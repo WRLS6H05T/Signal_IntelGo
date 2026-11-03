@@ -30,6 +30,11 @@
         android:name="android.permission.BLUETOOTH_CONNECT"
         tools:targetApi="31" />
 
+    <!-- Peer link: both phones advertise the service and connect to each other. -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_ADVERTISE"
+        tools:targetApi="31" />
+
     <uses-feature
         android:name="android.hardware.wifi"
         android:required="false" />

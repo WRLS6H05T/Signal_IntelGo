@@ -68,6 +68,7 @@ import dev.skyward.rf.core.CrashLog
 import dev.skyward.rf.core.DroneView
 import dev.skyward.rf.core.Esp32Node
 import dev.skyward.rf.core.LatLon
+import dev.skyward.rf.peer.PeerProtocol
 import dev.skyward.rf.scan.UsbBoards
 import dev.skyward.rf.sky.SatTracker
 import dev.skyward.rf.core.Layer
@@ -101,6 +102,12 @@ data class MapMarker(
     /** Decided once in buildMarkers: the draw loop must not do string work per frame. */
     val station: Boolean = false,
 )
+
+/**
+ * A logged signal, ready to draw. The colour is parsed once, when the table changes:
+ * thousands of colour strings must not be decoded inside the draw loop.
+ */
+data class SignalDot(val lat: Double, val lon: Double, val color: Color)
 
 /** One piece of attached hardware, listed in the top-right status panel. */
 private data class HwEntry(
@@ -146,6 +153,9 @@ private fun buildHardware(
                     "Chip" to b.chip.ifBlank { String.format("%04x:%04x", b.vendorId, b.productId) },
                     "APs seen" to seen(n?.wifiCount ?: 0),
                     "BLE seen" to seen(n?.bleCount ?: 0),
+                    // Only one wired board holds the cable at a time; the rest are listed but
+                    // waiting, which is what stops two consoles fighting over one port.
+                    "Link" to if (b.active) "active" else "waiting",
                     "GNSS" to gnss,
                     // Whether the board has a GPS module at all, which decides whether its
                     // position can be believed or borrowed as the observer.
@@ -195,17 +205,6 @@ private val IssOrange = Color(0xFFFF8C1A)
 /** NORAD 25544 is the station; the name never decides, because SWISSCUBE also contains "ISS". */
 private fun isIss(m: MapMarker): Boolean = m.station
 
-/**
- * Airline-style callsign: two or three letters followed by a flight number. Registrations
- * (N12345, G-ABCD) and blank callsigns fall on the private side of the split.
- */
-private fun looksCommercial(a: AircraftView): Boolean {
-    val cs = a.callSign.uppercase()
-    if (cs.length < 4) return false
-    if (!cs.take(3).all { it in 'A'..'Z' }) return false
-    return cs.drop(3).any { it.isDigit() }
-}
-
 private fun markerColor(m: MapMarker): Color = when {
     isIss(m) -> IssOrange
     m.logged -> Sky.logged
@@ -224,7 +223,6 @@ fun buildMarkers(
     showMesh: Boolean,
     showCells: Boolean,
     showEsp32: Boolean,
-    aircraftFilter: String,
     minScore: Int,
     /** A worldwide feed is tens of thousands of points; the map plots the nearest slice. */
     maxAircraft: Int = 900,
@@ -255,12 +253,9 @@ fun buildMarkers(
             ),
         )
     }
-    // Distance order comes from the engine, so this is the nearest slice, not an arbitrary
-    // one. Everything further out is still counted in the HUD and still logged.
+    // The engine keeps only what is inside 30 miles, so this is the whole picture rather
+    // than a slice of it: nothing further out is plotted, counted or logged.
     if (showAir) sky.aircraft.take(maxAircraft).forEach { a: AircraftView ->
-        val commercial = looksCommercial(a)
-        if (aircraftFilter == "commercial" && !commercial) return@forEach
-        if (aircraftFilter == "private" && commercial) return@forEach
         if (a.score < minScore) return@forEach
         out.add(
             MapMarker(
@@ -426,6 +421,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
     // Boards are status, not a layer: they no longer have a switch in the INTEL box.
     val showEsp32 = true
     var showPath by remember { mutableStateOf(true) }
+    var showSignals by remember { mutableStateOf(true) }
     var legendOpen by remember { mutableStateOf(true) }
     var selected by remember { mutableStateOf<MapMarker?>(null) }
 
@@ -443,7 +439,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
 
     val markers = remember(
         sky, showSats, showAir, showDrones, showMesh, showCells, showEsp32, settings.aircraftEnabled,
-        settings.dropWeakDots, settings.aircraftAll, settings.aircraftFilter,
+        settings.dropWeakDots,
     ) {
         buildMarkers(
             sky = sky,
@@ -453,9 +449,17 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
             showMesh = showMesh,
             showCells = showCells,
             showEsp32 = showEsp32,
-            aircraftFilter = settings.aircraftFilter,
-            minScore = if (settings.dropWeakDots && !settings.aircraftAll) 20 else 0,
+            minScore = if (settings.dropWeakDots) 20 else 0,
         )
+    }
+
+    val loggedSignals by c.signalLog.entries.collectAsState()
+    val signalDots = remember(loggedSignals) {
+        loggedSignals.take(3000).mapNotNull { s ->
+            val argb = runCatching { android.graphics.Color.parseColor(s.color) }.getOrNull()
+                ?: return@mapNotNull null
+            SignalDot(s.lat, s.lon, Color(argb))
+        }
     }
 
     val session: WardriveSession? = if (wd.active) {
@@ -479,12 +483,53 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
             markers = markers,
             world = worldRings,
             path = path,
+            signals = if (showSignals) signalDots else emptyList(),
             self = observer,
             accuracyM = null,
             selectedKey = selected?.key,
             onSelect = { selected = it },
             modifier = Modifier.fillMaxSize(),
         )
+
+        val peer by c.peer.state.collectAsState()
+
+        // ---- BLE peer: top left, the same width as the INTEL box ----
+        if (peer.running) {
+            Column(
+                Modifier
+                    .align(Alignment.TopStart)
+                    .padding(10.dp)
+                    .width(216.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Sky.surface.copy(alpha = 0.94f))
+                    .border(1.dp, Sky.cyan.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("PEER", style = SkywardThemeLabel(), color = Sky.cyan)
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        if (peer.connected) "linked" else "searching",
+                        color = Sky.textDim,
+                        fontSize = 9.sp,
+                    )
+                }
+                // The card describes the other phone, so it names the other phone's screen:
+                // this phone's role is already obvious from what is on it.
+                Text(
+                    peer.peerName.ifBlank { "BLE peer" } + " · " + PeerProtocol.roleLabel(peer.peerRole),
+                    color = Sky.text,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                )
+                Text(
+                    "wifi ${peer.peerWifiTotal} · ble ${peer.peerBleTotal} · up ${peer.sent} down ${peer.received}",
+                    color = Sky.textDim,
+                    fontSize = 9.sp,
+                    maxLines = 1,
+                )
+            }
+        }
 
         // ---- attached hardware: top right, only while something is plugged in ----
         val usbBoards by c.esp32Usb.state.collectAsState()
@@ -498,7 +543,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 Modifier
                     .align(Alignment.TopEnd)
                     .padding(10.dp)
-                    .width(if (hwOpen) 236.dp else 196.dp)
+                    .width(216.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(Sky.surface.copy(alpha = 0.94f))
                     .border(1.dp, Sky.esp32.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
@@ -566,22 +611,20 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
             }
             if (legendOpen) {
                 Spacer(Modifier.height(8.dp))
-                // Every count is also its layer/radio toggle.
-                // A bar per category rather than a chip per category: the counts span orders of
-                // magnitude, and a bar shows that shape at a glance. Tapping a row still switches
-                // that layer or radio, and the bar stays drawn either way.
-                val maxCount = listOf(
-                    sky.sats.size, sky.aircraft.size, sky.drones.size, sky.mesh.size,
-                    sky.cells.size, rf.wifi.size, rf.ble.size, path.size,
-                ).maxOrNull() ?: 0
-                IntelBar("SAT", sky.sats.size, maxCount, showSats) { showSats = !showSats }
-                IntelBar("AIR", sky.aircraft.size, maxCount, showAir) { showAir = !showAir }
-                IntelBar("UAV", sky.drones.size, maxCount, showDrones) { showDrones = !showDrones }
-                IntelBar("MESH", sky.mesh.size, maxCount, showMesh) { showMesh = !showMesh }
-                IntelBar("CELL", sky.cells.size, maxCount, showCells) { showCells = !showCells }
-                IntelBar("WIFI", rf.wifi.size, maxCount, wifiOn) { c.rf.setWifiEnabled(!wifiOn) }
-                IntelBar("BLE", rf.ble.size, maxCount, bleOn) { c.rf.setBleEnabled(!bleOn) }
-                IntelBar("PATH", path.size, maxCount, showPath) { showPath = !showPath }
+                // A plain table of counts. Tapping a row still switches that layer or radio;
+                // the number stays visible when a layer is off, so "hidden" is not "zero".
+                IntelRow("SAT", sky.sats.size, showSats) { showSats = !showSats }
+                IntelRow("AIR", sky.aircraft.size, showAir) { showAir = !showAir }
+                IntelRow("UAV", sky.drones.size, showDrones) { showDrones = !showDrones }
+                IntelRow("MESH", sky.mesh.size, showMesh) { showMesh = !showMesh }
+                IntelRow("CELL", sky.cells.size, showCells) { showCells = !showCells }
+                IntelRow("WIFI", rf.wifi.size, wifiOn) { c.rf.setWifiEnabled(!wifiOn) }
+                IntelRow("BLE", rf.ble.size, bleOn) { c.rf.setBleEnabled(!bleOn) }
+                IntelRow("PATH", path.size, showPath) { showPath = !showPath }
+                // Individual networks, drawn at the fix where each was heard.
+                IntelRow("SIG", signalDots.size, showSignals) { showSignals = !showSignals }
+                // What the other phone is hearing, so the table shows both devices' sweeps.
+                IntelRow("PEER", peer.peerWifiTotal + peer.peerBleTotal, peer.connected) { }
                 if (!wd.active) {
                     Spacer(Modifier.height(8.dp))
                     // The primary action lives in the box now, not in a floating button.
@@ -647,7 +690,20 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
             horizontalAlignment = Alignment.End,
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            // MAPS is gone: the bottom-right column keeps only the recenter button.
+            // The globe has no pinch-in, so this is the explicit way back to the flat map.
+            // Same threshold the map uses to switch to the sphere.
+            if (camera.zoom < 4.35) {
+                IconButton(
+                    onClick = { camera.centerOn(camera.lat, camera.lon, 9.0, resumeFollow = false) },
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Sky.surface.copy(alpha = 0.95f))
+                        .border(1.dp, Sky.outline, RoundedCornerShape(12.dp)),
+                ) {
+                    Text("MAP", color = Sky.cyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+            }
             IconButton(
                 onClick = {
                     val obs = observer
@@ -712,6 +768,7 @@ private fun TacticalMap(
     markers: List<MapMarker>,
     world: Array<FloatArray>,
     path: List<WardrivePoint>,
+    signals: List<SignalDot>,
     self: LatLon?,
     accuracyM: Float?,
     selectedKey: String?,
@@ -789,7 +846,10 @@ private fun TacticalMap(
                         ) {
                             // The globe is turn-only: its size is fixed, so a pinch on the
                             // ball does nothing instead of fighting the flat map's zoom.
-                            if (!globeModeNow) {
+                            // On the ball a pinch-out brings the flat map back; a
+                            // pinch-in has nothing to shrink, because the globe's size is
+                            // fixed. Without this the globe was a one-way view.
+                            if (!globeModeNow || zoom > 1f) {
                                 camera.zoomBy(zoom, centroid.x, centroid.y, w, h)
                             }
                         }
@@ -916,6 +976,23 @@ private fun TacticalMap(
                             center = Offset(s.x, s.y),
                         )
                     }
+                }
+            }
+
+            // ---- logged signals: each network where it was actually heard ----
+            // Flat map only: on the ball a dot per network would be indistinguishable from
+            // the logged-entity halos, and the sphere is for the sky, not the streets.
+            if (signals.isNotEmpty() && !globeMode) {
+                for (s in signals) {
+                    val pr = vp.surface(s.lat, s.lon)
+                    if (pr.x < -20f || pr.y < -20f ||
+                        pr.x > size.width + 20f || pr.y > size.height + 20f
+                    ) {
+                        continue
+                    }
+                    val p = Offset(pr.x, pr.y)
+                    drawCircle(color = s.color.copy(alpha = 0.20f), radius = 3.6f * density, center = p)
+                    drawCircle(color = s.color, radius = 1.7f * density, center = p)
                 }
             }
 

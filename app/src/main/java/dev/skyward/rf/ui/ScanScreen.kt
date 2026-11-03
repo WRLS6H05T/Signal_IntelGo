@@ -35,6 +35,7 @@ import dev.skyward.rf.core.Geo
 import dev.skyward.rf.core.RfKind
 import dev.skyward.rf.core.RfObservation
 import dev.skyward.rf.core.SignalScale
+import dev.skyward.rf.peer.PeerProtocol
 import dev.skyward.rf.ui.theme.Sky
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -182,6 +183,44 @@ fun ScanScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: ()
                     StatCell("GPS", if (observer != null) "lock" else "none", Modifier.weight(1f), accent = if (observer != null) Sky.cyan else Sky.danger)
                     StatCell("Sats logged", counts.sats.toString(), Modifier.weight(1f), accent = Sky.logged)
                     StatCell("Aircraft logged", counts.aircraft.toString(), Modifier.weight(1f), accent = Sky.logged)
+                }
+            }
+        }
+
+        // ---- the other phone, when the BLE link is up ----
+        item {
+            val peer by c.peer.state.collectAsState()
+            SectionCard(
+                title = "Peer",
+                trailing = when {
+                    !peer.running -> "off"
+                    peer.connected -> "linked"
+                    else -> "searching"
+                },
+            ) {
+                if (!peer.running) {
+                    Text(
+                        "No link. Both phones advertising is what starts it; the scans are "
+                            + "shared while a drive records on either side.",
+                        color = Sky.textDim,
+                        fontSize = 11.sp,
+                    )
+                } else {
+                    KeyValueRow("Device", peer.peerName.ifBlank { "waiting for the other phone" })
+                    KeyValueRow("Their screen", PeerProtocol.roleLabel(peer.peerRole))
+                    KeyValueRow(
+                        "Wi-Fi / BLE",
+                        "${peer.peerWifiTotal} / ${peer.peerBleTotal}",
+                        Sky.cyan,
+                    )
+                    KeyValueRow("Sent / received", "${peer.sent} / ${peer.received}")
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Their signals arrive with their own GPS fix and are logged there, "
+                            + "so the colours land on the streets they were heard on.",
+                        color = Sky.textDim,
+                        fontSize = 10.sp,
+                    )
                 }
             }
         }

@@ -10,11 +10,6 @@ import kotlinx.serialization.json.Json
 data class Settings(
     val satGroups: List<String> = listOf("stations", "visual", "weather"),
     val aircraftEnabled: Boolean = true,
-    val aircraftRadiusNm: Int = 150,
-    /** Ignore the radius and ask the feed for its maximum reach. */
-    val aircraftAll: Boolean = false,
-    /** "all", "commercial" (airline callsigns) or "private" (everything else). */
-    val aircraftFilter: String = "all",
     val aircraftEndpoint: String = "https://api.adsb.lol/v2/point",
     val meshMqttEnabled: Boolean = false,
     val meshBroker: String = "ssl://mqtt.meshtastic.org:8883",
@@ -45,6 +40,13 @@ data class Settings(
     val esp32Topic: String = "skyward/esp32/#",
     /** Let a board's own GPS stand in while the phone has no fix of its own. */
     val esp32GpsFallback: Boolean = true,
+    /** Share scans and GPS with a second phone on the same Wi-Fi or hotspot. */
+    val peerEnabled: Boolean = false,
+    /** Peer address to dial when broadcast discovery is blocked; blank means find it. */
+    val peerHost: String = "",
+    /** WiGLE account API name and token, used only by the CSV upload button. */
+    val wigleName: String = "",
+    val wigleToken: String = "",
 )
 
 class SettingsStore(private val store: FileStore) {

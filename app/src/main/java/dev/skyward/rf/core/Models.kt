@@ -28,6 +28,8 @@ data class RfObservation(
     val security: String = "",
     val freqMhz: Int = 0,
     val seenAt: Long = 0L,
+    /** "local", "peer" or "board": which radio heard it, so each can be placed at its own fix. */
+    val source: String = "local",
 )
 
 /** Airspace layers that can be "logged" during a drive. */

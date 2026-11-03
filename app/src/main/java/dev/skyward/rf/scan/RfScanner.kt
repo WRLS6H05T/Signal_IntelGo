@@ -75,35 +75,77 @@ class RfScanner(private val context: Context) {
      * the phone's own findings. Entries age out on the normal [STALE_MS] window, so pulling the
      * cable clears them without a teardown step.
      */
+    /** One observation that came from something other than this handset's own radios. */
+    data class RemoteObs(
+        val id: String,
+        val name: String,
+        val rssi: Int,
+        val channel: Int = 0,
+    )
+
     fun ingestSweep(sweep: Esp32Console.Sweep, now: Long = System.currentTimeMillis()) {
-        for (ap in sweep.aps) {
-            boardWifi[ap.bssid] = RfObservation(
+        ingestRemote(
+            wifi = sweep.aps.map { RemoteObs(it.bssid, it.ssid, it.rssi, it.channel) },
+            ble = sweep.devices.map { RemoteObs(it.address, it.name, it.rssi) },
+            via = "board",
+            now = now,
+        )
+    }
+
+    /**
+     * Observations from a second phone on the same network.
+     *
+     * They go into the same side tables a board's sweeps use, not the handset's own: the Wi-Fi
+     * poller prunes everything it did not hear itself, so a peer's findings would vanish on its
+     * next pass. They age out on the normal window, so a phone that walks out of range stops
+     * contributing without needing a teardown.
+     */
+    fun ingestRemote(
+        wifi: List<RemoteObs>,
+        ble: List<RemoteObs>,
+        via: String = "peer",
+        now: Long = System.currentTimeMillis(),
+    ) {
+        for (ap in wifi) {
+            if (ap.id.isBlank()) continue
+            boardWifi[ap.id] = RfObservation(
                 kind = RfKind.WIFI,
-                id = ap.bssid,
-                name = ap.ssid.ifBlank { "<hidden>" },
+                id = ap.id,
+                name = ap.name.ifBlank { "<hidden>" },
                 rssi = ap.rssi,
                 channel = ap.channel,
                 security = "",
                 freqMhz = 0,
                 seenAt = now,
+                source = via,
             )
         }
-        for (d in sweep.devices) {
-            boardBle[d.address] = RfObservation(
+        for (d in ble) {
+            if (d.id.isBlank()) continue
+            boardBle[d.id] = RfObservation(
                 kind = RfKind.BLE,
-                id = d.address,
+                id = d.id,
                 name = d.name,
                 rssi = d.rssi,
                 channel = 0,
                 security = "",
                 freqMhz = 2400,
                 seenAt = now,
+                source = via,
             )
         }
     }
 
     /** True while a board is contributing observations of its own. */
     fun hasBoardSweep(): Boolean = boardWifi.isNotEmpty() || boardBle.isNotEmpty()
+
+    /** How full the tables are, beyond the per-snapshot limit the peer link can carry. */
+    data class Totals(val wifi: Int, val ble: Int)
+
+    fun totals(): Totals = Totals(
+        wifi = wifiTable.size + boardWifi.size,
+        ble = bleTable.size + boardBle.size,
+    )
 
     private val main = Handler(Looper.getMainLooper())
     private var wifiPolling = false

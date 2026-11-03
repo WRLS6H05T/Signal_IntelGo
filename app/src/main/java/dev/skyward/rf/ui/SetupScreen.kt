@@ -37,11 +37,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.skyward.rf.Container
 import dev.skyward.rf.core.Settings
+import dev.skyward.rf.peer.PeerProtocol
 import dev.skyward.rf.ui.theme.Sky
 
 @Composable
 fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: () -> Unit) {
     val settings by c.settingsStore.state.collectAsState()
+    val peer by c.peer.state.collectAsState()
     val context = LocalContext.current
     val tileStore = remember { TileStore(context, c.http) }
 
@@ -84,38 +86,14 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                         onCheckedChange = { on -> c.settingsStore.update { it.copy(aircraftEnabled = on) } },
                     )
                 }
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(6.dp))
+                // Fixed, not a dial: a contact past 30 miles is not overhead traffic and its
+                // link estimate is noise, so it is neither plotted nor logged.
                 Text(
-                    "Radius ${settings.aircraftRadiusNm} nm",
-                    style = SkywardThemeLabel(),
+                    "Only aircraft inside 30 miles are shown and logged",
                     color = Sky.textDim,
+                    fontSize = 10.sp,
                 )
-                Slider(
-                    value = settings.aircraftRadiusNm.toFloat(),
-                    onValueChange = { v -> c.settingsStore.update { it.copy(aircraftRadiusNm = v.toInt()) } },
-                    valueRange = 10f..250f,
-                )
-                Spacer(Modifier.height(10.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("All aircraft", color = Sky.text, fontSize = 13.sp)
-                        Text(
-                            "Pull the feed's global snapshot instead of a local radius",
-                            color = Sky.textDim,
-                            fontSize = 10.sp,
-                        )
-                    }
-                    Switch(
-                        checked = settings.aircraftAll,
-                        onCheckedChange = { on -> c.settingsStore.update { it.copy(aircraftAll = on) } },
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    AircraftFilterChip("all", "All", settings) { c.settingsStore.update(it) }
-                    AircraftFilterChip("commercial", "Commercial", settings) { c.settingsStore.update(it) }
-                    AircraftFilterChip("private", "Private", settings) { c.settingsStore.update(it) }
-                }
             }
         }
 
@@ -229,7 +207,7 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
         item {
             SectionCard(title = "Logging", trailing = "${settings.logRadiusKm.toInt()} km") {
                 Text(
-                    "Satellites and aircraft within this radius are captured during a drive.",
+                    "Satellites within this radius are captured during a drive. Aircraft are the 30 mi set.",
                     color = Sky.textDim,
                     fontSize = 11.sp,
                 )
@@ -238,6 +216,59 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                     onValueChange = { v -> c.settingsStore.update { it.copy(logRadiusKm = v.toDouble()) } },
                     valueRange = 25f..500f,
                 )
+            }
+        }
+
+        item {
+            SectionCard(
+                title = "Two devices",
+                trailing = when {
+                    peer.connected -> "linked"
+                    peer.running -> "searching"
+                    else -> "off"
+                },
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Share scans and GPS over BLE", color = Sky.text, fontSize = 13.sp)
+                        Text(
+                            "Both phones keep wardriving on their own. The larger screen takes the globe, the smaller one the wardriving view.",
+                            color = Sky.textDim,
+                            fontSize = 10.sp,
+                        )
+                    }
+                    Switch(
+                        checked = settings.peerEnabled,
+                        onCheckedChange = { on ->
+                            c.settingsStore.update { it.copy(peerEnabled = on) }
+                            if (on) c.peer.start() else c.peer.stop()
+                        },
+                    )
+                }
+                if (settings.peerEnabled) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "This screen: ${PeerProtocol.roleLabel(peer.role)}",
+                        color = Sky.cyan,
+                        fontSize = 11.sp,
+                    )
+                    Text(
+                        peer.detail + if (peer.connected) " · ${peer.peerName}" else "",
+                        color = Sky.textDim,
+                        fontSize = 10.sp,
+                    )
+                    Text(
+                        "peer wifi ${peer.peerWifi} · ble ${peer.peerBle} · up ${peer.sent} down ${peer.received}",
+                        color = Sky.textDim,
+                        fontSize = 10.sp,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Bluetooth must be on for both phones, and the link is peer to peer - nothing leaves the two devices.",
+                        color = Sky.textDim,
+                        fontSize = 10.sp,
+                    )
+                }
             }
         }
 
@@ -409,28 +440,6 @@ private fun TileChip(value: String, label: String, settings: Settings, onChange:
             labelColor = Sky.textDim,
             selectedContainerColor = Sky.cyan.copy(alpha = 0.2f),
             selectedLabelColor = Sky.cyan,
-        ),
-    )
-}
-
-@Composable
-private fun AircraftFilterChip(
-    value: String,
-    label: String,
-    settings: Settings,
-    onChange: ((Settings) -> Settings) -> Unit,
-) {
-    val selected = settings.aircraftFilter == value
-    FilterChip(
-        selected = selected,
-        onClick = { onChange { it.copy(aircraftFilter = value) } },
-        label = { Text(label, fontSize = 10.sp) },
-        shape = RoundedCornerShape(9.dp),
-        colors = FilterChipDefaults.filterChipColors(
-            containerColor = Sky.surfaceHigh,
-            labelColor = Sky.textDim,
-            selectedContainerColor = Sky.aircraft.copy(alpha = 0.2f),
-            selectedLabelColor = Sky.aircraft,
         ),
     )
 }

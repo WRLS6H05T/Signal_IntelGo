@@ -147,12 +147,27 @@ class AirspaceEngine(
             val cfg = settings.current
             val obs = observer.value
             if (cfg.aircraftEnabled && obs != null) {
-                // "All aircraft" is global, not a bigger radius: the point query is capped at
-                // 250 nm by the API, so a radius can never cover the world.
-                val radiusNm = if (cfg.aircraftAll) 250 else cfg.aircraftRadiusNm
-                val result = aircraftSource.fetch(obs, radiusNm, cfg.aircraftEndpoint, cfg.aircraftAll)
-                // Keep everything a worldwide snapshot contains; a radius poll stays bounded.
-                val merged = mergeAircraft(result.aircraft, if (cfg.aircraftAll) 12000 else 400)
+                // One fixed ring: 30 miles, the traffic that is actually overhead.
+                val result = aircraftSource.fetch(obs, cfg.aircraftEndpoint)
+                val merged = mergeAircraft(result.aircraft, 400)
+                // Every contact heard inside the ring becomes an entity straight away, not
+                // only while a drive is recording. That is what keeps it on the map, haloed
+                // as logged, after it has flown back out of range.
+                val heard = merged.filter { it.distanceKm <= AircraftSource.RANGE_KM }
+                if (heard.isNotEmpty()) {
+                    logged.logBatch(
+                        System.currentTimeMillis(),
+                        heard.map { a ->
+                            LoggedRegistry.Sighting(
+                                Layer.AIRCRAFT,
+                                a.hex,
+                                a.callSign.ifBlank { a.reg.ifBlank { a.hex } },
+                                a.lat,
+                                a.lon,
+                            )
+                        },
+                    )
+                }
                 _state.value = _state.value.copy(aircraft = merged, acStatus = result.status)
             } else {
                 // Off means gone, not frozen. Leaving the last snapshot in state is what kept
@@ -163,16 +178,23 @@ class AirspaceEngine(
                     acStatus = FeedStatus(false, "aircraft off", System.currentTimeMillis(), 0),
                 )
             }
-            // A global snapshot is megabytes, so it is polled far less often than a radius.
-            val interval =
-                if (cfg.aircraftAll) 60_000L else cfg.refreshAircraftMs.coerceAtLeast(5_000)
+            val interval = cfg.refreshAircraftMs.coerceAtLeast(5_000)
             delay(interval)
         }
     }
 
-    /** Fresh contacts replace their old entry in place; nothing is ever dropped. */
+    /**
+     * Fresh contacts replace their old entry in place; nothing is removed for leaving the ring.
+     * Only what was heard inside 30 miles enters the table, and once an aircraft is in it, it
+     * stays on the map at its last known position - a contact that crosses the boundary, or
+     * that the feed misses between polls, must not blink out of the picture.
+     *
+     * The cap is the only thing that ever removes anything, so a long session cannot grow
+     * without bound.
+     */
     private fun mergeAircraft(fresh: List<AircraftView>, cap: Int): List<AircraftView> {
-        fresh.forEach { aircraftMemory[it.hex] = it }
+        fresh.filter { it.distanceKm <= AircraftSource.RANGE_KM }
+            .forEach { aircraftMemory[it.hex] = it }
         // Bound the growth on a long drive: insertion order means the oldest go first.
         if (aircraftMemory.size > cap) {
             aircraftMemory.keys.take(aircraftMemory.size - cap).forEach { aircraftMemory.remove(it) }
@@ -273,7 +295,8 @@ class AirspaceEngine(
         }
         var aircraft = 0
         for (a in st.aircraft) {
-            if (a.distanceKm <= radius) {
+            // The same ring the map draws: only traffic inside it is captured.
+            if (a.distanceKm <= AircraftSource.RANGE_KM) {
                 batch.add(
                     LoggedRegistry.Sighting(
                         Layer.AIRCRAFT,

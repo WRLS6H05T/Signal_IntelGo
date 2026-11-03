@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.locks.ReentrantLock
 
 /** Which firmware family a board turned out to be. */
 enum class BoardFamily { MARAUDER, GHOSTESP, BISCUIT, ESP32 }
@@ -170,6 +171,8 @@ class UsbBoards(private val context: Context) {
         val reading: Esp32Console.Reading = Esp32Console.Reading(),
         /** The networks and advertisers the board's last sweep named. */
         val sweep: Esp32Console.Sweep = Esp32Console.Sweep(),
+        /** True while this board holds the cable link; only one does at a time. */
+        val active: Boolean = false,
         val attachedAt: Long = System.currentTimeMillis(),
     ) {
         val key: String get() = "usb:$deviceId"
@@ -206,6 +209,22 @@ class UsbBoards(private val context: Context) {
     }
 
     private val devices = ConcurrentHashMap<Int, Board>()
+
+    /** The live UsbDevice for each id, so a queued board can be polled once the cable is free. */
+    private val attached = ConcurrentHashMap<Int, UsbDevice>()
+
+    /**
+     * One cable, one conversation.
+     *
+     * Probing and polling both open the same serial port and write commands to it, so if they
+     * ran at the same time the board would see two interleaved command streams and answer
+     * neither. This lock makes the port exclusive between them. It is deliberately the only
+     * serialisation in the app: BLE boards never touch the port, so any number of them can
+     * report while a wired board is being polled, and the peer link is a network socket that
+     * has nothing to share with a USB endpoint.
+     */
+    private val portLock = ReentrantLock()
+
     private val probing = ConcurrentHashMap.newKeySet<Int>()
 
     /** Boards with a telemetry poll running; cleared when the cable comes out. */
@@ -273,6 +292,7 @@ class UsbBoards(private val context: Context) {
         polling.clear()
         probing.clear()
         devices.clear()
+        attached.clear()
         publish()
     }
 
@@ -306,13 +326,20 @@ class UsbBoards(private val context: Context) {
         polling.remove(deviceId)
         devices.remove(deviceId)
         probing.remove(deviceId)
+        attached.remove(deviceId)
         publish()
+        // The unplugged board's poller calls pump() from its own finally block as well; doing it
+        // here means the next board takes the cable immediately rather than a cycle later.
+        pump()
     }
 
     // ---------------- probe ----------------
 
     private fun probe(device: UsbDevice) {
         val id = device.deviceId
+        // A board that is already polled is left alone: sounding it again would send help and
+        // version commands into the middle of its sweep for no reason.
+        if (id in polling) return
         if (!probing.add(id)) return
         worker.execute { runProbe(device) }
     }
@@ -327,8 +354,11 @@ class UsbBoards(private val context: Context) {
             return
         }
         val (iface, inEp, outEp) = port
+        // Wait for a poll to finish rather than opening a second session on the same port.
+        portLock.lock()
         val conn = runCatching { mgr.openDevice(device) }.getOrNull()
         if (conn == null) {
+            portLock.unlock()
             probing.remove(device.deviceId)
             upsert(device, UsbBoardMatch.Hit(BoardFamily.ESP32, ""), "")
             return
@@ -355,14 +385,16 @@ class UsbBoards(private val context: Context) {
             runCatching { conn.releaseInterface(iface) }
             runCatching { conn.close() }
             probing.remove(device.deviceId)
+            portLock.unlock()
         }
         val dual = dualPortPresent(device)
         val hit = UsbBoardMatch.classify(text, dual, describe(device))
             ?: UsbBoardMatch.Hit(BoardFamily.ESP32, "")
         upsert(device, hit, "", text)
         // Identification is not the end of the conversation: the same console is the board's
-        // only channel for sweeps and its own GPS, so it is polled for as long as it is wired.
-        startPolling(device, hit.family)
+        // only channel for sweeps and its own GPS, so it is polled for as long as it is wired -
+        // one board at a time, because they all share that one console.
+        pump()
     }
 
     // ---------------- telemetry ----------------
@@ -372,9 +404,20 @@ class UsbBoards(private val context: Context) {
      * whatever came back into the board's [Board.reading]. Re-opening rather than holding the
      * port keeps a stuck read from wedging the board for the rest of the session.
      */
+    /** Starts the first board that is waiting, and only when no other board holds the link. */
+    private fun pump() {
+        if (polling.isNotEmpty()) return
+        val next = devices.values.sortedBy { it.attachedAt }.firstOrNull { it.deviceId !in polling } ?: return
+        val device = attached[next.deviceId] ?: return
+        startPolling(device, next.family)
+    }
+
     private fun startPolling(device: UsbDevice, family: BoardFamily) {
         val id = device.deviceId
+        if (polling.isNotEmpty() && id !in polling) return
         if (!polling.add(id)) return
+        devices[id]?.let { devices[id] = it.copy(active = true) }
+        publish()
         runCatching {
             poller.execute {
                 try {
@@ -403,6 +446,10 @@ class UsbBoards(private val context: Context) {
                     CrashLog.recordQuiet(context, "usb-telemetry", t)
                 } finally {
                     polling.remove(id)
+                    devices[id]?.let { devices[id] = it.copy(active = false) }
+                    publish()
+                    // The cable is free: hand it to the next board that is waiting for it.
+                    pump()
                 }
             }
         }.onFailure { polling.remove(id) }
@@ -410,19 +457,28 @@ class UsbBoards(private val context: Context) {
 
     /** One poll: open, ask, read, close. Empty when the board cannot be addressed. */
     private fun poll(device: UsbDevice, family: BoardFamily): String {
-        val mgr = manager ?: return ""
-        if (!mgr.hasPermission(device)) return ""
-        val (iface, inEp, outEp) = findPort(device) ?: return ""
-        val conn = runCatching { mgr.openDevice(device) }.getOrNull() ?: return ""
-        return try {
-            if (!conn.claimInterface(iface, true)) return ""
-            configure(conn, transportOf(device), iface.id)
-            exchange(conn, inEp, outEp, Esp32Console.commands(family))
+        // Skipped rather than queued: a probe is holding the port, and the next sweep is a few
+        // seconds away. Two sessions on one console would interleave their commands.
+        if (!portLock.tryLock()) return ""
+        var conn: UsbDeviceConnection? = null
+        var iface: UsbInterface? = null
+        try {
+            if (device.deviceId !in polling || device.deviceId in probing) return ""
+            val mgr = manager ?: return ""
+            if (!mgr.hasPermission(device)) return ""
+            val port = findPort(device) ?: return ""
+            iface = port.first
+            val opened = runCatching { mgr.openDevice(device) }.getOrNull() ?: return ""
+            conn = opened
+            if (!opened.claimInterface(port.first, true)) return ""
+            configure(opened, transportOf(device), port.first.id)
+            return exchange(opened, port.second, port.third, Esp32Console.commands(family))
         } catch (t: Throwable) {
-            ""
+            return ""
         } finally {
-            runCatching { conn.releaseInterface(iface) }
-            runCatching { conn.close() }
+            iface?.let { i -> conn?.let { c -> runCatching { c.releaseInterface(i) } } }
+            conn?.let { c -> runCatching { c.close() } }
+            portLock.unlock()
         }
     }
 
@@ -636,6 +692,7 @@ class UsbBoards(private val context: Context) {
             chip = chip,
             raw = console.replace('\n', ' ').trim().take(160),
         )
+        attached[device.deviceId] = device
         devices[device.deviceId] = board
         publish()
     }

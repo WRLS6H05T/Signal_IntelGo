@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -28,7 +27,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.skyward.rf.ui.theme.Sky
-import kotlin.math.sqrt
 
 @Composable
 fun SectionCard(
@@ -176,31 +174,28 @@ fun ToggleChip(
 }
 
 /**
- * One row of the INTEL chart: category, a bar, and the count.
+ * One line of the INTEL table: the category, a leader, and its number.
  *
- * Every bar is the same colour on purpose. The label already says which category it is, so
- * colour has no work left to do and the bars can be read as one picture rather than eight
- * competing accent colours. The length is the square root of the share of the largest category:
- * a few hundred satellites against a couple of cell towers would otherwise leave the small bars
- * invisible, which is exactly what a chart must not do. A switched-off layer keeps its bar drawn
- * at the same colour and only dims its label, so "off" never looks like "nothing there".
+ * A bar answers "which is biggest". This screen is read for "how many", and a number is the
+ * honest way to say it - especially when one category is in the hundreds and another is two,
+ * which no linear bar can show without lying about the small one. The row still toggles its
+ * layer, and a switched-off layer dims its label while keeping the number visible, so "hidden"
+ * never looks like "zero".
  */
 @Composable
-fun IntelBar(
+fun IntelRow(
     label: String,
-    count: Int,
-    max: Int,
+    value: Int,
     on: Boolean,
     modifier: Modifier = Modifier,
     onToggle: () -> Unit,
 ) {
-    val share = if (max <= 0 || count <= 0) 0f else sqrt(count.toFloat() / max).coerceIn(0.06f, 1f)
     Row(
         modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(6.dp))
             .clickable(onClick = onToggle)
-            .padding(vertical = 3.dp),
+            .padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -208,32 +203,23 @@ fun IntelBar(
             style = SkywardThemeLabel(),
             fontSize = 9.sp,
             color = if (on) Sky.text else Sky.textDim,
-            modifier = Modifier.width(34.dp),
+            modifier = Modifier.width(46.dp),
         )
         Box(
             Modifier
                 .weight(1f)
-                .height(9.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(Sky.surfaceHigh),
-        ) {
-            Box(
-                Modifier
-                    .fillMaxWidth(if (count > 0) share else 0.02f)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(if (count > 0) Sky.cyan else Sky.outline),
-            )
-        }
-        Spacer(Modifier.width(6.dp))
+                .height(1.dp)
+                .background(Sky.outline.copy(alpha = 0.35f)),
+        )
+        Spacer(Modifier.width(8.dp))
         Text(
-            count.toString(),
+            value.toString(),
             fontFamily = FontFamily.Monospace,
-            fontSize = 10.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
             color = if (on) Sky.cyan else Sky.textDim,
             textAlign = TextAlign.End,
-            modifier = Modifier.width(30.dp),
+            modifier = Modifier.width(48.dp),
         )
     }
 }

@@ -16,10 +16,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,6 +39,7 @@ import dev.skyward.rf.core.Layer
 import dev.skyward.rf.core.SignalScale
 import dev.skyward.rf.ui.theme.Sky
 import dev.skyward.rf.wardrive.SessionSummary
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -84,6 +89,111 @@ fun LogScreen(c: Container, modifier: Modifier = Modifier, onShowOnMap: () -> Un
                     color = Sky.textDim,
                     fontSize = 10.sp,
                 )
+            }
+        }
+
+        item {
+            val placed by c.signalLog.count.collectAsState()
+            SectionCard(title = "Logged signals", trailing = "$placed placed") {
+                Text(
+                    "Every Wi-Fi network and BLE device heard with a GPS fix, with the bin colour it earned. Peer and board observations are stored at the fix of the device that heard them.",
+                    color = Sky.textDim,
+                    fontSize = 11.sp,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SmallAction("GEOJSON") {
+                        shareExport(
+                            context,
+                            "signal_intelgo_signals_${System.currentTimeMillis()}.geojson",
+                            "application/geo+json",
+                            c.signalLog.exportGeoJson(),
+                        )
+                    }
+                    SmallAction("CSV") {
+                        shareExport(
+                            context,
+                            "signal_intelgo_signals_${System.currentTimeMillis()}.csv",
+                            "text/csv",
+                            c.signalLog.exportCsv(),
+                        )
+                    }
+                    SmallAction("CLEAR", color = Sky.danger) { c.signalLog.clear() }
+                }
+            }
+        }
+
+        item {
+            val wigleSettings by c.settingsStore.state.collectAsState()
+            var apiName by remember { mutableStateOf(wigleSettings.wigleName) }
+            var apiToken by remember { mutableStateOf(wigleSettings.wigleToken) }
+            var busy by remember { mutableStateOf(false) }
+            var status by remember { mutableStateOf("") }
+            val scope = rememberCoroutineScope()
+            SectionCard(
+                title = "WiGLE",
+                trailing = if (wigleSettings.wigleToken.isNotBlank()) "key set" else "no key",
+            ) {
+                Text(
+                    "Uploads the logged signals as WiGLE's own CSV, so the drive appears on your "
+                        + "WiGLE map. The API name and token come from wigle.net/account.",
+                    color = Sky.textDim,
+                    fontSize = 11.sp,
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = apiName,
+                    onValueChange = { apiName = it },
+                    label = { Text("API name", fontSize = 11.sp) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = apiToken,
+                    onValueChange = { apiToken = it },
+                    label = { Text("API token", fontSize = 11.sp) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SmallAction(
+                        if (busy) "UPLOADING" else "UPLOAD CSV",
+                        color = Sky.cyan,
+                    ) {
+                        if (busy) return@SmallAction
+                        // Saved here rather than per keystroke: every change to settings is a
+                        // file write, and a token is not worth one write per character.
+                        c.settingsStore.update {
+                            it.copy(wigleName = apiName.trim(), wigleToken = apiToken.trim())
+                        }
+                        busy = true
+                        status = "uploading…"
+                        scope.launch {
+                            val out = c.wigle.upload(
+                                csv = c.signalLog.exportWigleCsv(),
+                                fileName = "signal_intelgo_${System.currentTimeMillis()}.csv",
+                                name = apiName.trim(),
+                                token = apiToken.trim(),
+                            )
+                            status = out.message
+                            busy = false
+                        }
+                    }
+                    SmallAction("SHARE CSV") {
+                        shareExport(
+                            context,
+                            "signal_intelgo_wigle_${System.currentTimeMillis()}.csv",
+                            "text/csv",
+                            c.signalLog.exportWigleCsv(),
+                        )
+                    }
+                }
+                if (status.isNotBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(status, color = Sky.textDim, fontSize = 10.sp)
+                }
             }
         }
 

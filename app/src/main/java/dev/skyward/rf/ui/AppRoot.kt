@@ -28,6 +28,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import dev.skyward.rf.Container
+import dev.skyward.rf.peer.PeerProtocol
 import dev.skyward.rf.ui.theme.Sky
 
 private fun requiredPermissions(): List<String> {
@@ -52,6 +54,8 @@ private fun requiredPermissions(): List<String> {
     if (Build.VERSION.SDK_INT >= 31) {
         list.add(Manifest.permission.BLUETOOTH_SCAN)
         list.add(Manifest.permission.BLUETOOTH_CONNECT)
+        // The peer link is a BLE GATT service, so it has to advertise as well as scan.
+        list.add(Manifest.permission.BLUETOOTH_ADVERTISE)
     }
     return list
 }
@@ -60,6 +64,18 @@ private fun requiredPermissions(): List<String> {
 fun AppRoot(c: Container) {
     val context = LocalContext.current
     var tab by remember { mutableStateOf(0) }
+
+    // Two phones on one network split the work: the bigger screen shows the globe, the smaller
+    // one the wardriving readout. The switch happens when the link or the role changes, never on
+    // every message, so after that it leaves the user's own tab choice alone.
+    val peer by c.peer.state.collectAsState()
+    LaunchedEffect(peer.connected, peer.role) {
+        if (!peer.connected) return@LaunchedEffect
+        when (peer.role) {
+            PeerProtocol.DISPLAY -> tab = 0
+            PeerProtocol.SENSOR -> tab = 1
+        }
+    }
 
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),

@@ -18,30 +18,35 @@ import okhttp3.Request
 import java.util.Locale
 
 /**
- * Live aircraft, two feeds.
+ * Live aircraft inside a fixed ring.
  *
- * Local mode uses api.adsb.lol's point query around the observer. That endpoint is hard-capped
- * at 250 nm server-side, and its `/v2/all` sibling answers HTTP 400 - so a radius, or that
- * endpoint, can never produce a worldwide picture.
+ * The limit is 30 statute miles because that is the traffic that is actually overhead: a contact
+ * a hundred miles away is a position on a map, not something this antenna is hearing, and its
+ * 1090 MHz link estimate is noise. So the ring is applied twice - once in the query, and again
+ * on every row that comes back, because the feed answers a grid square rather than a circle.
  *
- * Global mode therefore uses the OpenSky Network's `/api/states/all`, which really does return
- * every aircraft the network is tracking worldwide (about 6,500 contacts, well under a
- * megabyte, one second). If OpenSky refuses - it is anonymously rate-limited - the app falls
- * back to the local radius query rather than showing an empty map.
- *
- * Distance drives a 1090 MHz free-space path-loss estimate, which is what colours and logs
- * contacts. For an aircraft on the far side of the planet that estimate is meaningless, but the
- * contact itself is real and is still plotted.
+ * The feed is api.adsb.lol's point query, which needs no key. Its replies are capped at 250 nm
+ * server-side, well outside this ring, so nothing here depends on a paid tier.
  */
 class AircraftSource(private val http: OkHttpClient) {
 
     data class Result(val aircraft: List<AircraftView>, val status: FeedStatus)
 
     companion object {
-        /** Worldwide snapshot: no radius, no key, anonymously rate-limited. */
-        const val OPEN_SKY_URL = "https://opensky-network.org/api/states/all"
-        /** Ceiling on what one global reply may hand the map. */
-        const val MAX_GLOBAL = 12000
+        /** Contacts further out than this are dropped: not overhead traffic, not logged. */
+        const val RANGE_MI = 30.0
+
+        /** The same ring in kilometres, which is what the feed's answers are measured in. */
+        const val RANGE_KM = RANGE_MI * 1.609344
+
+        /**
+         * What is asked of the feed, in nautical miles. Slightly wider than the ring so an
+         * aircraft crossing the boundary is still seen before it leaves, never narrower - the
+         * point query answers from a grid, and a tight request can miss the corners.
+         */
+        private const val REQUEST_NM = 30
+
+        private const val DEFAULT_ENDPOINT = "https://api.adsb.lol/v2/point"
         private const val UA = "Signal_IntelGo/1.0 (wardriving; contact local operator)"
     }
 
@@ -53,83 +58,20 @@ class AircraftSource(private val http: OkHttpClient) {
 
     suspend fun fetch(
         observer: LatLon,
-        radiusNm: Int,
-        endpoint: String = "https://api.adsb.lol/v2/point",
-        global: Boolean = false,
+        endpoint: String = DEFAULT_ENDPOINT,
     ): Result = withContext(Dispatchers.IO) {
-        if (global) {
-            val worldwide = fetchOpenSky(observer)
-            if (worldwide != null && worldwide.aircraft.isNotEmpty()) return@withContext worldwide
-        }
         // Locale.US on purpose: a comma decimal separator would break the URL path.
         val lat = String.format(Locale.US, "%.4f", observer.lat)
         val lon = String.format(Locale.US, "%.4f", observer.lon)
-        fetchAdsbLol("$endpoint/$lat/$lon/${radiusNm.coerceIn(5, 250)}", observer)
+        fetchPoint("$endpoint/$lat/$lon/$REQUEST_NM", observer)
             ?: Result(
                 emptyList(),
                 FeedStatus(false, "network error", System.currentTimeMillis(), 0),
             )
     }
 
-    /**
-     * OpenSky state vectors, positional arrays:
-     * 0 icao24, 1 callsign, 5 lon, 6 lat, 7 baro alt (m), 9 ground speed (m/s),
-     * 10 track, 11 vertical rate (m/s), 13 geo alt (m), 14 squawk.
-     */
-    private fun fetchOpenSky(observer: LatLon): Result? {
-        val req = Request.Builder().url(OPEN_SKY_URL).header("User-Agent", UA).build()
-        return runCatching {
-            http.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return@use null
-                val body = resp.body?.string().orEmpty()
-                val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull()
-                    ?: return@use null
-                val rows = root["states"]?.jsonArray ?: return@use null
-                val out = ArrayList<AircraftView>(minOf(rows.size, MAX_GLOBAL))
-                for (el in rows) {
-                    if (out.size >= MAX_GLOBAL) break
-                    val row = runCatching { el.jsonArray }.getOrNull() ?: continue
-                    if (row.size < 15) continue
-                    val hex = row[0].jsonPrimitive.contentOrNull ?: continue
-                    val lon = row[5].jsonPrimitive.doubleOrNull ?: continue
-                    val lat = row[6].jsonPrimitive.doubleOrNull ?: continue
-                    val baroM = row[7].jsonPrimitive.doubleOrNull
-                    val geoM = row[13].jsonPrimitive.doubleOrNull
-                    val altM = baroM ?: geoM
-                    val speedMs = row[9].jsonPrimitive.doubleOrNull ?: 0.0
-                    val track = row[10].jsonPrimitive.doubleOrNull ?: 0.0
-                    val verticalMs = row[11].jsonPrimitive.doubleOrNull ?: 0.0
-                    val distanceKm = Geo.distanceM(observer.lat, observer.lon, lat, lon) / 1000.0
-                    out.add(
-                        AircraftView(
-                            hex = hex,
-                            callSign = (row[1].jsonPrimitive.contentOrNull ?: "").trim(),
-                            reg = "",
-                            type = "",
-                            lat = lat,
-                            lon = lon,
-                            altFt = altM?.let { (it * 3.28084).toInt() },
-                            groundSpeedKt = speedMs * 1.94384,
-                            trackDeg = track,
-                            verticalRateFpm = (verticalMs * 196.85).toInt(),
-                            squawk = row[14].jsonPrimitive.contentOrNull ?: "",
-                            category = "",
-                            distanceKm = distanceKm,
-                            score = Geo.aircraftScore(distanceKm),
-                        ),
-                    )
-                }
-                out.sortBy { it.distanceKm }
-                Result(
-                    out,
-                    FeedStatus(true, "${out.size} aircraft (worldwide)", System.currentTimeMillis(), out.size),
-                )
-            }
-        }.getOrNull()
-    }
-
-    /** One adsb.lol point query plus parse. Null means the request itself failed. */
-    private fun fetchAdsbLol(url: String, observer: LatLon): Result? {
+    /** One point query plus parse. Null means the request itself failed. */
+    private fun fetchPoint(url: String, observer: LatLon): Result? {
         val req = Request.Builder().url(url).header("User-Agent", UA).build()
         return runCatching {
             http.newCall(req).execute().use { resp ->
@@ -152,6 +94,9 @@ class AircraftSource(private val http: OkHttpClient) {
                     val lonD = o.num("lon") ?: continue
                     val hex = o.str("hex") ?: continue
                     val distanceKm = Geo.distanceM(observer.lat, observer.lon, latD, lonD) / 1000.0
+                    // The query answers a square around the observer, so the circle is applied
+                    // here: a contact in the corner of the square is still outside the ring.
+                    if (distanceKm > RANGE_KM) continue
                     val altFt = o.num("alt_baro")?.toInt() ?: o.num("alt_geom")?.toInt()
                     out.add(
                         AircraftView(
@@ -175,7 +120,12 @@ class AircraftSource(private val http: OkHttpClient) {
                 out.sortBy { it.distanceKm }
                 Result(
                     out,
-                    FeedStatus(true, "${out.size} aircraft", System.currentTimeMillis(), out.size),
+                    FeedStatus(
+                        true,
+                        "${out.size} aircraft within ${RANGE_MI.toInt()} mi",
+                        System.currentTimeMillis(),
+                        out.size,
+                    ),
                 )
             }
         }.getOrNull()
