@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Skyward" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#FF05070C</item>
+        <item name="android:statusBarColor">#FF05070C</item>
+        <item name="android:navigationBarColor">#FF05070C</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

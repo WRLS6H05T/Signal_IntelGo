@@ -1,0 +1,6 @@
+-dontwarn org.orekit.**
+-dontwarn org.hipparchus.**
+-keep class org.orekit.** { *; }
+-keep class org.hipparchus.** { *; }
+-keep class org.eclipse.paho.** { *; }
+-keepclassmembers class kotlinx.serialization.json.** { *; }
