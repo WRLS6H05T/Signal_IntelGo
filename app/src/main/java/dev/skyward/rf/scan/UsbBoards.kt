@@ -119,7 +119,9 @@ class UsbBoards(private val context: Context) {
         private const val PROBE_GAP_MS = 380L
         private const val MAX_TEXT = 6_000
         /** How long each telemetry poll listens after its commands go out. */
-        private const val POLL_READ_MS = 3_500L
+        private const val POLL_READ_MS = 6_000L
+        /** Gap between the poll's commands, so an AP sweep can finish before BLE starts. */
+        private const val COMMAND_GAP_MS = 1_200L
         /** Gap between telemetry polls: a Wi-Fi sweep needs time to finish printing. */
         private const val POLL_GAP_MS = 6_000L
         private const val POLL_TEXT = 8_000
@@ -166,6 +168,8 @@ class UsbBoards(private val context: Context) {
         val raw: String = "",
         /** Numbers the board reported on its own console; empty until it answers a poll. */
         val reading: Esp32Console.Reading = Esp32Console.Reading(),
+        /** The networks and advertisers the board's last sweep named. */
+        val sweep: Esp32Console.Sweep = Esp32Console.Sweep(),
         val attachedAt: Long = System.currentTimeMillis(),
     ) {
         val key: String get() = "usb:$deviceId"
@@ -192,6 +196,10 @@ class UsbBoards(private val context: Context) {
     /** Called whenever the roster changes; [dev.skyward.rf.sky.Esp32Source] mirrors it. */
     @Volatile
     var onChange: ((List<Board>) -> Unit)? = null
+
+    /** Called with each sweep a board finishes, so its findings can join the RF tables. */
+    @Volatile
+    var onSweep: ((Esp32Console.Sweep) -> Unit)? = null
 
     private val manager: UsbManager? by lazy {
         context.getSystemService(Context.USB_SERVICE) as? UsbManager
@@ -371,17 +379,23 @@ class UsbBoards(private val context: Context) {
             poller.execute {
                 try {
                     while (id in polling) {
-                        Thread.sleep(POLL_GAP_MS)
-                        if (id !in polling) break
+                        // Poll first: a board plugged in should start reporting within seconds,
+                        // not after the gap that keeps consecutive sweeps from overlapping.
                         val text = poll(device, family)
-                        if (text.isBlank()) continue
-                        val reading = Esp32Console.parse(text)
-                        val board = devices[id] ?: break
-                        devices[id] = board.copy(
-                            reading = board.reading.merge(reading),
-                            raw = text.replace('\n', ' ').trim().take(160),
-                        )
-                        publish()
+                        if (id !in polling) break
+                        if (text.isNotBlank()) {
+                            val reading = Esp32Console.parse(text)
+                            val sweep = Esp32Console.parseScan(text)
+                            val board = devices[id] ?: break
+                            devices[id] = board.copy(
+                                reading = board.reading.merge(reading),
+                                sweep = sweep,
+                                raw = text.replace('\n', ' ').trim().take(160),
+                            )
+                            publish()
+                            if (!sweep.isEmpty) onSweep?.invoke(sweep)
+                        }
+                        Thread.sleep(POLL_GAP_MS)
                     }
                 } catch (t: InterruptedException) {
                     Thread.currentThread().interrupt()
@@ -431,7 +445,7 @@ class UsbBoards(private val context: Context) {
             val n = runCatching { conn.bulkTransfer(inEp, buf, buf.size, READ_TIMEOUT_MS) }.getOrDefault(-1)
             if (n > 0) appendPrintable(text, buf, n)
             val elapsed = SystemClock.elapsedRealtime() - startedAt
-            if (sent < commands.size && elapsed >= sent * PROBE_GAP_MS) {
+            if (sent < commands.size && elapsed >= sent * COMMAND_GAP_MS) {
                 val line = commands[sent].toByteArray()
                 outEp?.let { runCatching { conn.bulkTransfer(it, line, line.size, 100) } }
                 sent++

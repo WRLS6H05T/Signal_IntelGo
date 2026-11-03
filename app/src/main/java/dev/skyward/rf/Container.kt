@@ -66,6 +66,12 @@ class Container(context: Context) {
     val esp32Usb = UsbBoards(appContext)
     val esp32 = Esp32Source({ settingsStore.current }, esp32Usb)
 
+    init {
+        // A wired board is a second radio: what it sweeps joins the handset's Wi-Fi/BLE tables,
+        // so its networks reach the layer counts, the map and the drive record.
+        esp32.onSweep = { sweep -> rf.ingestSweep(sweep) }
+    }
+
     private val _observer = MutableStateFlow<LatLon?>(null)
     val observer: StateFlow<LatLon?> = _observer
 

@@ -277,3 +277,40 @@ fun DrawScope.drawGpsLogo(at: Offset, r: Float, tint: Color) {
     drawLine(tint, Offset(at.x, at.y + r * 1.1f), Offset(at.x, at.y + r * 1.7f), r * 0.26f)
     drawCircle(color = tint, radius = r * 0.3f, center = at)
 }
+
+/**
+ * Drone: a quadcopter seen from above - four arms, four rotors, a body and a camera.
+ *
+ * Remote ID usually carries a heading, so a drone with a track is drawn as a small arrow; this
+ * is for the ones that do not broadcast one. It is deliberately not a scaled-down aeroplane:
+ * four rotors make a drone unmistakable at a glance, and no airliner has them.
+ */
+fun DrawScope.drawDroneIcon(at: Offset, r: Float, tint: Color) {
+    val arm = r * 0.95f
+    val rotor = r * 0.4f
+    for (sx in -1..1 step 2) {
+        for (sy in -1..1 step 2) {
+            val hub = Offset(at.x + sx * arm, at.y + sy * arm)
+            drawLine(
+                color = tint.dim(0.85f),
+                start = at,
+                end = hub,
+                strokeWidth = r * 0.14f,
+            )
+            drawCircle(
+                color = tint.copy(alpha = tint.alpha * 0.5f),
+                radius = rotor,
+                center = hub,
+                style = Stroke(width = r * 0.13f),
+            )
+        }
+    }
+    drawRoundRect(
+        color = tint,
+        topLeft = Offset(at.x - r * 0.32f, at.y - r * 0.24f),
+        size = Size(r * 0.64f, r * 0.48f),
+        cornerRadius = CornerRadius(r * 0.13f),
+    )
+    // the gimbal, which is what a drone is looking through
+    drawCircle(color = tint.dim(0.35f), radius = r * 0.12f, center = at)
+}

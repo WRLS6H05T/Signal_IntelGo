@@ -180,81 +180,24 @@ fun DrawScope.drawGlobeWorld(
 
         // ---- continents ----
         //
-        // Each ring is clipped to the visible hemisphere honestly: a contiguous run of
-        // near-side points is filled on its own and closed along the horizon circle, never with
-        // a straight chord. A ring entirely on the far side contributes nothing at all. That is
-        // what used to flip the globe's colours as it turned: every far-side ring was clamped
-        // onto the limb and closed across it, painting a lens of land-coloured ocean near the
-        // rim, and the clamped out-and-back points made rings self-intersect so winding
-        // cancelled in patches that appeared and vanished with the camera.
+        // One filled polygon per ring, with every point that is behind the sphere pushed just
+        // outside the disc and the ring closed out there, where the circular clip throws the
+        // closure away. The old code instead guessed where a ring re-entered the visible
+        // hemisphere and joined the two crossings with an arc along the rim, picking whichever
+        // sweep was shorter. That guess is wrong the moment a visible run spans more than half
+        // the horizon - which is most large landmasses as they turn past the limb - and a wrong
+        // sweep fills the complement: land-coloured water and water-coloured land, meeting along
+        // a hard edge that flickers into a different shape every frame as the globe rotates.
+        // Closing outside the disc removes the guess: the only thing that can appear inside the
+        // circle is the genuine near-side outline.
         val landPath = Path()
         val coastPath = Path()
-        val discRect = Rect(center.x - radius, center.y - radius, center.x + radius, center.y + radius)
-
         var rx = FloatArray(512)
         var ry = FloatArray(512)
         var rf = BooleanArray(512)
-
-        fun emitRun(n: Int, rot: Int, from: Int, to: Int, whole: Boolean) {
-            fun px(m: Int) = rx[(rot + m) % n]
-            fun py(m: Int) = ry[(rot + m) % n]
-
-            landPath.reset()
-            if (whole) {
-                // Fully visible: an ordinary closed polygon.
-                landPath.moveTo(px(0), py(0))
-                for (m in 1 until n) landPath.lineTo(px(m), py(m))
-                landPath.close()
-                drawPath(landPath, Color(LAND_MID), alpha = alpha)
-
-                coastPath.moveTo(px(0), py(0))
-                for (m in 1 until n) coastPath.lineTo(px(m), py(m))
-                coastPath.close()
-                return
-            }
-
-            // The run's two boundary points sit on the limb, so the arc meets them exactly.
-            var x0 = px(from)
-            var y0 = py(from)
-            var dx = x0 - center.x
-            var dy = y0 - center.y
-            var len = sqrt(dx * dx + dy * dy)
-            if (len > 0.001f) {
-                x0 = center.x + dx / len * radius
-                y0 = center.y + dy / len * radius
-            }
-            var x1 = px(to)
-            var y1 = py(to)
-            dx = x1 - center.x
-            dy = y1 - center.y
-            len = sqrt(dx * dx + dy * dy)
-            if (len > 0.001f) {
-                x1 = center.x + dx / len * radius
-                y1 = center.y + dy / len * radius
-            }
-
-            val a0 = Math.toDegrees(
-                atan2((y0 - center.y).toDouble(), (x0 - center.x).toDouble()),
-            ).toFloat()
-            val a1 = Math.toDegrees(
-                atan2((y1 - center.y).toDouble(), (x1 - center.x).toDouble()),
-            ).toFloat()
-            // Short way round the rim: the hidden sliver of land is always the smaller sweep.
-            var sweep = a1 - a0
-            while (sweep > 180f) sweep -= 360f
-            while (sweep < -180f) sweep += 360f
-
-            landPath.moveTo(x0, y0)
-            for (m in from until to) landPath.lineTo(px(m), py(m))
-            landPath.lineTo(x1, y1)
-            // Follow the horizon rather than cutting a chord across the disc.
-            landPath.arcTo(discRect, a0, sweep, false)
-            landPath.close()
-            drawPath(landPath, Color(LAND_MID), alpha = alpha)
-
-            coastPath.moveTo(px(from), py(from))
-            for (m in from + 1..to) coastPath.lineTo(px(m), py(m))
-        }
+        // Far enough past the rim that every closing edge is clipped, close enough that the
+        // edge from a crossing point stays within a pixel of the limb.
+        val outside = radius * 1.02f
 
         for (ring in rings) {
             val n = ring.size / 2
@@ -265,36 +208,49 @@ fun DrawScope.drawGlobeWorld(
                 rf = BooleanArray(n)
             }
             var front = 0
+            var lastAngle = 0.0
             for (k in 0 until n) {
                 project(ring[2 * k + 1].toDouble(), ring[2 * k].toDouble())
-                rx[k] = pt[0]
-                ry[k] = pt[1]
-                rf[k] = pt[2] > 0.02f
-                if (rf[k]) front++
+                val dx = pt[0] - center.x
+                val dy = pt[1] - center.y
+                val len = sqrt(dx * dx + dy * dy)
+                val near = pt[2] > 0.02f
+                rf[k] = near
+                if (near) {
+                    rx[k] = pt[0]
+                    ry[k] = pt[1]
+                    front++
+                    if (len > 0.001f) lastAngle = atan2(dy.toDouble(), dx.toDouble())
+                } else {
+                    // Directly behind the centre the direction is undefined, so the previous
+                    // point's angle is reused rather than letting a vertex snap to the middle.
+                    val a = if (len > 0.001f) atan2(dy.toDouble(), dx.toDouble()) else lastAngle
+                    rx[k] = center.x + outside * cos(a).toFloat()
+                    ry[k] = center.y + outside * sin(a).toFloat()
+                }
             }
             if (front == 0) continue
-            if (front == n) {
-                emitRun(n, 0, 0, n - 1, true)
-                continue
-            }
-            // Begin at a run boundary, so no run wraps past the end of the array.
-            var rot = -1
+
+            landPath.reset()
+            landPath.moveTo(rx[0], ry[0])
+            for (k in 1 until n) landPath.lineTo(rx[k], ry[k])
+            landPath.close()
+            drawPath(landPath, Color(LAND_MID), alpha = alpha)
+
+            // Coastline only where both ends of a segment are genuinely on the near side, so no
+            // stroke ever runs along the clipped closure.
+            var pen = false
             for (k in 0 until n) {
-                if (rf[k] && !rf[(k - 1 + n) % n]) {
-                    rot = k
-                    break
+                val m = (k + 1) % n
+                if (rf[k] && rf[m]) {
+                    if (!pen) {
+                        coastPath.moveTo(rx[k], ry[k])
+                        pen = true
+                    }
+                    coastPath.lineTo(rx[m], ry[m])
+                } else {
+                    pen = false
                 }
-            }
-            if (rot < 0) continue
-            var m = 0
-            while (m < n) {
-                if (!rf[(rot + m) % n]) {
-                    m++
-                    continue
-                }
-                val from = m
-                while (m < n && rf[(rot + m) % n]) m++
-                emitRun(n, rot, from, m - 1, false)
             }
         }
         drawPath(coastPath, coast, style = Stroke(width = coastWidth))

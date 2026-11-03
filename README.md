@@ -16,7 +16,7 @@ scale** by how strong the best signal was at each fix.
 | Map | Map, panel collapsed |
 | --- | --- |
 | ![Map with the INTEL panel open](docs/screenshots/signal-intelgo-1.png) | ![Map with the INTEL panel collapsed](docs/screenshots/signal-intelgo-2.png) |
-| Everything at once: 408 satellite element sets loaded, the INTEL chips doubling as layer switches and live counts, and a greyscale basemap that leaves RF colour as the only colour meaning anything. | The panel folds down to its count when the map matters more than the numbers. |
+| Everything at once: 408 satellite element sets loaded, the INTEL chart doubling as layer switches and live counts, and a greyscale basemap that leaves RF colour as the only colour meaning anything. | The panel folds down to its count when the map matters more than the numbers. |
 
 | Globe | Setup |
 | --- | --- |
@@ -101,7 +101,7 @@ shaders — the whole catalogue is on screen at globe zoom):
 | Aircraft | arrow along its track |
 | Mesh node | satellite dish |
 | Cell tower | lattice tower with signal arcs |
-| Drone | diamond |
+| Drone | quadcopter, or a smaller arrow when it reports a heading |
 | Your position | GPS reticle labelled `GPS` |
 
 Cell towers come from `TelephonyManager` (LTE, GSM, WCDMA) and get their own `CELL` count and
@@ -169,11 +169,13 @@ Unit tests (orbit math, Remote ID parser, colour scale, exports):
 
 ## Using it
 
-1. **Map** — a row of live counts doubles as the layer switches: **SAT**, **AIR**, **UAV**,
-   **MESH**, **WIFI**, **BLE**, **PATH**. Each chip shows how many are currently held and
-   taps to show/hide that layer; the Wi-Fi and BLE chips switch those radios on and off
-   (their tables clear, so the count drops to 0). Chips dim when off while keeping the
-   count visible, so "hidden" never looks like "nothing there". Tap any marker for altitude,
+1. **Map** — the INTEL box is a bar chart, one row per category: **SAT**, **AIR**, **UAV**,
+   **MESH**, **CELL**, **WIFI**, **BLE**, **PATH**. Every bar is the same colour and its
+   length is the share of the largest category, so the shape of the sky is legible even when
+   one count is hundreds and another is two; a zero still gets a visible sliver. Tapping a
+   row shows or hides that layer, and the Wi-Fi and BLE rows switch those radios (their
+   tables clear, so the count drops to 0). A switched-off row keeps its bar drawn and dims
+   only its label, so "hidden" never looks like "nothing there". Tap any marker for altitude,
    range, RSSI/SNR, squawk, operator ID and so on. The `◎` button re-centres on you;
    `⊙` logs the current sky. Zooming out declutters automatically (see *Zoom behaviour*).
    `MAPS ↗` hands the current view to your phone's own map app (Google Maps and friends, via a
@@ -271,7 +273,10 @@ Marauder) are sent, and the reply is parsed as NMEA or as labelled output, so a 
 module places itself on the map and can stand in for a handset with no fix. Anything a board has not
 answered yet reads as an em dash, never as a confident zero, and a bridge with no CLI is simply listened
 to. The HARDWARE panel shows the live AP and BLE counts, satellite count, HDOP, the board position and
-the board's last console line.
+the board's last console line. What a sweep names - BSSIDs, SSIDs, RSSI, channel and BLE
+advertisers - joins the same Wi-Fi and BLE tables the handset's radios fill, so a board's
+networks count on the map, in the INTEL chart and in the drive record like any other
+observation, and age out on the same fifteen-second window.
 
 **GPS fallback.** While the phone has no fix of its own, a board reporting four or more
 satellites stands in as the observer, so a cold handset still puts the map where you are. The

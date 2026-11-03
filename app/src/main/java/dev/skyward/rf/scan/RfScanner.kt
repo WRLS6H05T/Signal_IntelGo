@@ -63,6 +63,48 @@ class RfScanner(private val context: Context) {
     private val droneFrames = ConcurrentHashMap<String, OdidParser.DroneFrame>()
     private val esp32Table = ConcurrentHashMap<String, Esp32Advert>()
 
+    // Sweeps from a wired ESP32 board. Kept apart from the handset's tables because the Wi-Fi
+    // poller prunes every BSSID it did not hear itself, which would wipe a board's findings a
+    // few seconds after they arrived.
+    private val boardWifi = ConcurrentHashMap<String, RfObservation>()
+    private val boardBle = ConcurrentHashMap<String, RfObservation>()
+
+    /**
+     * Folds a board's own sweep into the picture the handset's radios fill, so the networks and
+     * advertisers it named reach the layer counts, the map and the drive record exactly like
+     * the phone's own findings. Entries age out on the normal [STALE_MS] window, so pulling the
+     * cable clears them without a teardown step.
+     */
+    fun ingestSweep(sweep: Esp32Console.Sweep, now: Long = System.currentTimeMillis()) {
+        for (ap in sweep.aps) {
+            boardWifi[ap.bssid] = RfObservation(
+                kind = RfKind.WIFI,
+                id = ap.bssid,
+                name = ap.ssid.ifBlank { "<hidden>" },
+                rssi = ap.rssi,
+                channel = ap.channel,
+                security = "",
+                freqMhz = 0,
+                seenAt = now,
+            )
+        }
+        for (d in sweep.devices) {
+            boardBle[d.address] = RfObservation(
+                kind = RfKind.BLE,
+                id = d.address,
+                name = d.name,
+                rssi = d.rssi,
+                channel = 0,
+                security = "",
+                freqMhz = 2400,
+                seenAt = now,
+            )
+        }
+    }
+
+    /** True while a board is contributing observations of its own. */
+    fun hasBoardSweep(): Boolean = boardWifi.isNotEmpty() || boardBle.isNotEmpty()
+
     private val main = Handler(Looper.getMainLooper())
     private var wifiPolling = false
     private var bleScanning = false
@@ -371,8 +413,11 @@ class RfScanner(private val context: Context) {
             .sortedByDescending { it.rssi }
             .take(limit)
 
-        val wifi = clean(wifiTable)
-        val ble = clean(bleTable)
+        prune(boardWifi, now) { it.seenAt }
+        prune(boardBle, now) { it.seenAt }
+        // A duplicate keeps the handset's copy: it carries a real channel and security string.
+        val wifi = clean(wifiTable + boardWifi)
+        val ble = clean(bleTable + boardBle)
         return Snapshot(
             wifi = wifi,
             ble = ble,
@@ -393,6 +438,8 @@ class RfScanner(private val context: Context) {
         bleTable.clear()
         droneFrames.clear()
         esp32Table.clear()
+        boardWifi.clear()
+        boardBle.clear()
     }
 
     /** Exposed for the UI: score of a single observation. */

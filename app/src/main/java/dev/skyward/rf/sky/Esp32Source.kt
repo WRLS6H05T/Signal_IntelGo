@@ -5,6 +5,7 @@ import dev.skyward.rf.core.FeedStatus
 import dev.skyward.rf.core.Geo
 import dev.skyward.rf.core.Settings
 import dev.skyward.rf.scan.Esp32Codec
+import dev.skyward.rf.scan.Esp32Console
 import dev.skyward.rf.scan.UsbBoards
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -76,9 +77,17 @@ class Esp32Source(
     @Volatile
     private var observerLon: Double? = null
 
+    /**
+     * A board's own sweep, handed on to the RF tables. Set by the container: a board is a second
+     * radio, so what it sweeps belongs beside what the handset heard.
+     */
+    @Volatile
+    var onSweep: ((Esp32Console.Sweep) -> Unit)? = null
+
     init {
         // Wired boards are pushed in by the USB detector rather than polled.
         usb?.onChange = { boards -> syncUsb(boards) }
+        usb?.onSweep = { sweep -> onSweep?.invoke(sweep) }
     }
 
     fun isRunning(): Boolean = client?.isConnected == true
@@ -199,8 +208,9 @@ class Esp32Source(
                 altM = r.altM?.roundToInt() ?: existing?.altM,
                 sats = sats,
                 hdop = r.hdop ?: existing?.hdop,
-                wifiCount = r.wifi ?: existing?.wifiCount ?: 0,
-                bleCount = r.ble ?: existing?.bleCount ?: 0,
+                // A sweep listing is a better count than a summary line a firmware may not print.
+                wifiCount = r.wifi ?: b.sweep.aps.size.takeIf { it > 0 } ?: existing?.wifiCount ?: 0,
+                bleCount = r.ble ?: b.sweep.devices.size.takeIf { it > 0 } ?: existing?.bleCount ?: 0,
                 source = "usb",
                 lastSeen = now,
                 // A wired board is still a good link even with no fix, so it never scores 0.

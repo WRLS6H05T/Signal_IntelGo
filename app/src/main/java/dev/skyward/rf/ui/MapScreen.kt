@@ -147,6 +147,13 @@ private fun buildHardware(
                     "APs seen" to seen(n?.wifiCount ?: 0),
                     "BLE seen" to seen(n?.bleCount ?: 0),
                     "GNSS" to gnss,
+                    // Whether the board has a GPS module at all, which decides whether its
+                    // position can be believed or borrowed as the observer.
+                    "GPS" to when (r.gps) {
+                        true -> "yes"
+                        false -> "no module"
+                        null -> if (r.lat != null) "yes" else "—"
+                    },
                     "Position" to (if (r.lat != null && r.lon != null)
                         String.format("%.5f, %.5f", r.lat, r.lon) else "unknown"),
                     "Battery" to (n?.batteryPct?.takeIf { it >= 0 }?.let { "$it%" } ?: "\u2014"),
@@ -560,20 +567,21 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
             if (legendOpen) {
                 Spacer(Modifier.height(8.dp))
                 // Every count is also its layer/radio toggle.
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp),
-                    maxItemsInEachRow = 4,
-                ) {
-                    ToggleChip("SAT", sky.sats.size, Sky.satellite, showSats) { showSats = !showSats }
-                    ToggleChip("AIR", sky.aircraft.size, Sky.aircraft, showAir) { showAir = !showAir }
-                    ToggleChip("UAV", sky.drones.size, Sky.drone, showDrones) { showDrones = !showDrones }
-                    ToggleChip("MESH", sky.mesh.size, Sky.mesh, showMesh) { showMesh = !showMesh }
-                    ToggleChip("CELL", sky.cells.size, Sky.warn, showCells) { showCells = !showCells }
-                    ToggleChip("WIFI", rf.wifi.size, Sky.cyan, wifiOn) { c.rf.setWifiEnabled(!wifiOn) }
-                    ToggleChip("BLE", rf.ble.size, Sky.mesh, bleOn) { c.rf.setBleEnabled(!bleOn) }
-                    ToggleChip("PATH", path.size, Sky.warn, showPath) { showPath = !showPath }
-                }
+                // A bar per category rather than a chip per category: the counts span orders of
+                // magnitude, and a bar shows that shape at a glance. Tapping a row still switches
+                // that layer or radio, and the bar stays drawn either way.
+                val maxCount = listOf(
+                    sky.sats.size, sky.aircraft.size, sky.drones.size, sky.mesh.size,
+                    sky.cells.size, rf.wifi.size, rf.ble.size, path.size,
+                ).maxOrNull() ?: 0
+                IntelBar("SAT", sky.sats.size, maxCount, showSats) { showSats = !showSats }
+                IntelBar("AIR", sky.aircraft.size, maxCount, showAir) { showAir = !showAir }
+                IntelBar("UAV", sky.drones.size, maxCount, showDrones) { showDrones = !showDrones }
+                IntelBar("MESH", sky.mesh.size, maxCount, showMesh) { showMesh = !showMesh }
+                IntelBar("CELL", sky.cells.size, maxCount, showCells) { showCells = !showCells }
+                IntelBar("WIFI", rf.wifi.size, maxCount, wifiOn) { c.rf.setWifiEnabled(!wifiOn) }
+                IntelBar("BLE", rf.ble.size, maxCount, bleOn) { c.rf.setBleEnabled(!bleOn) }
+                IntelBar("PATH", path.size, maxCount, showPath) { showPath = !showPath }
                 if (!wd.active) {
                     Spacer(Modifier.height(8.dp))
                     // The primary action lives in the box now, not in a floating button.
@@ -958,7 +966,17 @@ private fun TacticalMap(
                     Layer.CELL -> drawTowerIcon(p, r, color)
                     Layer.MESH -> drawDishIcon(p, r, color)
                     Layer.ESP32 -> drawChipIcon(p, r, color)
-                    Layer.DRONE -> drawDiamond(p, color, r * 1.15f)
+                    Layer.DRONE -> {
+                        // A drone with a track is an arrow, but a smaller one than an airliner:
+                        // the two must not read as the same weight in the sky. Without a
+                        // heading there is nothing to point, so it gets the quadcopter glyph.
+                        val heading = m.headingDeg
+                        if (heading != null) {
+                            drawPlaneArrow(p, heading, r * 0.62f, color, simple = true)
+                        } else {
+                            drawDroneIcon(p, r * 0.8f, color)
+                        }
+                    }
                 }
                 if (m.key == selectedKey) {
                     drawCircle(
@@ -1046,13 +1064,3 @@ private fun CrashPill() {
     )
 }
 
-private fun DrawScope.drawDiamond(p: Offset, color: Color, r: Float) {
-    val path = Path().apply {
-        moveTo(0f, -r)
-        lineTo(r, 0f)
-        lineTo(0f, r)
-        lineTo(-r, 0f)
-        close()
-    }
-    withTransform({ translate(p.x, p.y) }) { drawPath(path, color) }
-}

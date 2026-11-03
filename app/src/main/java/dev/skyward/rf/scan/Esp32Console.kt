@@ -23,6 +23,8 @@ object Esp32Console {
         val lat: Double? = null,
         val lon: Double? = null,
         val altM: Double? = null,
+        /** True when the board has a GNSS module, false when it says it has none. */
+        val gps: Boolean? = null,
     ) {
         /** Nothing worth showing: the poll produced no numbers at all. */
         val isEmpty: Boolean
@@ -38,7 +40,27 @@ object Esp32Console {
             lat = other.lat ?: lat,
             lon = other.lon ?: lon,
             altM = other.altM ?: altM,
+            gps = other.gps ?: gps,
         )
+    }
+
+    /** One access point a board swept: what the phone's own radio would have reported. */
+    data class Ap(val bssid: String, val ssid: String, val rssi: Int, val channel: Int)
+
+    /** One BLE advertiser a board heard. */
+    data class Device(val address: String, val name: String, val rssi: Int)
+
+    /**
+     * The named half of a sweep. Counts alone only prove a radio worked; these are what put the
+     * board's networks and advertisers on the map and into the drive record.
+     */
+    data class Sweep(
+        val aps: List<Ap> = emptyList(),
+        val devices: List<Device> = emptyList(),
+    ) {
+        val isEmpty: Boolean get() = aps.isEmpty() && devices.isEmpty()
+
+        val total: Int get() = aps.size + devices.size
     }
 
     /**
@@ -49,8 +71,10 @@ object Esp32Console {
      * gets no commands and the poll simply listens, which is enough for NMEA.
      */
     fun commands(family: BoardFamily): List<String> = when (family) {
-        BoardFamily.GHOSTESP -> listOf("gps\r\n", "scanap\r\n", "bledetect\r\n")
-        BoardFamily.MARAUDER -> listOf("gps\r\n", "scanap\r\n", "blescan\r\n")
+        // A sweep left running from the last poll would have to be stopped before a new one is
+        // accepted, which is why every cycle opens with stopscan.
+        BoardFamily.GHOSTESP -> listOf("stopscan\r\n", "gps\r\n", "scanap\r\n", "bledetect\r\n")
+        BoardFamily.MARAUDER -> listOf("stopscan\r\n", "gps\r\n", "scanap\r\n", "blescan\r\n")
         BoardFamily.BISCUIT, BoardFamily.ESP32 -> emptyList()
     }
 
@@ -82,6 +106,12 @@ object Esp32Console {
     private val LAT = Regex("""(?i)\blat(?:itude)?\s*[:=]\s*(-?\d+(?:\.\d+)?)""")
     private val LON = Regex("""(?i)\blon(?:gitude)?\s*[:=]\s*(-?\d+(?:\.\d+)?)""")
     private val ALT = Regex("""(?i)\balt(?:itude)?\s*[:=]\s*(-?\d+(?:\.\d+)?)""")
+    private val GPS_YES = Regex(
+        """(?i)\b(?:gps|gnss)\s*[:=]\s*(?:ok|on|yes|present|detected|ready|fix|3d|2d|a|\d)""",
+    )
+    private val GPS_NO = Regex(
+        """(?i)(?:\b(?:no|without)\s+(?:gps|gnss)\b|\b(?:gps|gnss)\b[^\n]{0,4}?\b(?:not\s+(?:detected|found|present|fitted)|absent|missing|disabled))""",
+    )
     private val FIX_YES = Regex("""(?i)(?:\bfix\b\s*[:=]\s*(?:yes|true|ok|valid|acquired|on|1)\b|\b(?:gps|gnss)\s*[:=]\s*(?:fix|3d|valid|acquired)\b)""")
     private val FIX_NO = Regex("""(?i)(?:\bfix\b\s*[:=]\s*(?:no|false|none|invalid|lost|off|0)\b|\b(?:gps|gnss)\s*[:=]\s*(?:no\s*fix|none|lost|waiting|searching)\b)""")
 
@@ -107,9 +137,96 @@ object Esp32Console {
                 FIX_NO.containsMatchIn(text) -> false
                 else -> null
             },
+            gps = when {
+                GPS_NO.containsMatchIn(text) -> false
+                out.lat != null || out.sats != null -> true
+                GPS_YES.containsMatchIn(text) -> true
+                // A board that answers `gps` with only a fix state still has a module.
+                out.fix != null -> true
+                else -> null
+            },
         )
         return out.merge(labelled)
     }
+
+    // ---------------- sweep listings ----------------
+
+    private val MAC = Regex("""(?i)\b([0-9a-f]{2}(?::[0-9a-f]{2}){5})\b""")
+    private val RSSI_LABELLED = Regex("""(?i)\b(?:rssi|signal|dbm|level)\s*[:=]?\s*(-?\d{1,3})\b""")
+    private val RSSI_PLAIN = Regex("""(?<![\w.-])(-\d{1,3})(?![\w.])""")
+    private val CHANNEL = Regex("""(?i)\b(?:ch|chan|channel)\s*[:=]?\s*(\d{1,3})\b""")
+    private val SSID_LABELLED = Regex(
+        """(?i)\b(?:ssid|essid|network(?:\s*name)?)\s*[:=]\s*([^,;|]{1,32})""",
+    )
+    private val NAME_LABELLED = Regex("""(?i)\bname\s*[:=]\s*([^,;|]{1,32})""")
+    private val BLE_LINE = Regex("""(?i)\b(?:ble|bt|bluetooth)\b""")
+
+    /**
+     * Reads a sweep listing into the individual networks and advertisers it named.
+     *
+     * The two firmwares print sweeps in different shapes and neither is documented as stable, so
+     * this works line by line off the only two things that must be there for a line to mean
+     * anything: an address and a signal level. A line without both is boot noise and is skipped,
+     * so a silent or partly-printed sweep adds nothing rather than inventing entries.
+     */
+    fun parseScan(text: String): Sweep {
+        val aps = LinkedHashMap<String, Ap>()
+        val devices = LinkedHashMap<String, Device>()
+        for (raw in text.lineSequence()) {
+            val line = raw.trim()
+            if (line.isEmpty() || line.length > 240) continue
+            val mac = MAC.find(line)?.groupValues?.getOrNull(1)?.uppercase() ?: continue
+            val rssi = rssiOf(line) ?: continue
+            val channel = CHANNEL.find(line)?.groupValues?.getOrNull(1)?.toIntOrNull()
+            val isBle = BLE_LINE.containsMatchIn(line) && channel == null
+            if (!isBle && (channel != null || SSID_LABELLED.containsMatchIn(line))) {
+                val ssid = ssidOf(line, mac)
+                aps[mac] = Ap(mac, ssid, rssi, channel ?: 0)
+            } else {
+                devices[mac] = Device(mac, nameOf(line, mac), rssi)
+            }
+        }
+        return Sweep(aps.values.toList(), devices.values.toList())
+    }
+
+    /** Signal level: a labelled RSSI wins, otherwise the first negative number in range. */
+    private fun rssiOf(line: String): Int? {
+        val labelled = RSSI_LABELLED.find(line)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        if (labelled != null && labelled in -127..0) return labelled
+        for (m in RSSI_PLAIN.findAll(line)) {
+            val v = m.groupValues[1].toIntOrNull() ?: continue
+            if (v in -127..-5) return v
+        }
+        return null
+    }
+
+    /**
+     * SSID: a labelled one is taken as printed. An unlabelled sweep line only names itself
+     * after the address, so whatever follows the MAC is used when it looks like a name.
+     */
+    private fun ssidOf(line: String, mac: String): String {
+        SSID_LABELLED.find(line)?.groupValues?.getOrNull(1)?.let { return clean(it) }
+        val after = line.substringAfter(mac, "")
+        return clean(after)
+    }
+
+    /** BLE has no SSID; the advertiser's name sits either side of the address. */
+    private fun nameOf(line: String, mac: String): String {
+        SSID_LABELLED.find(line)?.groupValues?.getOrNull(1)?.let { return clean(it) }
+        NAME_LABELLED.find(line)?.groupValues?.getOrNull(1)?.let { return clean(it) }
+        val after = clean(line.substringAfter(mac, ""))
+        if (after.isNotBlank()) return after
+        return clean(line.substringBefore(mac))
+    }
+
+    /** Strips the punctuation and field labels a console line wraps around a value. */
+    private fun clean(value: String): String = value
+        .replace(Regex("""(?i)\b(?:rssi|signal|dbm|ch|chan|channel|bssid|mac|enc|auth|security)\b\s*[:=]?"""), " ")
+        .replace(Regex("""[-+]?\d+(?:\.\d+)?"""), " ")
+        .replace(Regex("""[\[\]{}()<>,;:|/\\*\"']"""), " ")
+        .trim()
+        .replace(Regex("""\s{2,}"""), " ")
+        .take(32)
 
     // ---------------- NMEA ----------------
 

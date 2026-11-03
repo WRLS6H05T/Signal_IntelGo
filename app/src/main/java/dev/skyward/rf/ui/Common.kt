@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -23,9 +24,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.skyward.rf.ui.theme.Sky
+import kotlin.math.sqrt
 
 @Composable
 fun SectionCard(
@@ -169,5 +172,68 @@ fun ToggleChip(
                 color = if (on) color else Sky.textDim,
             )
         }
+    }
+}
+
+/**
+ * One row of the INTEL chart: category, a bar, and the count.
+ *
+ * Every bar is the same colour on purpose. The label already says which category it is, so
+ * colour has no work left to do and the bars can be read as one picture rather than eight
+ * competing accent colours. The length is the square root of the share of the largest category:
+ * a few hundred satellites against a couple of cell towers would otherwise leave the small bars
+ * invisible, which is exactly what a chart must not do. A switched-off layer keeps its bar drawn
+ * at the same colour and only dims its label, so "off" never looks like "nothing there".
+ */
+@Composable
+fun IntelBar(
+    label: String,
+    count: Int,
+    max: Int,
+    on: Boolean,
+    modifier: Modifier = Modifier,
+    onToggle: () -> Unit,
+) {
+    val share = if (max <= 0 || count <= 0) 0f else sqrt(count.toFloat() / max).coerceIn(0.06f, 1f)
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(onClick = onToggle)
+            .padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            style = SkywardThemeLabel(),
+            fontSize = 9.sp,
+            color = if (on) Sky.text else Sky.textDim,
+            modifier = Modifier.width(34.dp),
+        )
+        Box(
+            Modifier
+                .weight(1f)
+                .height(9.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(Sky.surfaceHigh),
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth(if (count > 0) share else 0.02f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(if (count > 0) Sky.cyan else Sky.outline),
+            )
+        }
+        Spacer(Modifier.width(6.dp))
+        Text(
+            count.toString(),
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (on) Sky.cyan else Sky.textDim,
+            textAlign = TextAlign.End,
+            modifier = Modifier.width(30.dp),
+        )
     }
 }
