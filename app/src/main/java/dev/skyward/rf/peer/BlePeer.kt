@@ -207,6 +207,10 @@ class BlePeer(private val context: Context) {
     @Volatile
     private var peerMode = ""
 
+    /** The other phone's id, as last reported on the link. */
+    @Volatile
+    private var peerId = ""
+
     @Volatile
     private var sent = 0
 
@@ -270,6 +274,15 @@ class BlePeer(private val context: Context) {
 
     fun isRunning(): Boolean = running
 
+    /**
+     * Whether this phone sorts first in the link.
+     *
+     * The only thing that can break a tie in the automatic role split: two phones of the same
+     * size get no role from the size comparison, and the pair still needs one host. The smaller
+     * id wins, which is the same rule the link already uses to decide which phone dials.
+     */
+    fun firstOnLink(): Boolean = peerId.isNotBlank() && id < peerId
+
     // ---------------- lifecycle ----------------
 
     private fun adapter(): BluetoothAdapter? =
@@ -329,6 +342,7 @@ class BlePeer(private val context: Context) {
         connection = null
         subscription = null
         peerAddress = null
+        peerId = ""
         peerDiagIn = 0f
         synchronized(lock) {
             outbox.clear()
@@ -601,6 +615,7 @@ class BlePeer(private val context: Context) {
         received++
         if (decoded.diagIn > 0f) peerDiagIn = decoded.diagIn
         if (decoded.mode.isNotBlank()) peerMode = decoded.mode
+        if (decoded.id.isNotBlank()) peerId = decoded.id
         val fix = if (decoded.lat != null && decoded.lon != null) LatLon(decoded.lat, decoded.lon) else null
         if (fix != null) _peerFix.value = fix
         _state.value = _state.value.copy(

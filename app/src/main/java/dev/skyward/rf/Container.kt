@@ -434,7 +434,8 @@ class Container(context: Context) {
     fun isHostPhone(): Boolean = when (settingsStore.current.peerRoleMode) {
         PeerProtocol.MODE_HOST -> true
         PeerProtocol.MODE_GLOBE -> false
-        else -> !peer.isRunning() || peer.role() == PeerProtocol.DISPLAY
+        else -> !peer.isRunning() || peer.role() == PeerProtocol.DISPLAY ||
+            (peer.role() == "" && peer.firstOnLink())
     }
 
     /**
