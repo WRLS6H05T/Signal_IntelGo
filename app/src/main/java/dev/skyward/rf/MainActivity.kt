@@ -35,5 +35,9 @@ class MainActivity : ComponentActivity() {
         super.onStop()
         container.stopScanning()
         container.logged.save()
+        // Everything logged this session is on disk by now, so this is the moment to let the
+        // account have it: the next time the app is opened it may have been uninstalled.
+        container.signalLog.save()
+        container.autoBackup()
     }
 }

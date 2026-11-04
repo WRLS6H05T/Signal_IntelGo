@@ -1,6 +1,8 @@
 package dev.skyward.rf
 
 import android.content.Context
+import dev.skyward.rf.cloud.CloudAccount
+import dev.skyward.rf.cloud.CloudBackup
 import dev.skyward.rf.core.FileStore
 import dev.skyward.rf.core.LatLon
 import dev.skyward.rf.core.RfKind
@@ -83,6 +85,20 @@ class Container(context: Context) {
 
     /** Uploads the logged signals to the user's own WiGLE account. */
     val wigle = WigleUpload(http)
+
+    /**
+     * The account, on a project the user owns. It carries the data directory between installs,
+     * which is the whole point: an uninstall then costs a sign-in, not the drives.
+     */
+    val account = CloudAccount(appContext, http)
+
+    val cloud = CloudBackup(
+        dataDir = rootData,
+        http = http,
+        account = account,
+        settings = { settingsStore.current },
+        context = appContext,
+    )
 
     init {
         // A wired board is a second radio: what it sweeps joins the handset's Wi-Fi/BLE tables,
@@ -247,6 +263,15 @@ class Container(context: Context) {
 
     fun stopScanning() {
         rf.stopAll()
+    }
+
+    /**
+     * Updates the account copy as the app leaves the foreground. A no-op when signed out or when
+     * nothing has changed since the last upload, so it costs nothing to call on every pause.
+     */
+    fun autoBackup() {
+        if (!account.state.value.signedIn) return
+        scope.launch { cloud.autoBackup() }
     }
 
     fun shutdown() {
