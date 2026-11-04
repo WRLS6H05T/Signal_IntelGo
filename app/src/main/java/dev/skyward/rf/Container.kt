@@ -150,6 +150,10 @@ class Container(context: Context) {
                 // Sent alongside the sample so both phones can show the same totals.
                 wifiTotal = totals.wifi,
                 bleTotal = totals.ble,
+                // What the other phone is actually using, so its card can say so plainly.
+                gpsUsed = (phoneFix ?: _observer.value) != null,
+                // Cellular counts as in use once towers are actually being heard.
+                cellUsed = cell.count() > 0,
             )
         }
         peer.onRemote = { wifi, ble, fix ->
@@ -184,6 +188,8 @@ class Container(context: Context) {
         location.start()
         rf.startAll()
         mesh.start()
+        // The persisted rate has to be on the port before the first probe opens it.
+        esp32Usb.setBaud(settingsStore.current.esp32Baud)
         esp32.start()
         if (settingsStore.current.peerEnabled) peer.start()
         airspace.start()

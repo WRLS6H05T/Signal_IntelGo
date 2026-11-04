@@ -281,3 +281,23 @@ observation, and age out on the same fifteen-second window.
 **GPS fallback.** While the phone has no fix of its own, a board reporting four or more
 satellites stands in as the observer, so a cold handset still puts the map where you are. The
 first real handset fix takes over again, and the behaviour is a switch.
+
+## Installing and updating without a cable or an SD card
+
+Every push to `main` builds the app on GitHub Actions and publishes it as the latest release:
+
+    https://github.com/WRLS6H05T/Signal_IntelGo/releases/latest/download/Signal_IntelGo-debug.apk
+
+Open that link on the phone, download it and tap the file: Android installs it over the running
+app. The URL never changes, so it can be bookmarked or kept on the home screen, and the release
+is replaced automatically on each push.
+
+Builds are signed with the key committed in `keystore/signal-intelgo.jks` (settings in
+`keystore.properties`) instead of a machine-specific debug key, which is what lets a GitHub
+build replace a desktop build and vice versa. The first build signed this way has to replace
+the old debug-signed install once - uninstall the app, install this APK, and every update is
+in place from then on. The key is committed deliberately: this is a personal side-load app, and
+a stable certificate is the only way in-place updates work. Anyone with access to the
+repository can sign an APK that Android will accept as this app.
+
+The workflow runs the unit tests before it builds, so a red build never becomes a download.

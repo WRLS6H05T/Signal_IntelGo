@@ -1,8 +1,26 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.serialization")
 }
+
+/**
+ * One signing key for every build, kept in the repository on purpose.
+ *
+ * A desktop build and CI then produce APKs with the same certificate, so each new build
+ * installs *over* the previous one; with the automatic per-machine debug key, Android refuses
+ * it as coming from a different app and the only way out is an uninstall.
+ */
+val keystoreProps = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+val stableKeystoreFile = rootProject.file(
+    keystoreProps.getProperty("storeFile") ?: "keystore/signal-intelgo.jks",
+)
+val hasStableKeystore = stableKeystoreFile.exists()
 
 android {
     namespace = "dev.skyward.rf"
@@ -44,14 +62,29 @@ android {
             enableV2Signing = true
             enableV3Signing = true
         }
+        if (hasStableKeystore) {
+            create("stable") {
+                storeFile = stableKeystoreFile
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
     }
 
     buildTypes {
         debug {
             isMinifyEnabled = false
+            // Signed with the shared key when it is present, which is what makes a download
+            // from GitHub a plain update rather than a reinstall.
+            if (hasStableKeystore) signingConfig = signingConfigs.getByName("stable")
         }
         release {
             isMinifyEnabled = false
+            if (hasStableKeystore) signingConfig = signingConfigs.getByName("stable")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

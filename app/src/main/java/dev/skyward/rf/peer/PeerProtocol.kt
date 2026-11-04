@@ -50,6 +50,9 @@ object PeerProtocol {
         /** Full table sizes: [wifi] and [ble] are only the strongest slice the pipe carries. */
         val wifiTotal: Int = 0,
         val bleTotal: Int = 0,
+        /** Whether the other phone is using a GPS fix of its own, and its cellular radio. */
+        val gpsUsed: Boolean = false,
+        val cellUsed: Boolean = false,
         val wifi: List<Ap> = emptyList(),
         val ble: List<Device> = emptyList(),
     )

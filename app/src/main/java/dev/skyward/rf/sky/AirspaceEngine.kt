@@ -29,6 +29,14 @@ import kotlinx.coroutines.launch
  * Owns the live picture: satellite propagation ticks, ADS-B polling, Remote ID + mesh
  * aggregation, and the optional capture of everything seen while a drive is recording.
  */
+/**
+ * Satellites are logged out to 150 miles of ground distance from the observer, not the
+ * drive's capture radius: a pass is over in minutes, and the point of the sky view is what is
+ * actually overhead. Once logged, a satellite stays an entity for good.
+ */
+private const val SAT_RANGE_MI = 150.0
+private const val SAT_RANGE_KM = SAT_RANGE_MI * 1.609344
+
 class AirspaceEngine(
     private val scope: CoroutineScope,
     private val settings: SettingsStore,
@@ -119,6 +127,22 @@ class AirspaceEngine(
                 lastSat = now
                 val sats = sat.positions(obs, now).map { s ->
                     s.copy(logged = logged.contains(Layer.SATELLITE, s.noradId))
+                }
+                // Inside 150 miles is an entity from the moment it is up, whether or not a drive
+                // is recording, and nothing ever removes it: the registry keeps the sighting, so
+                // a satellite once caught stays marked after it has moved away.
+                if (obs != null) {
+                    val overhead = sats.filter {
+                        OrbitMath.groundDistanceKm(obs.lat, obs.lon, it.lat, it.lon) <= SAT_RANGE_KM
+                    }
+                    if (overhead.isNotEmpty()) {
+                        logged.logBatch(
+                            System.currentTimeMillis(),
+                            overhead.map { s ->
+                                LoggedRegistry.Sighting(Layer.SATELLITE, s.noradId, s.name, s.lat, s.lon)
+                            },
+                        )
+                    }
                 }
                 val status = FeedStatus(
                     ok = sats.isNotEmpty() || sat.cachedCount() > 0,

@@ -207,13 +207,18 @@ fun ScanScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: ()
                     )
                 } else {
                     KeyValueRow("Device", peer.peerName.ifBlank { "waiting for the other phone" })
-                    KeyValueRow("Their screen", PeerProtocol.roleLabel(peer.peerRole))
+                    KeyValueRow("Wi-Fi", peer.peerWifiTotal.toString(), Sky.cyan)
+                    KeyValueRow("BLE", peer.peerBleTotal.toString(), Sky.mesh)
                     KeyValueRow(
-                        "Wi-Fi / BLE",
-                        "${peer.peerWifiTotal} / ${peer.peerBleTotal}",
-                        Sky.cyan,
+                        "GPS",
+                        if (peer.peerGps) "using fix" else "not used",
+                        if (peer.peerGps) Sky.cyan else Sky.textDim,
                     )
-                    KeyValueRow("Sent / received", "${peer.sent} / ${peer.received}")
+                    KeyValueRow(
+                        "Cellular",
+                        if (peer.peerCell) "in use" else "not used",
+                        if (peer.peerCell) Sky.cyan else Sky.textDim,
+                    )
                     Spacer(Modifier.height(6.dp))
                     Text(
                         "Their signals arrive with their own GPS fix and are logged there, "

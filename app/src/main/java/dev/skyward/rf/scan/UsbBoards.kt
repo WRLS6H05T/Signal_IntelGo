@@ -113,7 +113,9 @@ class UsbBoards(private val context: Context) {
 
     companion object {
         private const val ACTION_PERMISSION = "dev.skyward.rf.USB_PERMISSION"
-        private const val BAUD = 115200
+        /** Rates a bridge is normally flashed at, in the order the status panel steps them. */
+        val BAUD_RATES = listOf(9_600, 19_200, 38_400, 57_600, 115_200, 230_400, 460_800, 921_600)
+
         /** How long to listen for a banner. Marauder answers immediately, GhostESP within ~1 s. */
         private const val LISTEN_MS = 4_000L
         private const val READ_TIMEOUT_MS = 200
@@ -192,6 +194,19 @@ class UsbBoards(private val context: Context) {
                 chip.ifBlank { String.format("%04x:%04x", vendorId, productId) },
             ).filter { it.isNotBlank() }.joinToString(" \u00b7 ")
     }
+
+    /**
+     * Live serial speed. Not a constant: a board flashed at 57 600 or 921 600 reads as pure
+     * noise at 115 200, and its console then looks dead rather than wrong.
+     */
+    @Volatile
+    private var baud = 115200
+
+    fun setBaud(rate: Int) {
+        baud = rate.coerceIn(1_200, 2_000_000)
+    }
+
+    fun baudRate(): Int = baud
 
     private val _state = MutableStateFlow<List<Board>>(emptyList())
     val state: StateFlow<List<Board>> = _state
@@ -559,9 +574,12 @@ class UsbBoards(private val context: Context) {
         runCatching {
             when (transport) {
                 Transport.NATIVE_USB, Transport.CDC_ACM -> {
-                    // SET_LINE_CODING: 115200, one stop bit, no parity, eight data bits.
+                    // SET_LINE_CODING at the configured rate, one stop bit, no parity, 8 data.
                     val line = byteArrayOf(
-                        0x00, 0xC2.toByte(), 0x01, 0x00, // dwDTERate = 115200
+                        (baud and 0xFF).toByte(),
+                        ((baud ushr 8) and 0xFF).toByte(),
+                        ((baud ushr 16) and 0xFF).toByte(),
+                        ((baud ushr 24) and 0xFF).toByte(),
                         0x00, // bCharFormat = 1 stop
                         0x00, // bParityType = none
                         0x08, // bDataBits = 8
@@ -573,7 +591,7 @@ class UsbBoards(private val context: Context) {
                 Transport.CP210X -> {
                     conn.controlTransfer(0x41, 0x00, 0x0001, ifaceId, null, 0, 200) // IFC_ENABLE
                     conn.controlTransfer(0x41, 0x03, 0x0800, ifaceId, null, 0, 200) // 8N1
-                    conn.controlTransfer(0x41, 0x1E, BAUD and 0xFFFF, BAUD ushr 16, null, 0, 200)
+                    conn.controlTransfer(0x41, 0x1E, baud and 0xFFFF, baud ushr 16, null, 0, 200)
                 }
 
                 Transport.CH34X -> {
@@ -582,14 +600,14 @@ class UsbBoards(private val context: Context) {
                     // Two divisor conventions are in circulation for the CH34x family; a second pass
                     // with the other one is how a board that read as noise gets identified.
                     val clock = if (altBaud) 12_000_000 else 6_000_000
-                    val divisor = (clock / BAUD) and 0xFFFF
+                    val divisor = (clock / baud) and 0xFFFF
                     conn.controlTransfer(0x40, 0x9A, divisor, ifaceId, null, 0, 200)
                     conn.controlTransfer(0x40, 0xA4, 0x00FF, ifaceId, null, 0, 200) // no handshake
                 }
 
                 Transport.FTDI -> {
                     conn.controlTransfer(0x40, 0x00, 0x0000, 0, null, 0, 200) // reset
-                    conn.controlTransfer(0x40, 0x03, 3_000_000 / BAUD, ifaceId, null, 0, 200)
+                    conn.controlTransfer(0x40, 0x03, 3_000_000 / baud, ifaceId, null, 0, 200)
                     conn.controlTransfer(0x40, 0x04, 0x0008, ifaceId, null, 0, 200) // 8N1
                 }
 

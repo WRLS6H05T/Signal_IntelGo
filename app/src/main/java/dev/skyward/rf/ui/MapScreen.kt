@@ -199,14 +199,14 @@ private fun buildHardware(
 private val GreyscaleFilter: ColorFilter =
     ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
 
-/** The station gets its own colour so it stands out even in a crowded sky. */
-private val IssOrange = Color(0xFFFF8C1A)
+/** The station is gold: one object, the one everyone looks for, so it never shares a colour. */
+private val IssGold = Color(0xFFFFC53D)
 
 /** NORAD 25544 is the station; the name never decides, because SWISSCUBE also contains "ISS". */
 private fun isIss(m: MapMarker): Boolean = m.station
 
 private fun markerColor(m: MapMarker): Color = when {
-    isIss(m) -> IssOrange
+    isIss(m) -> IssGold
     m.logged -> Sky.logged
     m.layer == Layer.SATELLITE -> Sky.satellite
     m.layer == Layer.AIRCRAFT -> Sky.aircraft
@@ -523,7 +523,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                     maxLines = 1,
                 )
                 Text(
-                    "wifi ${peer.peerWifiTotal} · ble ${peer.peerBleTotal} · up ${peer.sent} down ${peer.received}",
+                    "wifi ${peer.peerWifiTotal} · ble ${peer.peerBleTotal} · gps ${if (peer.peerGps) "yes" else "no"} · cell ${if (peer.peerCell) "yes" else "no"}",
                     color = Sky.textDim,
                     fontSize = 9.sp,
                     maxLines = 1,
@@ -538,6 +538,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
             buildHardware(usbBoards, espNodes, sky.mesh)
         }
         if (hardware.isNotEmpty()) {
+            val cfg by c.settingsStore.state.collectAsState()
             var hwOpen by remember { mutableStateOf(false) }
             Column(
                 Modifier
@@ -570,6 +571,32 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 if (hardware.size > 3) {
                     Spacer(Modifier.height(3.dp))
                     Text("+${hardware.size - 3} more", color = Sky.textDim, fontSize = 9.sp)
+                }
+                Spacer(Modifier.height(5.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("BAUD", style = SkywardThemeLabel(), color = Sky.textDim)
+                    Spacer(Modifier.weight(1f))
+                    Text("${cfg.esp32Baud}", color = Sky.text, fontSize = 10.sp)
+                    Spacer(Modifier.width(5.dp))
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Sky.esp32.copy(alpha = 0.16f))
+                            .clickable {
+                                // A board flashed at another rate answers 115200 with noise,
+                                // which reads like a dead board: step until its console is text.
+                                val rates = dev.skyward.rf.scan.UsbBoards.BAUD_RATES
+                                val i = rates.indexOf(cfg.esp32Baud)
+                                val next = if (i < 0 || i == rates.lastIndex) rates.first() else rates[i + 1]
+                                c.settingsStore.update { it.copy(esp32Baud = next) }
+                                c.esp32Usb.setBaud(next)
+                                c.esp32Usb.stop()
+                                c.esp32Usb.start()
+                            }
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    ) {
+                        Text("NEXT", color = Sky.esp32, fontSize = 9.sp)
+                    }
                 }
             }
         }
@@ -1026,7 +1053,21 @@ private fun TacticalMap(
                 }
 
                 val r = (if (m.logged) 5.4f else 4.4f) * density
-                if (m.logged) {
+                // The station is drawn a size up: it is one object, and it should read as one.
+                val iconR = if (isIss(m)) r * 1.9f else r
+                if (isIss(m) && m.logged) {
+                    // Caught on this device, the station glows gold instead of wearing the
+                    // purple every other logged entity takes: it is what people scroll for.
+                    drawCircle(
+                        brush = androidx.compose.ui.graphics.Brush.radialGradient(
+                            colors = listOf(IssGold.copy(alpha = 0.55f * a), Color.Transparent),
+                            center = p,
+                            radius = iconR * 5.5f,
+                        ),
+                        radius = iconR * 5.5f,
+                        center = p,
+                    )
+                } else if (m.logged) {
                     drawCircle(color = Sky.logged.copy(alpha = 0.18f * a), radius = r * 3.2f, center = p)
                     drawCircle(
                         color = Sky.logged.copy(alpha = a),
@@ -1035,8 +1076,10 @@ private fun TacticalMap(
                         style = Stroke(width = 1.2f * density),
                     )
                 }
-                // The station is drawn a size up: it is one object, and it should read as one.
-                val iconR = if (isIss(m)) r * 1.9f else r
+                if (isIss(m)) {
+                    // A gold halo under the glyph, so the station reads gold logged or not.
+                    drawCircle(color = IssGold.copy(alpha = 0.22f * a), radius = iconR * 1.8f, center = p)
+                }
                 when (m.layer) {
                     Layer.AIRCRAFT -> drawPlaneArrow(p, m.headingDeg ?: 0f, r, color, simple = denseAircraft)
                     Layer.SATELLITE -> if (isIss(m)) drawStationIcon(p, iconR, color) else drawSatelliteIcon(p, r, color)

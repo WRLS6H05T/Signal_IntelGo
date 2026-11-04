@@ -40,6 +40,11 @@ data class Settings(
     val esp32Topic: String = "skyward/esp32/#",
     /** Let a board's own GPS stand in while the phone has no fix of its own. */
     val esp32GpsFallback: Boolean = true,
+    /**
+     * Serial speed for the board on the cable. A GhostESP or Marauder flashed at another rate
+     * answers a 115200 probe with noise, which reads exactly like a board that will not scan.
+     */
+    val esp32Baud: Int = 115200,
     /** Share scans and GPS with a second phone on the same Wi-Fi or hotspot. */
     val peerEnabled: Boolean = false,
     /** Peer address to dial when broadcast discovery is blocked; blank means find it. */

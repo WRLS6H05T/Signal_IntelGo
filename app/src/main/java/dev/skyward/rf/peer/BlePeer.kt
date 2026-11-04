@@ -78,6 +78,9 @@ class BlePeer(private val context: Context) {
         /** Full table sizes; [wifi] and [ble] are only what one message can carry. */
         val wifiTotal: Int = 0,
         val bleTotal: Int = 0,
+        /** Whether this phone is using a GPS fix, and whether it is hearing cell towers. */
+        val gpsUsed: Boolean = false,
+        val cellUsed: Boolean = false,
     )
 
     data class State(
@@ -91,6 +94,9 @@ class BlePeer(private val context: Context) {
         val peerRole: String = "",
         val peerWifiTotal: Int = 0,
         val peerBleTotal: Int = 0,
+        /** The other phone's own answer to whether it is using GPS and cellular. */
+        val peerGps: Boolean = false,
+        val peerCell: Boolean = false,
         val detail: String = "off",
         val sent: Int = 0,
         val received: Int = 0,
@@ -331,6 +337,8 @@ class BlePeer(private val context: Context) {
                     peerWifiTotal = 0,
                     peerBleTotal = 0,
                     peerRole = "",
+                    peerGps = false,
+                    peerCell = false,
                     detail = if (running) "waiting for the other device" else "off",
                 )
                 if (running) adapter()?.let { startAdvertising(it) }
@@ -431,6 +439,8 @@ class BlePeer(private val context: Context) {
                     peerWifiTotal = 0,
                     peerBleTotal = 0,
                     peerRole = "",
+                    peerGps = false,
+                    peerCell = false,
                     detail = if (running) "searching" else "off",
                 )
                 adapter()?.let { startScanning(it) }
@@ -492,6 +502,8 @@ class BlePeer(private val context: Context) {
             // The totals are what the other phone actually holds, not just what got sent.
             peerWifiTotal = if (decoded.wifiTotal > 0) decoded.wifiTotal else decoded.wifi.size,
             peerBleTotal = if (decoded.bleTotal > 0) decoded.bleTotal else decoded.ble.size,
+            peerGps = decoded.gpsUsed,
+            peerCell = decoded.cellUsed,
         )
         if (decoded.wifi.isNotEmpty() || decoded.ble.isNotEmpty() || fix != null) {
             onRemote?.invoke(decoded.wifi, decoded.ble, fix)
@@ -541,6 +553,8 @@ class BlePeer(private val context: Context) {
             ble = snapshot.ble.take(MAX_ITEMS).map { it.copy(name = it.name.take(NAME_CHARS)) },
             wifiTotal = if (snapshot.wifiTotal > 0) snapshot.wifiTotal else snapshot.wifi.size,
             bleTotal = if (snapshot.bleTotal > 0) snapshot.bleTotal else snapshot.ble.size,
+            gpsUsed = snapshot.gpsUsed,
+            cellUsed = snapshot.cellUsed,
         )
         val bytes = PeerProtocol.encode(message).toByteArray(Charsets.UTF_8)
         // Too big for the pipe means too big: dropping it whole is honest, truncating it would
