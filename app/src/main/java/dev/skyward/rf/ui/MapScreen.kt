@@ -576,26 +576,40 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("BAUD", style = SkywardThemeLabel(), color = Sky.textDim)
                     Spacer(Modifier.weight(1f))
-                    Text("${cfg.esp32Baud}", color = Sky.text, fontSize = 10.sp)
-                    Spacer(Modifier.width(5.dp))
-                    Box(
-                        Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Sky.esp32.copy(alpha = 0.16f))
-                            .clickable {
-                                // A board flashed at another rate answers 115200 with noise,
-                                // which reads like a dead board: step until its console is text.
-                                val rates = dev.skyward.rf.scan.UsbBoards.BAUD_RATES
-                                val i = rates.indexOf(cfg.esp32Baud)
-                                val next = if (i < 0 || i == rates.lastIndex) rates.first() else rates[i + 1]
-                                c.settingsStore.update { it.copy(esp32Baud = next) }
-                                c.esp32Usb.setBaud(next)
-                                c.esp32Usb.stop()
-                                c.esp32Usb.start()
-                            }
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                    ) {
-                        Text("NEXT", color = Sky.esp32, fontSize = 9.sp)
+                    Text("${cfg.esp32Baud}", color = Sky.text, fontSize = 9.sp)
+                }
+                Spacer(Modifier.height(4.dp))
+                // The rates as a list to pick from, not a stepper: a board flashed at 921600 is
+                // one tap away, and the rate in use is the one drawn solid.
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    dev.skyward.rf.scan.UsbBoards.BAUD_RATES.forEach { rate ->
+                        val chosen = rate == cfg.esp32Baud
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(
+                                    if (chosen) Sky.esp32.copy(alpha = 0.30f)
+                                    else Sky.outline.copy(alpha = 0.30f),
+                                )
+                                .clickable(enabled = !chosen) {
+                                    // Reopening the port is what applies it: the bridge rate is
+                                    // set once, when the console is opened.
+                                    c.settingsStore.update { it.copy(esp32Baud = rate) }
+                                    c.esp32Usb.setBaud(rate)
+                                    c.esp32Usb.stop()
+                                    c.esp32Usb.start()
+                                }
+                                .padding(horizontal = 5.dp, vertical = 2.dp),
+                        ) {
+                            Text(
+                                "$rate",
+                                color = if (chosen) Sky.esp32 else Sky.textDim,
+                                fontSize = 8.5.sp,
+                            )
+                        }
                     }
                 }
             }
@@ -645,13 +659,23 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 IntelRow("UAV", sky.drones.size, showDrones) { showDrones = !showDrones }
                 IntelRow("MESH", sky.mesh.size, showMesh) { showMesh = !showMesh }
                 IntelRow("CELL", sky.cells.size, showCells) { showCells = !showCells }
-                IntelRow("WIFI", rf.wifi.size, wifiOn) { c.rf.setWifiEnabled(!wifiOn) }
-                IntelRow("BLE", rf.ble.size, bleOn) { c.rf.setBleEnabled(!bleOn) }
+                // One table for both phones: what this device heard plus what the other one
+                // reports. With no peer linked the second term is zero and the standalone
+                // handset's own sweeps fill the rows, which is the point of them.
+                val ownWifi = rf.wifi.count { it.source != "peer" }
+                val ownBle = rf.ble.count { it.source != "peer" }
+                IntelRow("WIFI", ownWifi + peer.peerWifiTotal, wifiOn) { c.rf.setWifiEnabled(!wifiOn) }
+                IntelRow("BLE", ownBle + peer.peerBleTotal, bleOn) { c.rf.setBleEnabled(!bleOn) }
                 IntelRow("PATH", path.size, showPath) { showPath = !showPath }
                 // Individual networks, drawn at the fix where each was heard.
                 IntelRow("SIG", signalDots.size, showSignals) { showSignals = !showSignals }
                 // What the other phone is hearing, so the table shows both devices' sweeps.
                 IntelRow("PEER", peer.peerWifiTotal + peer.peerBleTotal, peer.connected) { }
+                // A board is a second radio, so its sweep is a row of its own beside the
+                // peer's rather than being invisible in the combined counts.
+                val espWifi = espNodes.sumOf { it.wifiCount }
+                val espBle = espNodes.sumOf { it.bleCount }
+                IntelRow("ESP", espWifi + espBle, espNodes.isNotEmpty()) { }
                 if (!wd.active) {
                     Spacer(Modifier.height(8.dp))
                     // The primary action lives in the box now, not in a floating button.
