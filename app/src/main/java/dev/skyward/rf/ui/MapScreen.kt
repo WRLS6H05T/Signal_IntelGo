@@ -638,6 +638,19 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                         fontSize = 9.sp,
                         maxLines = 1,
                     )
+                    // The other phone's cable intel, and whether a drive is running there:
+                    // both are things that can only be seen from over here.
+                    if (peer.peerBoardWifi > 0 || peer.peerBoardBle > 0) {
+                        Text(
+                            "board wifi " + peer.peerBoardWifi + " \u00b7 ble " + peer.peerBoardBle,
+                            color = Sky.esp32,
+                            fontSize = 9.sp,
+                            maxLines = 1,
+                        )
+                    }
+                    if (peer.peerRecording) {
+                        Text("peer recording", color = Sky.cyan, fontSize = 9.sp, maxLines = 1)
+                    }
                     Spacer(Modifier.height(4.dp))
                     // What this phone has assigned the other one to sweep.
                     ScanLine(

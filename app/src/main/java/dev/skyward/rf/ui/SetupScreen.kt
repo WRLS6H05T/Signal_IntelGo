@@ -9,6 +9,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -44,9 +46,11 @@ import dev.skyward.rf.core.Settings
 import dev.skyward.rf.core.Units
 import dev.skyward.rf.core.VoiceStyles
 import dev.skyward.rf.peer.PeerProtocol
+import dev.skyward.rf.scan.UsbBoards
 import dev.skyward.rf.sky.AircraftSource
 import dev.skyward.rf.ui.theme.Sky
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: () -> Unit) {
     val settings by c.settingsStore.state.collectAsState()
@@ -214,6 +218,38 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                         },
                     )
                 }
+                Spacer(Modifier.height(10.dp))
+                // The rate lives here as well as on the map's board card: it is a setting of
+                // the cable, and a board flashed at another rate answers a 115200 probe with
+                // noise, which reads exactly like a board that will not scan at all.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("SERIAL SPEED", style = SkywardThemeLabel(), color = Sky.textDim)
+                    Spacer(Modifier.weight(1f))
+                    Text("${settings.esp32Baud}", color = Sky.text, fontSize = 10.sp)
+                }
+                Spacer(Modifier.height(4.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    UsbBoards.BAUD_RATES.forEach { rate ->
+                        UnitChip("$rate", settings.esp32Baud == rate) {
+                            // Reopening the port is what applies it: the bridge rate is set
+                            // once, when the console is opened.
+                            c.settingsStore.update { it.copy(esp32Baud = rate) }
+                            c.esp32Usb.setBaud(rate)
+                            c.esp32Usb.stop()
+                            c.esp32Usb.start()
+                        }
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "115200 suits GhostESP and Marauder at their defaults. Pick the rate the " +
+                        "firmware was flashed at; the port reopens at the new speed straight away.",
+                    color = Sky.textDim,
+                    fontSize = 10.sp,
+                )
                 Spacer(Modifier.height(8.dp))
                 Esp32Config(c, settings)
             }
@@ -536,6 +572,19 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                         color = Sky.textDim,
                         fontSize = 10.sp,
                     )
+                    if (peer.peerBoardWifi > 0 || peer.peerBoardBle > 0) {
+                        Text(
+                            "its board: wifi ${peer.peerBoardWifi} · ble ${peer.peerBoardBle}",
+                            color = Sky.esp32,
+                            fontSize = 10.sp,
+                        )
+                    }
+                    Text(
+                        if (peer.peerRecording) "both phones are recording" else
+                            "neither phone is recording",
+                        color = Sky.textDim,
+                        fontSize = 10.sp,
+                    )
                     Spacer(Modifier.height(10.dp))
                     Text("Link role", style = SkywardThemeLabel(), color = Sky.textDim)
                     Spacer(Modifier.height(4.dp))
@@ -560,13 +609,15 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                         color = Sky.textDim,
                         fontSize = 10.sp,
                     )
-                    if (settings.peerRoleMode == PeerProtocol.MODE_GLOBE) {
+                    if (settings.peerRoleMode != PeerProtocol.MODE_HOST) {
                         Spacer(Modifier.height(8.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text("Follow host settings", color = Sky.text, fontSize = 13.sp)
                                 Text(
-                                    "Apply the host's map, layers and scan assignments as they arrive",
+                                    "Take the host's map, clock, units and scan assignments as " +
+                                        "it changes them; a value you change here stays until " +
+                                        "the host changes something again",
                                     color = Sky.textDim,
                                     fontSize = 10.sp,
                                 )
@@ -578,6 +629,14 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                         }
                     }
                     Spacer(Modifier.height(6.dp))
+                    Text(
+                        "A drive is shared: start one here and the other phone starts its own " +
+                            "for the same stretch of road. A board on the host's cable is cast to " +
+                            "the other phone, while the record of what it heard stays on the host.",
+                        color = Sky.textDim,
+                        fontSize = 10.sp,
+                    )
+                    Spacer(Modifier.height(4.dp))
                     Text(
                         "Bluetooth must be on for both phones, and the link is peer to peer - nothing leaves the two devices.",
                         color = Sky.textDim,

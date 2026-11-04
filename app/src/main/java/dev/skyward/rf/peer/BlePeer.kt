@@ -73,6 +73,9 @@ class BlePeer(private val context: Context) {
 
         /** How many drives are offered at once; more would not fit one message. */
         private const val MAX_OFFERS = 12
+
+        /** Board intel is the smaller half of a snapshot: the cable holds one board, not a city. */
+        private const val BOARD_ITEMS = 16
     }
 
     /** What this device offers the other one. */
@@ -87,6 +90,11 @@ class BlePeer(private val context: Context) {
         /** Whether this phone is using a GPS fix, and whether it is hearing cell towers. */
         val gpsUsed: Boolean = false,
         val cellUsed: Boolean = false,
+        /** What this phone's own ESP32 boards swept: the intel that travels with the sweep. */
+        val boardWifi: List<PeerProtocol.Ap> = emptyList(),
+        val boardBle: List<PeerProtocol.Device> = emptyList(),
+        val boardWifiTotal: Int = 0,
+        val boardBleTotal: Int = 0,
     )
 
     data class State(
@@ -111,6 +119,10 @@ class BlePeer(private val context: Context) {
         val received: Int = 0,
         val peerWifi: Int = 0,
         val peerBle: Int = 0,
+        /** The other phone's ESP32 intel, and whether it is recording a drive right now. */
+        val peerBoardWifi: Int = 0,
+        val peerBoardBle: Int = 0,
+        val peerRecording: Boolean = false,
     )
 
     private val id: String = UUID.randomUUID().toString().replace("-", "").take(6)
@@ -142,6 +154,18 @@ class BlePeer(private val context: Context) {
 
     @Volatile
     var onPeerLog: ((String, String) -> Unit)? = null
+
+    /** The other phone's board intel, so a cable on one phone is a radio on both. */
+    @Volatile
+    var onPeerBoard: ((List<PeerProtocol.Ap>, List<PeerProtocol.Device>) -> Unit)? = null
+
+    /** The other phone started or stopped a drive, and the name it gave it. */
+    @Volatile
+    var onPeerRecording: ((Boolean, String) -> Unit)? = null
+
+    /** Whether this phone is recording, and the name of the drive it is recording. */
+    @Volatile
+    var recordingProvider: (() -> Pair<Boolean, String>)? = null
 
     /** The role chosen by hand on this phone: auto, host or globe. */
     @Volatile
@@ -582,8 +606,18 @@ class BlePeer(private val context: Context) {
             peerBleTotal = if (decoded.bleTotal > 0) decoded.bleTotal else decoded.ble.size,
             peerGps = decoded.gpsUsed,
             peerCell = decoded.cellUsed,
+            peerBoardWifi = if (decoded.boardWifiTotal > 0) decoded.boardWifiTotal else decoded.boardWifi.size,
+            peerBoardBle = if (decoded.boardBleTotal > 0) decoded.boardBleTotal else decoded.boardBle.size,
+            peerRecording = decoded.recording,
         )
         if (decoded.logs.isNotEmpty()) onPeerLogs?.invoke(decoded.logs)
+        // A drive is a shared act: whichever phone starts one, the other records the same
+        // stretch of road. The state rides every snapshot, so the two settle rather than
+        // taking turns telling each other to start.
+        onPeerRecording?.invoke(decoded.recording, decoded.recordName)
+        if (decoded.boardWifi.isNotEmpty() || decoded.boardBle.isNotEmpty()) {
+            onPeerBoard?.invoke(decoded.boardWifi, decoded.boardBle)
+        }
         if (decoded.wantList) sendLogList()
         if (decoded.want.isNotBlank()) startSending(decoded.want)
         // Only a host's blob is applied; a follower cannot quietly rewrite the other phone.
@@ -630,6 +664,7 @@ class BlePeer(private val context: Context) {
         // leave the other phone holding a transfer that can never complete.
         if (synchronized(lock) { outParts.isNotEmpty() }) return
         val snapshot = snapshotProvider?.invoke() ?: return
+        val drive = recordingProvider?.invoke()
         val message = PeerProtocol.Message(
             kind = PeerProtocol.KIND_SKY,
             id = id,
@@ -645,6 +680,14 @@ class BlePeer(private val context: Context) {
             bleTotal = if (snapshot.bleTotal > 0) snapshot.bleTotal else snapshot.ble.size,
             gpsUsed = snapshot.gpsUsed,
             cellUsed = snapshot.cellUsed,
+            recording = drive?.first ?: false,
+            recordName = drive?.second.orEmpty(),
+            boardWifi = snapshot.boardWifi.take(BOARD_ITEMS)
+                .map { it.copy(name = it.name.take(NAME_CHARS)) },
+            boardBle = snapshot.boardBle.take(BOARD_ITEMS)
+                .map { it.copy(name = it.name.take(NAME_CHARS)) },
+            boardWifiTotal = if (snapshot.boardWifiTotal > 0) snapshot.boardWifiTotal else snapshot.boardWifi.size,
+            boardBleTotal = if (snapshot.boardBleTotal > 0) snapshot.boardBleTotal else snapshot.boardBle.size,
             mode = modeProvider?.invoke().orEmpty(),
             scan = scanProvider?.invoke().orEmpty(),
             hostSettings = if (modeProvider?.invoke() == PeerProtocol.MODE_HOST) {

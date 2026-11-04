@@ -144,6 +144,35 @@ class RfScanner(private val context: Context) {
     /** True while a board is contributing observations of its own. */
     fun hasBoardSweep(): Boolean = boardWifi.isNotEmpty() || boardBle.isNotEmpty()
 
+    /** The board's own intel, apart from the handset's sweeps: what the peer link carries. */
+    data class BoardIntel(
+        val wifi: List<RfObservation>,
+        val ble: List<RfObservation>,
+        val wifiTotal: Int,
+        val bleTotal: Int,
+    )
+
+    /**
+     * What a board on the cable has swept, for the other phone.
+     *
+     * Separate from [snapshot] on purpose: the handset's tables are the bulk of a sweep and are
+     * capped at the strongest few, which would drop a board's findings on a busy street. The
+     * totals count everything the board heard, not just what one message can hold.
+     */
+    fun boardIntel(limit: Int = 16, now: Long = System.currentTimeMillis()): BoardIntel {
+        fun clean(map: Map<String, RfObservation>) = map.values
+            .filter { it.source == "board" && now - it.seenAt <= STALE_MS }
+            .sortedByDescending { it.rssi }
+            .take(limit)
+        val t = totals()
+        return BoardIntel(
+            wifi = clean(boardWifi),
+            ble = clean(boardBle),
+            wifiTotal = (t.wifi - wifiTable.size).coerceAtLeast(0),
+            bleTotal = (t.ble - bleTable.size).coerceAtLeast(0),
+        )
+    }
+
     /** How full the tables are, beyond the per-snapshot limit the peer link can carry. */
     data class Totals(val wifi: Int, val ble: Int)
 

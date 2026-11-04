@@ -1,8 +1,10 @@
 package dev.skyward.rf.peer
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PeerProtocolTest {
@@ -68,6 +70,63 @@ class PeerProtocolTest {
         assertEquals("", PeerProtocol.roleFor(6.1f, 6.2f))
         assertEquals("", PeerProtocol.roleFor(0f, 6.2f))
         assertEquals("", PeerProtocol.roleFor(6.2f, 0f))
+    }
+
+    @Test
+    fun `a drive started on one phone is announced to the other`() {
+        val back = PeerProtocol.decode(
+            PeerProtocol.encode(sample.copy(recording = true, recordName = "Drive A")),
+        )
+        assertNotNull(back)
+        assertTrue(back!!.recording)
+        assertEquals("Drive A", back.recordName)
+    }
+
+    @Test
+    fun `board intel travels with the sweep`() {
+        val back = PeerProtocol.decode(
+            PeerProtocol.encode(
+                sample.copy(
+                    boardWifi = listOf(PeerProtocol.Ap("AA:BB:CC:DD:EE:03", "BoardNet", -44, 36)),
+                    boardBle = listOf(PeerProtocol.Device("AA:BB:CC:DD:EE:04", "Tag", -61)),
+                    boardWifiTotal = 4,
+                    boardBleTotal = 2,
+                ),
+            ),
+        )
+        assertNotNull(back)
+        assertEquals("BoardNet", back!!.boardWifi[0].name)
+        assertEquals(36, back.boardWifi[0].ch)
+        assertEquals(4, back.boardWifiTotal)
+        assertEquals("Tag", back.boardBle[0].name)
+        assertEquals(2, back.boardBleTotal)
+    }
+
+    @Test
+    fun `host settings carry their revision and the shared dashboard`() {
+        val hs = PeerProtocol.HostSettings(
+            rev = 3,
+            clockSeconds = false,
+            distanceUnit = "mi",
+            tempUnit = "f",
+            showLiveTime = false,
+        )
+        val back = PeerProtocol.decode(
+            PeerProtocol.encode(sample.copy(mode = PeerProtocol.MODE_HOST, hostSettings = hs)),
+        )
+        assertNotNull(back)
+        assertEquals(3, back!!.hostSettings!!.rev)
+        assertFalse(back.hostSettings!!.clockSeconds)
+        assertFalse(back.hostSettings!!.showLiveTime)
+        assertEquals("mi", back.hostSettings!!.distanceUnit)
+        assertEquals("f", back.hostSettings!!.tempUnit)
+    }
+
+    @Test
+    fun `a host blob is applied once per revision`() {
+        assertTrue(PeerProtocol.shouldApplyHost(rev = 4, applied = 3))
+        assertFalse("a repeated snapshot must not undo a local change", PeerProtocol.shouldApplyHost(4, 4))
+        assertFalse(PeerProtocol.shouldApplyHost(3, 4))
     }
 
     @Test

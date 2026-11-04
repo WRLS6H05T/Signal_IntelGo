@@ -66,9 +66,15 @@ object PeerProtocol {
      * Deliberately a bounded, display-and-scan set: the follower is not told to re-flash a
      * board or change a broker, because a bad value there would take the other phone off the
      * air with no way back except picking up the handset.
+     *
+     * [rev] goes up whenever the host changes one of these. A follower applies a blob once per
+     * revision, which is what lets both rules hold at the same time: a host toggle lands on the
+     * other phone, and a value changed on the other phone for itself stays put while the host
+     * merely repeats what it already said.
      */
     @Serializable
     data class HostSettings(
+        val rev: Int = 0,
         val tileSource: String = "streets",
         val dropWeakDots: Boolean = false,
         val aircraftEnabled: Boolean = true,
@@ -76,6 +82,11 @@ object PeerProtocol {
         val globeSpin: Int = 1,
         /** Band assigned to each radio, keyed ScanPlan.PEER_KEY or a board id. */
         val scanAssign: Map<String, String> = emptyMap(),
+        /** The clock and the units: the shared dashboard, not the radio. */
+        val showLiveTime: Boolean = true,
+        val clockSeconds: Boolean = true,
+        val distanceUnit: String = "km",
+        val tempUnit: String = "c",
     )
 
     @Serializable
@@ -110,6 +121,17 @@ object PeerProtocol {
         val mode: String = "",
         /** What this phone has been assigned to sweep, as a ScanPlan code. */
         val scan: String = "",
+        /** Whether this phone is recording a drive right now, and what it called that drive. */
+        val recording: Boolean = false,
+        val recordName: String = "",
+        /**
+         * Intel from this phone's own ESP32 boards, carried alongside its sweep so the other
+         * phone holds it too. The record of it stays with the board that heard it.
+         */
+        val boardWifi: List<Ap> = emptyList(),
+        val boardBle: List<Device> = emptyList(),
+        val boardWifiTotal: Int = 0,
+        val boardBleTotal: Int = 0,
         /** Present only from a host, and only on a host's snapshot. */
         val hostSettings: HostSettings? = null,
     )
@@ -168,4 +190,13 @@ object PeerProtocol {
     }
 
     fun isGlobeMode(mode: String): Boolean = mode == MODE_HOST || mode == MODE_GLOBE
+
+    /**
+     * Whether a follower should take a host blob.
+     *
+     * Once per revision is the whole rule. The host resends its settings with every snapshot,
+     * so applying repeats unconditionally would undo every change made here seconds later;
+     * applying nothing would ignore the next thing the host does.
+     */
+    fun shouldApplyHost(rev: Int, applied: Int): Boolean = rev > applied
 }

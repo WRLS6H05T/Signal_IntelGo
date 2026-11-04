@@ -170,6 +170,20 @@ class Container(context: Context) {
     @Volatile
     private var running = false
 
+    /**
+     * The host's settings revision, and the follower's memory of what it has taken.
+     *
+     * A revision goes up only when one of the shared settings actually changes, so the blob the
+     * host repeats with every snapshot can be told apart from a fresh decision.
+     */
+    private val hostRev = java.util.concurrent.atomic.AtomicInteger(1)
+    private var lastHostSig: String? = null
+    private var lastHostRev = 0
+
+    /** The drive state the other phone last reported, so a repeat is not a new instruction. */
+    @Volatile
+    private var lastPeerRecording = false
+
     /** The last real handset fix, so board GPS is only ever a stand-in for it. */
     @Volatile
     private var phoneFix: LatLon? = null
@@ -182,6 +196,7 @@ class Container(context: Context) {
         peer.snapshotProvider = {
             val snap = rf.snapshot(limit = 80)
             val totals = rf.totals()
+            val boards = rf.boardIntel()
             BlePeer.Snapshot(
                 fix = phoneFix ?: _observer.value,
                 sats = 0,
@@ -194,6 +209,11 @@ class Container(context: Context) {
                 gpsUsed = (phoneFix ?: _observer.value) != null,
                 // Cellular counts as in use once towers are actually being heard.
                 cellUsed = cell.count() > 0,
+                // The cable's intel, which the other phone has no way of hearing for itself.
+                boardWifi = boards.wifi.map { PeerProtocol.Ap(it.id, it.name, it.rssi, it.channel) },
+                boardBle = boards.ble.map { PeerProtocol.Device(it.id, it.name, it.rssi) },
+                boardWifiTotal = boards.wifiTotal,
+                boardBleTotal = boards.bleTotal,
             )
         }
         // Recorded drives travel on request, not with every sweep: a long drive would hold the
@@ -216,6 +236,35 @@ class Container(context: Context) {
         peer.onPeerLogs = { list -> peerLogs.value = list }
         peer.onPeerLog = { json, from -> wardrive.importSession(json, from) }
 
+        // A drive is a shared act: whichever phone starts one, both record the same road. The
+        // comparison is against what the other phone last said, not against this phone, so a
+        // stop here is not undone by the other phone repeating an older snapshot.
+        peer.recordingProvider = {
+            val st = wardrive.state.value
+            st.active to st.name
+        }
+        peer.onPeerRecording = { active, name ->
+            if (active != lastPeerRecording) {
+                lastPeerRecording = active
+                val drive = wardrive.state.value
+                when {
+                    active && !drive.active -> wardrive.start(name.ifBlank { null })
+                    !active && drive.active -> wardrive.stop()
+                }
+            }
+        }
+
+        // The other phone's board intel lands on this phone as the other phone's: it reaches
+        // the counts, the map and the watch list, but it is not offered back as this phone's
+        // own sweep, and the record of it stays with the host that heard it.
+        peer.onPeerBoard = { wifi, ble ->
+            rf.ingestRemote(
+                wifi = wifi.map { RfScanner.RemoteObs(it.id, it.name, it.rssi, it.ch) },
+                ble = ble.map { RfScanner.RemoteObs(it.id, it.name, it.rssi) },
+                via = "peer",
+            )
+        }
+
         // The hand-picked role, this phone's assigned sweep, and - on a host - the settings
         // every linked device should be using.
         peer.modeProvider = { settingsStore.current.peerRoleMode }
@@ -226,21 +275,30 @@ class Container(context: Context) {
                 null
             } else {
                 PeerProtocol.HostSettings(
+                    rev = hostRev.get(),
                     tileSource = cfg.tileSource,
                     dropWeakDots = cfg.dropWeakDots,
                     aircraftEnabled = cfg.aircraftEnabled,
                     satGroups = cfg.satGroups,
                     globeSpin = cfg.globeSpin.coerceIn(0, 2),
                     scanAssign = cfg.scanAssign,
+                    showLiveTime = cfg.showLiveTime,
+                    clockSeconds = cfg.clockSeconds,
+                    distanceUnit = cfg.distanceUnit,
+                    tempUnit = cfg.tempUnit,
                 )
             }
         }
-        // A globe view follows its host, and only a globe view does: a host is never rewritten
-        // by the phone it is controlling, which is what keeps the two from pushing at each
-        // other for the rest of the drive.
+        // Every phone that is not the host follows it, because the settings that matter while
+        // driving - the map, the clock, the units, what each radio sweeps - are one decision,
+        // not two. A host is never rewritten by the phones it drives, and taking a blob only
+        // once per revision is what lets a change made here stick: the host repeats itself every
+        // five seconds, and only a fresh revision from the host wins the value back.
         peer.onHostSettings = { hs ->
             val cfg = settingsStore.current
-            if (cfg.peerRoleMode == PeerProtocol.MODE_GLOBE && cfg.followHost) {
+            val follows = cfg.peerRoleMode != PeerProtocol.MODE_HOST && cfg.followHost
+            if (follows && PeerProtocol.shouldApplyHost(hs.rev, lastHostRev)) {
+                lastHostRev = hs.rev
                 val next = cfg.copy(
                     tileSource = hs.tileSource,
                     dropWeakDots = hs.dropWeakDots,
@@ -248,6 +306,10 @@ class Container(context: Context) {
                     satGroups = if (hs.satGroups.isEmpty()) cfg.satGroups else hs.satGroups,
                     globeSpin = hs.globeSpin.coerceIn(0, 2),
                     scanAssign = cfg.scanAssign + hs.scanAssign,
+                    showLiveTime = hs.showLiveTime,
+                    clockSeconds = hs.clockSeconds,
+                    distanceUnit = hs.distanceUnit,
+                    tempUnit = hs.tempUnit,
                 )
                 // The host repeats its blob with every snapshot; writing the file on each one
                 // would be a disk write every five seconds for a picture that has not moved.
@@ -290,6 +352,33 @@ class Container(context: Context) {
                 voice.audible = cfg.voiceAudio
                 voice.style = VoiceStyles.of(cfg.voiceGender)
                 if (cfg.voiceEnabled) voice.start() else voice.stop()
+            }
+        }
+
+        // The host's revision, bumped only when a shared setting actually moves. A follower
+        // reads it to tell "the host just decided this" from "the host is repeating itself".
+        scope.launch {
+            settingsStore.state.collect { cfg ->
+                if (cfg.peerRoleMode != PeerProtocol.MODE_HOST) {
+                    lastHostSig = null
+                    return@collect
+                }
+                val sig = listOf(
+                    cfg.tileSource,
+                    cfg.dropWeakDots,
+                    cfg.aircraftEnabled,
+                    cfg.satGroups.joinToString(","),
+                    cfg.globeSpin,
+                    cfg.scanAssign.toSortedMap().toString(),
+                    cfg.showLiveTime,
+                    cfg.clockSeconds,
+                    cfg.distanceUnit,
+                    cfg.tempUnit,
+                ).joinToString("|")
+                if (sig != lastHostSig) {
+                    lastHostSig = sig
+                    hostRev.incrementAndGet()
+                }
             }
         }
 

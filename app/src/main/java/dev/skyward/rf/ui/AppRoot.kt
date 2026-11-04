@@ -15,10 +15,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.List
@@ -140,38 +140,7 @@ fun AppRoot(c: Container) {
     )
     val current = tabs[tab.coerceIn(0, tabs.lastIndex)]
 
-    Scaffold(
-        containerColor = Sky.bg,
-        bottomBar = {
-            if (barOpen) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .background(Sky.surface)
-                        .padding(vertical = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    tabs.forEach { (label, icon, index) ->
-                        BottomTab(label, icon, tab == index) {
-                            if (index == 2) c.wardrive.refreshSessions()
-                            tab = index
-                            barOpen = false
-                        }
-                    }
-                    Box(
-                        Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { barOpen = false },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text("\u25BC", color = Sky.textDim, fontSize = 12.sp)
-                    }
-                }
-            }
-        },
-    ) { inner ->
+    Scaffold(containerColor = Sky.bg) { inner ->
         Box(
             Modifier
                 .fillMaxSize()
@@ -186,6 +155,41 @@ fun AppRoot(c: Container) {
 
             // The Watcher's status box is not here: it lives under the clock in the map's
             // top-right corner, where the time already is.
+            //
+            // The bar is a pop-out, not a strip carved out of the screen: it floats over what
+            // is underneath, built like the map's own cards, and folds back to the one square
+            // button. Each choice carries its word beside its icon, and the whole row is the
+            // target, so tapping the icon or the word selects it.
+            if (barOpen) {
+                Row(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 10.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Sky.surface.copy(alpha = 0.97f))
+                        .border(1.dp, Sky.outline, RoundedCornerShape(16.dp))
+                        .padding(horizontal = 6.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    tabs.forEach { (label, icon, index) ->
+                        BottomTab(label, icon, tab == index) {
+                            if (index == 2) c.wardrive.refreshSessions()
+                            tab = index
+                            barOpen = false
+                        }
+                    }
+                    Box(
+                        Modifier
+                            .size(34.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { barOpen = false },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("\u25BC", color = Sky.textDim, fontSize = 12.sp)
+                    }
+                }
+            }
             if (!barOpen) {
                 Column(
                     Modifier
@@ -216,16 +220,17 @@ fun AppRoot(c: Container) {
 @Composable
 private fun BottomTab(label: String, icon: ImageVector, selected: Boolean, onClick: () -> Unit) {
     val color = if (selected) Sky.cyan else Sky.textDim
-    Column(
+    // Icon and word are one target: the row is what is clickable, so either one selects it.
+    Row(
         Modifier
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(11.dp))
             .background(if (selected) Sky.cyan.copy(alpha = 0.10f) else Sky.surface)
             .clickable(onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 5.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .padding(horizontal = 9.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = label, tint = color)
-        Spacer(Modifier.height(2.dp))
-        Text(label, fontSize = 10.sp, color = color)
+        Icon(icon, contentDescription = label, tint = color, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(5.dp))
+        Text(label, fontSize = 11.sp, color = color)
     }
 }
