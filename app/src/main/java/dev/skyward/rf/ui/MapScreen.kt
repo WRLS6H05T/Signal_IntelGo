@@ -78,8 +78,12 @@ import dev.skyward.rf.sky.SatTracker
 import dev.skyward.rf.core.Layer
 import dev.skyward.rf.core.MeshNode
 import dev.skyward.rf.core.SatView
+import dev.skyward.rf.core.RfKind
 import dev.skyward.rf.core.ScanPlan
 import dev.skyward.rf.core.SignalScale
+import dev.skyward.rf.core.WatchKind
+import dev.skyward.rf.core.WatchView
+import dev.skyward.rf.net.compassPoint
 import dev.skyward.rf.sky.AirspaceEngine
 import dev.skyward.rf.ui.theme.Sky
 import dev.skyward.rf.wardrive.WardrivePoint
@@ -88,8 +92,12 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.pow
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.sqrt
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /** One plottable entity. */
 data class MapMarker(
@@ -109,6 +117,8 @@ data class MapMarker(
     val station: Boolean = false,
     /** One of the BIRDS-3 CubeSats: gold when caught, same glyph as every other satellite. */
     val birds3: Boolean = false,
+    /** Which surveillance family matched, when this marker is a watch hit. */
+    val watch: WatchKind? = null,
 )
 
 /**
@@ -240,6 +250,12 @@ private fun markerColor(m: MapMarker): Color = when {
     m.layer == Layer.AIRCRAFT -> Sky.aircraft
     m.layer == Layer.DRONE -> Sky.drone
     m.layer == Layer.ESP32 -> Sky.esp32
+    m.layer == Layer.WATCH -> when (m.watch) {
+        WatchKind.FLOCK -> Sky.watchFlock
+        WatchKind.AXON -> Sky.watchAxon
+        WatchKind.TASER -> Sky.watchTaser
+        null -> Sky.watchFlock
+    }
     else -> Sky.mesh
 }
 
@@ -251,6 +267,7 @@ fun buildMarkers(
     showMesh: Boolean,
     showCells: Boolean,
     showEsp32: Boolean,
+    showWatch: Boolean,
     minScore: Int,
     /** A worldwide feed is tens of thousands of points; the map plots the nearest slice. */
     maxAircraft: Int = 900,
@@ -425,6 +442,33 @@ fun buildMarkers(
             ),
         )
     }
+    // ---- surveillance watch: Flock ALPR, Axon cameras, TASERs ----
+    // The radios carry no bearing, so these sit at the listener's fix; the marker says how the
+    // match was made rather than implying a position it cannot know.
+    if (showWatch) sky.watch.forEach { w: WatchView ->
+        if (w.score < minScore) return@forEach
+        out.add(
+            MapMarker(
+                key = "WATCH:${w.kind.name}:${w.id}",
+                layer = Layer.WATCH,
+                watch = w.kind,
+                lat = w.lat,
+                lon = w.lon,
+                title = w.name.ifBlank { w.id },
+                subtitle = w.kind.detail,
+                score = w.score,
+                logged = w.logged,
+                lines = listOf(
+                    "Signature" to w.kind.label,
+                    "Confidence" to w.confidence,
+                    "Radio" to if (w.radio == RfKind.WIFI) "Wi-Fi" else "BLE",
+                    "RSSI" to "${w.rssi} dBm",
+                    "Heard by" to w.source,
+                    "Address" to w.id,
+                ),
+            ),
+        )
+    }
     return out
 }
 
@@ -452,6 +496,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
     var showDrones by remember { mutableStateOf(true) }
     var showMesh by remember { mutableStateOf(true) }
     var showCells by remember { mutableStateOf(true) }
+    var showWatch by remember { mutableStateOf(true) }
     // Boards are status, not a layer: they no longer have a switch in the INTEL box.
     val showEsp32 = true
     var showPath by remember { mutableStateOf(true) }
@@ -477,8 +522,8 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
     }
 
     val markers = remember(
-        sky, showSats, showAir, showDrones, showMesh, showCells, showEsp32, settings.aircraftEnabled,
-        settings.dropWeakDots,
+        sky, showSats, showAir, showDrones, showMesh, showCells, showEsp32, showWatch,
+        settings.aircraftEnabled, settings.dropWeakDots,
     ) {
         buildMarkers(
             sky = sky,
@@ -488,6 +533,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
             showMesh = showMesh,
             showCells = showCells,
             showEsp32 = showEsp32,
+            showWatch = showWatch,
             minScore = if (settings.dropWeakDots) 20 else 0,
         )
     }
@@ -747,7 +793,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 Text("INTEL", style = SkywardThemeLabel(), color = Sky.textDim)
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    "${sky.loggedSats + sky.loggedAircraft + sky.loggedDrones + sky.loggedMesh + sky.loggedCells + sky.loggedEsp32}",
+                    "${sky.loggedSats + sky.loggedAircraft + sky.loggedDrones + sky.loggedMesh + sky.loggedCells + sky.loggedEsp32 + sky.loggedWatch}",
                     color = Sky.logged,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
@@ -770,6 +816,9 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 IntelRow("UAV", sky.drones.size, showDrones) { showDrones = !showDrones }
                 IntelRow("MESH", sky.mesh.size, showMesh) { showMesh = !showMesh }
                 IntelRow("CELL", sky.cells.size, showCells) { showCells = !showCells }
+                // Cameras and TASERs were heard, not triangulated: the row is still a count of
+                // matched advertisers, not of confirmed installations.
+                IntelRow("WATCH", sky.watch.size, showWatch) { showWatch = !showWatch }
                 // One table for both phones: what this device heard plus what the other one
                 // reports. With no peer linked the second term is zero and the standalone
                 // handset's own sweeps fill the rows, which is the point of them.
@@ -851,6 +900,11 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                     color = Sky.textDim,
                 )
             }
+        }
+
+        // ---- live clock: top right, and its drop-down is the weather at the pin ----
+        if (settings.showLiveTime) {
+            LiveClock(c, observer, Modifier.align(Alignment.TopEnd).padding(10.dp))
         }
 
         // ---- actions ----
@@ -1437,6 +1491,13 @@ private fun TacticalMap(
                             drawDroneIcon(p, r * 0.8f, color)
                         }
                     }
+                    // A camera and a TASER are different things to see on a street; the
+                    // glyph, not just the colour, says which one this is.
+                    Layer.WATCH -> if (m.watch == WatchKind.TASER) {
+                        drawTaserIcon(p, r, color)
+                    } else {
+                        drawCameraIcon(p, r, color)
+                    }
                 }
                 if (m.key == selectedKey) {
                     drawCircle(
@@ -1522,5 +1583,121 @@ private fun CrashPill() {
         },
         containerColor = Sky.surface,
     )
+}
+
+/**
+ * The clock in the top-right corner, and the weather behind it.
+ *
+ * The time is the phone's own and ticks once a second. Tapping it opens the weather at the GPS
+ * pin: temperature, what it feels like, cloud, wind and gusts, rain, pressure and the terrain
+ * height, from Open-Meteo. [dev.skyward.rf.net.WeatherFeed] throttles the reads to one per ten
+ * minutes and one per two kilometres, so opening the drop-down costs nothing when it is current.
+ */
+@Composable
+private fun LiveClock(c: Container, observer: LatLon?, modifier: Modifier = Modifier) {
+    val weather by c.weather.state.collectAsState()
+    val scope = rememberCoroutineScope()
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    var open by remember { mutableStateOf(false) }
+    val timeFmt = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+    val dayFmt = remember { SimpleDateFormat("EEE d MMM", Locale.getDefault()) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = System.currentTimeMillis()
+            delay(1_000L)
+        }
+    }
+
+    Box(modifier) {
+        Column(
+            Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .background(Sky.surface.copy(alpha = 0.95f))
+                .border(1.dp, Sky.outline, RoundedCornerShape(12.dp))
+                .clickable {
+                    open = true
+                    // A tap is the one moment a fresh read is worth asking for; the feed
+                    // decides whether it has anything to fetch.
+                    observer?.let { pin -> scope.launch { runCatching { c.weather.refresh(pin.lat, pin.lon) } } }
+                }
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            horizontalAlignment = Alignment.End,
+        ) {
+            Text(
+                timeFmt.format(Date(now)),
+                color = Sky.cyan,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                dayFmt.format(Date(now)) + " \u25BE",
+                color = Sky.textDim,
+                fontSize = 8.sp,
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            val w = weather
+            val pin = observer
+            Column(
+                Modifier
+                    .width(232.dp)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    if (pin == null) "GPS PIN" else String.format("GPS PIN %.5f, %.5f", pin.lat, pin.lon),
+                    style = SkywardThemeLabel(),
+                    color = Sky.textDim,
+                )
+                Spacer(Modifier.height(6.dp))
+                when {
+                    pin == null -> Text(
+                        "No fix yet, so there is no pin to forecast.",
+                        color = Sky.textDim,
+                        fontSize = 10.sp,
+                    )
+                    w == null -> Text(
+                        "Reading the sky\u2026",
+                        color = Sky.textDim,
+                        fontSize = 10.sp,
+                    )
+                    else -> {
+                        Text(w.condition, color = Sky.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(4.dp))
+                        WeatherLine("Temperature", w.tempC?.let { String.format("%.1f \u00b0C", it) } ?: "\u2014")
+                        WeatherLine("Feels like", w.feelsC?.let { String.format("%.1f \u00b0C", it) } ?: "\u2014")
+                        WeatherLine("Humidity", w.humidity?.let { "$it%" } ?: "\u2014")
+                        WeatherLine("Cloud", w.cloud?.let { "$it%" } ?: "\u2014")
+                        WeatherLine(
+                            "Wind",
+                            w.windKmh?.let { v ->
+                                String.format("%.0f km/h %s", v, compassPoint(w.windDir))
+                            } ?: "\u2014",
+                        )
+                        WeatherLine("Gusts", w.gustsKmh?.let { String.format("%.0f km/h", it) } ?: "\u2014")
+                        WeatherLine("Rain now", w.precipMm?.let { String.format("%.1f mm", it) } ?: "\u2014")
+                        WeatherLine("Pressure", w.pressureHpa?.let { String.format("%.0f hPa", it) } ?: "\u2014")
+                        WeatherLine("Terrain", w.elevationM?.let { String.format("%.0f m", it) } ?: "\u2014")
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            w.error?.let { "offline: $it" }
+                                ?: ("updated " + timeFmt.format(Date(w.at)) + " \u00b7 Open-Meteo"),
+                            color = if (w.error != null) Sky.warn else Sky.textDim,
+                            fontSize = 9.sp,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WeatherLine(key: String, value: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
+        Text(key, color = Sky.textDim, fontSize = 10.sp, modifier = Modifier.width(82.dp))
+        Text(value, color = Sky.text, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+    }
 }
 

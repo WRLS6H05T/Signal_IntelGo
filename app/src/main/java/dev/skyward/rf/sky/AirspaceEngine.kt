@@ -10,7 +10,9 @@ import dev.skyward.rf.core.LatLon
 import dev.skyward.rf.core.Layer
 import dev.skyward.rf.core.MeshNode
 import dev.skyward.rf.core.SatView
+import dev.skyward.rf.core.DeviceWatch
 import dev.skyward.rf.core.SettingsStore
+import dev.skyward.rf.core.WatchView
 import dev.skyward.rf.location.LocationTracker
 import dev.skyward.rf.scan.CellScanner
 import dev.skyward.rf.scan.RfScanner
@@ -58,6 +60,7 @@ class AirspaceEngine(
         val mesh: List<MeshNode> = emptyList(),
         val cells: List<CellView> = emptyList(),
         val esp32: List<Esp32Node> = emptyList(),
+        val watch: List<WatchView> = emptyList(),
         val satStatus: FeedStatus = FeedStatus(),
         val acStatus: FeedStatus = FeedStatus(),
         val tleCount: Int = 0,
@@ -71,6 +74,7 @@ class AirspaceEngine(
         val loggedMesh: Int get() = mesh.count { it.logged }
         val loggedCells: Int get() = cells.count { it.logged }
         val loggedEsp32: Int get() = esp32.count { it.logged }
+        val loggedWatch: Int get() = watch.count { it.logged }
     }
 
     private val _state = MutableStateFlow(SkyState())
@@ -290,16 +294,59 @@ class AirspaceEngine(
             b.copy(logged = logged.contains(Layer.ESP32, b.id))
         }
 
+        // Surveillance hardware: Flock ALPR cameras, Axon body cameras and TASERs, matched from
+        // the names and manufacturer ids the radios already carry. A radio carries no bearing,
+        // so a hit is pinned at this phone's fix - where it was heard from - with a small stable
+        // offset so several do not stack into one dot.
+        val placed = if (obs == null) {
+            emptyList()
+        } else {
+            rf.watchHits(now).map { h ->
+                val (wLat, wLon) = DeviceWatch.place(h.id, obs.lat, obs.lon)
+                WatchView(
+                    kind = h.kind,
+                    id = h.id,
+                    name = h.name.ifBlank { h.id },
+                    radio = h.radio,
+                    rssi = h.rssi,
+                    source = h.source,
+                    lat = wLat,
+                    lon = wLon,
+                    score = Geo.rssiToScore(h.rssi),
+                    lastSeen = h.at,
+                    confidence = h.confidence,
+                )
+            }
+        }
+        // A camera does not move, so it is written the first time it is heard rather than only
+        // while a drive is recording. The registry write is skipped for anything already known,
+        // or this would republish the whole table every two seconds.
+        if (obs != null) {
+            val fresh = placed.filterNot { logged.contains(Layer.WATCH, watchKey(it)) }
+            if (fresh.isNotEmpty()) {
+                logged.logBatch(
+                    now,
+                    fresh.map {
+                        LoggedRegistry.Sighting(Layer.WATCH, watchKey(it), it.name, it.lat, it.lon)
+                    },
+                )
+            }
+        }
+        val watch = placed.map { it.copy(logged = logged.contains(Layer.WATCH, watchKey(it))) }
+
         _rf.value = snap
         _state.value = _state.value.copy(
             drones = drones,
             mesh = meshNodes,
             cells = cells,
             esp32 = boards,
+            watch = watch,
             observer = obs,
             lastTick = now,
         )
     }
+
+    private fun watchKey(w: WatchView): String = "${w.kind.name}:${w.id}"
 
     /** Marks everything currently in range as logged for this drive. */
     private fun capture(now: Long) {

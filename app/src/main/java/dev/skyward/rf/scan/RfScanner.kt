@@ -14,8 +14,10 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.core.content.ContextCompat
+import dev.skyward.rf.core.DeviceWatch
 import dev.skyward.rf.core.Geo
 import dev.skyward.rf.core.RfKind
+import dev.skyward.rf.core.WatchHit
 import dev.skyward.rf.core.RfObservation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -62,6 +64,9 @@ class RfScanner(private val context: Context) {
     private val bleTable = ConcurrentHashMap<String, RfObservation>()
     private val droneFrames = ConcurrentHashMap<String, OdidParser.DroneFrame>()
     private val esp32Table = ConcurrentHashMap<String, Esp32Advert>()
+
+    /** Bluetooth company id per advertiser, read from the AD payload; Flock's hardware uses one. */
+    private val companyIds = ConcurrentHashMap<String, Int>()
 
     // Sweeps from a wired ESP32 board. Kept apart from the handset's tables because the Wi-Fi
     // poller prunes every BSSID it did not hear itself, which would wipe a board's findings a
@@ -336,6 +341,7 @@ class RfScanner(private val context: Context) {
         val address = runCatching { device.address }.getOrNull() ?: return
         val now = System.currentTimeMillis()
         val record = result.scanRecord
+        companyId(record?.bytes)?.let { companyIds[address] = it }
         val name = record?.deviceName?.takeIf { it.isNotBlank() }
             ?: runCatching { device.name }.getOrNull()
             ?: ""
@@ -486,8 +492,62 @@ class RfScanner(private val context: Context) {
         bleTable.clear()
         droneFrames.clear()
         esp32Table.clear()
+        companyIds.clear()
         boardWifi.clear()
         boardBle.clear()
+    }
+
+    /**
+     * Surveillance-hardware matches among everything currently in the tables.
+     *
+     * Everything the radios already hold is examined - the handset's own sweeps, a wired
+     * board's, and the other phone's - because a camera does not care which radio heard it.
+     * The match itself is name and manufacturer-id based; see [DeviceWatch] for what that can
+     * and cannot recognise.
+     */
+    fun watchHits(now: Long = System.currentTimeMillis()): List<WatchHit> {
+        val out = ArrayList<WatchHit>(8)
+        fun look(table: Map<String, RfObservation>) {
+            for (o in table.values) {
+                if (now - o.seenAt > STALE_MS) continue
+                val verdict = DeviceWatch.assess(o.kind, o.name, o.id, companyIds[o.id] ?: 0) ?: continue
+                out.add(
+                    WatchHit(
+                        kind = verdict.kind,
+                        id = o.id,
+                        name = o.name,
+                        rssi = o.rssi,
+                        radio = o.kind,
+                        source = o.source,
+                        at = o.seenAt,
+                        confidence = verdict.confidence,
+                    ),
+                )
+            }
+        }
+        look(wifiTable)
+        look(bleTable)
+        look(boardWifi)
+        look(boardBle)
+        return out.distinctBy { "${it.kind.name}:${it.id}" }.sortedByDescending { it.rssi }
+    }
+
+    /**
+     * AD structures are length, type, data. Type 0xFF carries a 16-bit company id,
+     * little-endian, and that is the one field a BLE advertiser cannot easily hide.
+     */
+    private fun companyId(bytes: ByteArray?): Int? {
+        val b = bytes ?: return null
+        var i = 0
+        while (i < b.size) {
+            val len = b[i].toInt() and 0xFF
+            if (len == 0) break
+            if (i + 3 < b.size && (b[i + 1].toInt() and 0xFF) == 0xFF && len >= 3) {
+                return (b[i + 2].toInt() and 0xFF) or ((b[i + 3].toInt() and 0xFF) shl 8)
+            }
+            i += len + 1
+        }
+        return null
     }
 
     /** Exposed for the UI: score of a single observation. */

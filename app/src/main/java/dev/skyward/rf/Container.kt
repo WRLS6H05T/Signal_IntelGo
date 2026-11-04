@@ -7,6 +7,7 @@ import dev.skyward.rf.core.RfKind
 import dev.skyward.rf.core.RfObservation
 import dev.skyward.rf.core.SettingsStore
 import dev.skyward.rf.location.LocationTracker
+import dev.skyward.rf.net.WeatherFeed
 import dev.skyward.rf.net.WigleApi
 import dev.skyward.rf.peer.BlePeer
 import dev.skyward.rf.peer.PeerProtocol
@@ -105,6 +106,9 @@ class Container(context: Context) {
 
     /** Uploads, lists and searches the user's own WiGLE account. */
     val wigle = WigleApi(http)
+
+    /** Current conditions at the fix, keyless via Open-Meteo; only asked while the clock is on. */
+    val weather = WeatherFeed(http)
 
     /** KML pulled back from WiGLE, kept beside the rest of the data so a PC can copy it too. */
     val wigleDir = File(rootData, "wigle").apply { mkdirs() }
@@ -294,6 +298,11 @@ class Container(context: Context) {
                     via = "local",
                     now = fix.at,
                 )
+                // The clock's drop-down reads this. The feed throttles itself to one read per
+                // ten minutes and one per two kilometres, so a fix per second is harmless.
+                if (settingsStore.current.showLiveTime) {
+                    launch { runCatching { weather.refresh(fix.lat, fix.lon) } }
+                }
                 if (wardrive.state.value.active) {
                     wardrive.onFix(
                         lat = fix.lat,

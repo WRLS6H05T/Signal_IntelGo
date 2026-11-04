@@ -279,6 +279,70 @@ fun DrawScope.drawGpsLogo(at: Offset, r: Float, tint: Color) {
 }
 
 /**
+ * Surveillance camera: a lens on a bracket, side-on. It has to be unmistakable next to the
+ * ESP32 chip and the mesh dish, which are the two other box-shaped things on the map.
+ */
+fun DrawScope.drawCameraIcon(at: Offset, r: Float, tint: Color) {
+    drawRoundRect(
+        color = tint,
+        topLeft = Offset(at.x - r * 0.95f, at.y - r * 0.45f),
+        size = Size(r * 1.3f, r * 0.9f),
+        cornerRadius = CornerRadius(r * 0.18f),
+    )
+    // lens hood, then the glass
+    drawRect(
+        color = tint.dim(0.78f),
+        topLeft = Offset(at.x + r * 0.3f, at.y - r * 0.3f),
+        size = Size(r * 0.5f, r * 0.6f),
+    )
+    drawCircle(color = tint.dim(0.32f), radius = r * 0.19f, center = Offset(at.x + r * 0.8f, at.y))
+    // bracket above, mast below
+    drawLine(
+        color = tint.dim(0.85f),
+        start = Offset(at.x - r * 0.85f, at.y - r * 0.45f),
+        end = Offset(at.x - r * 0.85f, at.y - r * 1.05f),
+        strokeWidth = r * 0.16f,
+    )
+    drawLine(
+        color = tint.dim(0.55f),
+        start = Offset(at.x - r * 0.85f, at.y + r * 0.45f),
+        end = Offset(at.x - r * 0.85f, at.y + r * 0.95f),
+        strokeWidth = r * 0.16f,
+    )
+    drawCircle(color = tint.dim(0.45f), radius = r * 0.15f, center = Offset(at.x - r * 0.85f, at.y + r * 1.0f))
+}
+
+/** TASER: a body with a grip and two prongs, so it never reads as another body camera. */
+fun DrawScope.drawTaserIcon(at: Offset, r: Float, tint: Color) {
+    drawRoundRect(
+        color = tint,
+        topLeft = Offset(at.x - r * 0.95f, at.y - r * 0.4f),
+        size = Size(r * 1.5f, r * 0.8f),
+        cornerRadius = CornerRadius(r * 0.16f),
+    )
+    drawRoundRect(
+        color = tint.dim(0.7f),
+        topLeft = Offset(at.x - r * 0.5f, at.y + r * 0.32f),
+        size = Size(r * 0.42f, r * 0.75f),
+        cornerRadius = CornerRadius(r * 0.12f),
+    )
+    drawLine(
+        color = tint,
+        start = Offset(at.x + r * 0.55f, at.y - r * 0.16f),
+        end = Offset(at.x + r * 1.2f, at.y - r * 0.55f),
+        strokeWidth = r * 0.14f,
+    )
+    drawLine(
+        color = tint,
+        start = Offset(at.x + r * 0.55f, at.y + r * 0.16f),
+        end = Offset(at.x + r * 1.2f, at.y + r * 0.55f),
+        strokeWidth = r * 0.14f,
+    )
+    drawCircle(color = tint.dim(0.6f), radius = r * 0.12f, center = Offset(at.x + r * 1.26f, at.y - r * 0.58f))
+    drawCircle(color = tint.dim(0.6f), radius = r * 0.12f, center = Offset(at.x + r * 1.26f, at.y + r * 0.58f))
+}
+
+/**
  * Drone: a quadcopter seen from above - four arms, four rotors, a body and a camera.
  *
  * Remote ID usually carries a heading, so a drone with a track is drawn as a small arrow; this

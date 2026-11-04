@@ -27,6 +27,11 @@ object Sky {
     val logged = Color(0xFFC084FC)
     val warn = Color(0xFFFB923C)
     val danger = Color(0xFFF87171)
+
+    /** Surveillance watch: one colour per family, so a hit names itself before it is tapped. */
+    val watchFlock = Color(0xFFFB7185)
+    val watchAxon = Color(0xFF60A5FA)
+    val watchTaser = Color(0xFFFBBF24)
 }
 
 private val scheme = darkColorScheme(

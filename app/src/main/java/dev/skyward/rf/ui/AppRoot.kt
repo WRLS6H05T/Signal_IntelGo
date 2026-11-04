@@ -7,6 +7,7 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -106,10 +107,11 @@ fun AppRoot(c: Container) {
         if (missing) runCatching { launcher.launch(requiredPermissions().toTypedArray()) }
     }
 
-    // The tab strip folds away: closed it is one line naming the tab you are on, and a tap
-    // opens the four choices. Choosing one puts it back, so the bar does not sit over the map.
-    // The strip shrinking is also what lets the INTEL box on the map drop into the space it
-    // gives back, because the Scaffold pads the screen by whatever the bar occupies.
+    // The tab strip folds away into one square button in the bottom-left corner - the same
+    // size, corner and border as the map's own buttons, so it reads as part of that stack
+    // rather than a bar. It still occupies the strip the Scaffold reserves, which is what lets
+    // the INTEL box sit above it rather than under it. A tap opens the four choices; choosing
+    // one puts it back, so the bar does not sit over the map.
     var barOpen by remember { mutableStateOf(false) }
     val tabs = listOf(
         Triple("Map", Icons.Filled.Place, 0),
@@ -122,46 +124,58 @@ fun AppRoot(c: Container) {
     Scaffold(
         containerColor = Sky.bg,
         bottomBar = {
-            Column(
-                Modifier.fillMaxWidth().background(Sky.surface),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                if (barOpen) {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        tabs.forEach { (label, icon, index) ->
-                            BottomTab(label, icon, tab == index) {
-                                if (index == 2) c.wardrive.refreshSessions()
-                                tab = index
-                                barOpen = false
-                            }
-                        }
-                    }
-                }
+            if (barOpen) {
                 Row(
                     Modifier
-                        .padding(horizontal = 18.dp, vertical = 4.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { barOpen = !barOpen },
+                        .fillMaxWidth()
+                        .background(Sky.surface)
+                        .padding(vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (!barOpen) {
+                    tabs.forEach { (label, icon, index) ->
+                        BottomTab(label, icon, tab == index) {
+                            if (index == 2) c.wardrive.refreshSessions()
+                            tab = index
+                            barOpen = false
+                        }
+                    }
+                    Box(
+                        Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { barOpen = false },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("\u25BC", color = Sky.textDim, fontSize = 12.sp)
+                    }
+                }
+            } else {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    Column(
+                        Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Sky.surface.copy(alpha = 0.95f))
+                            .border(1.dp, Sky.outline, RoundedCornerShape(12.dp))
+                            .clickable { barOpen = true },
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
                         Icon(
                             current.second,
                             contentDescription = current.first,
                             tint = Sky.cyan,
-                            modifier = Modifier.size(14.dp),
+                            modifier = Modifier.size(16.dp),
                         )
-                        Spacer(Modifier.size(6.dp))
-                        Text(current.first, fontSize = 10.sp, color = Sky.cyan)
-                        Spacer(Modifier.size(10.dp))
+                        Spacer(Modifier.height(1.dp))
+                        Text("\u25B2", color = Sky.textDim, fontSize = 6.sp)
                     }
-                    Text(if (barOpen) "\u25BC" else "\u25B2", fontSize = 11.sp, color = Sky.textDim)
                 }
             }
         },

@@ -31,6 +31,11 @@ data class Settings(
     val dropWeakDots: Boolean = false,
     /** Globe auto-spin as a speed step: 0 off, 1 slow, 2 fast. */
     val globeSpin: Int = 1,
+    /**
+     * A running clock in the map's top-right corner; tapping it opens the weather at the GPS
+     * pin. Off, nothing is drawn and the weather feed is never asked.
+     */
+    val showLiveTime: Boolean = true,
     /** ESP32 sensor boards: BLE advertisements always, MQTT when a Wi-Fi board publishes. */
     val esp32Enabled: Boolean = true,
     /** GhostESP, ESP32 Marauder, Biscuit and anything else ESP32 plugged into the USB port. */

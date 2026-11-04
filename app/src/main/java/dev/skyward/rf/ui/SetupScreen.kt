@@ -44,6 +44,7 @@ import dev.skyward.rf.ui.theme.Sky
 fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: () -> Unit) {
     val settings by c.settingsStore.state.collectAsState()
     val peer by c.peer.state.collectAsState()
+    val sky by c.airspace.state.collectAsState()
     val context = LocalContext.current
     val tileStore = remember { TileStore(context, c.http) }
 
@@ -213,6 +214,61 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                 }
                 Spacer(Modifier.height(8.dp))
                 SmallAction("CLEAR TILE CACHE") { tileStore.clear() }
+            }
+        }
+
+        item {
+            SectionCard(title = "Clock", trailing = if (settings.showLiveTime) "top right" else "off") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Live time", color = Sky.text, fontSize = 13.sp)
+                        Text(
+                            "A running clock in the map's top-right corner. Tapping it opens " +
+                                "the weather at your GPS pin.",
+                            color = Sky.textDim,
+                            fontSize = 10.sp,
+                        )
+                    }
+                    Switch(
+                        checked = settings.showLiveTime,
+                        onCheckedChange = { on -> c.settingsStore.update { it.copy(showLiveTime = on) } },
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Weather from Open-Meteo: no account and no key. It is read at most every " +
+                        "ten minutes, and again after moving two kilometres. The drop-down also " +
+                        "gives the terrain height at the pin, which is a useful second opinion " +
+                        "on the map's own elevation.",
+                    color = Sky.textDim,
+                    fontSize = 10.sp,
+                )
+            }
+        }
+
+        item {
+            SectionCard(title = "Watch list", trailing = "${sky.watch.size} heard") {
+                Text(
+                    "Passive matches for surveillance hardware: Flock Safety ALPR cameras " +
+                        "(including the 'FS Ext Battery' packs and Flock-XXXX names), Axon " +
+                        "body cameras, and Axon TASERs.",
+                    color = Sky.textDim,
+                    fontSize = 11.sp,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "The match is made from the name a device broadcasts, plus the Bluetooth " +
+                        "manufacturer id Flock's hardware uses (XUNTONG, 0x09C8). A camera that " +
+                        "keeps its name hidden, or any phone whose address rotates, cannot be " +
+                        "told apart from an anonymous MAC - so a hit is a lead, not proof. " +
+                        "A marker reading 'name + manufacturer id' is the one to trust.",
+                    color = Sky.textDim,
+                    fontSize = 10.sp,
+                )
+                Spacer(Modifier.height(6.dp))
+                SwatchRow(color = Sky.watchFlock, label = "FLOCK", detail = "ALPR camera")
+                SwatchRow(color = Sky.watchAxon, label = "AXON", detail = "body camera")
+                SwatchRow(color = Sky.watchTaser, label = "TASER", detail = "Axon CED")
             }
         }
 

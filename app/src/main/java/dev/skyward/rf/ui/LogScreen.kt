@@ -68,6 +68,7 @@ fun LogScreen(c: Container, modifier: Modifier = Modifier, onShowOnMap: () -> Un
                 KeyValueRow("Mesh nodes", logged.values.count { it.layer == Layer.MESH }.toString(), Sky.logged)
                 KeyValueRow("Cell towers", logged.values.count { it.layer == Layer.CELL }.toString(), Sky.logged)
                 KeyValueRow("ESP32 nodes", logged.values.count { it.layer == Layer.ESP32 }.toString(), Sky.logged)
+                KeyValueRow("Watch hits", logged.values.count { it.layer == Layer.WATCH }.toString(), Sky.watchFlock)
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SmallAction("EXPORT CSV") {

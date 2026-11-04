@@ -335,6 +335,37 @@ Saved tiles live in the app's `files/tiles_v2`, not `cacheDir`, so Android does 
 reclaim space; **CLEAR TILE CACHE** in Setup removes them. The tiles come from OpenStreetMap's
 volunteer servers, which is why the save is a neighbourhood rather than a country.
 
+## Getting around
+
+The tab bar is not a bar. Folded away it is a single square button in the bottom-left corner,
+the same size and border as the map's own buttons; tap it for Map, Drive, Log and Setup, and
+choosing a tab puts it back. The Scaffold still reserves that strip, so the INTEL box sits above
+the button rather than under it.
+
+## Clock and weather
+
+Setup -> **Clock** -> **Live time** puts a running clock in the map's top-right corner. Tapping
+it opens the weather at the GPS pin: conditions, temperature and what it feels like, humidity,
+cloud, wind and gusts, rain right now, pressure, and the terrain height at the pin - a useful
+second opinion on the map's own elevation. It comes from Open-Meteo, which needs no account and
+no key, and is read at most every ten minutes (and again after moving two kilometres), so the
+drop-down is current without being a fetch per tap. With the clock off, nothing is drawn and the
+feed is never asked.
+
+## Watch list
+
+The radios also look for surveillance hardware and pin a match where it was heard: **FLOCK**
+(Flock Safety ALPR cameras, including their `FS Ext Battery` packs and `Flock-XXXX` names),
+**AXON** (body cameras) and **TASER** (Axon conducted-energy devices). Each gets its own glyph
+and colour, a WATCH row in the INTEL table, and a marker card that says how the match was made.
+
+The signatures are name-based, plus the XUNTONG Bluetooth manufacturer id (`0x09C8`) that
+Flock's camera and battery hardware advertises. That is a lead, not proof: a camera that keeps
+its name hidden, and any device whose address rotates, is indistinguishable from an anonymous
+MAC. A hit marked `name + manufacturer id` is the one to trust. A handset radio reports no
+bearing, so a hit sits at the phone's own fix with a small fixed offset - "somewhere within
+radio range", not a triangulated position.
+
 ## Two phones: host, globe view and scan assignments
 
 Setup -> **Two devices** -> **Link role** overrides the screen-size split:

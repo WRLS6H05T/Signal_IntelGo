@@ -34,7 +34,7 @@ data class RfObservation(
 
 /** Airspace layers that can be "logged" during a drive. */
 @Serializable
-enum class Layer { SATELLITE, AIRCRAFT, DRONE, MESH, CELL, ESP32 }
+enum class Layer { SATELLITE, AIRCRAFT, DRONE, MESH, CELL, ESP32, WATCH }
 
 data class SatView(
     val noradId: String,
@@ -174,6 +174,29 @@ data class CellView(
     val registered: Boolean,
     val score: Int,
     val logged: Boolean = false,
+)
+
+/**
+ * A matched piece of surveillance hardware.
+ *
+ * A handset radio reports no bearing, so [lat]/[lon] are the observer's fix - the place the
+ * device was heard from - nudged a few metres so several hits do not draw as one dot. That is
+ * the honest answer: "here, and somewhere within radio range", not a triangulated position.
+ */
+data class WatchView(
+    val kind: WatchKind,
+    val id: String,
+    val name: String,
+    val radio: RfKind,
+    val rssi: Int,
+    val source: String,
+    val lat: Double,
+    val lon: Double,
+    val score: Int,
+    val logged: Boolean = false,
+    val lastSeen: Long = 0L,
+    /** How the match was made, e.g. "name + manufacturer id". */
+    val confidence: String = "",
 )
 
 /** Health of a network feed, surfaced in the HUD so silent failures are visible. */
