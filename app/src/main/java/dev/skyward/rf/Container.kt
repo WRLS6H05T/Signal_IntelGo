@@ -1,8 +1,6 @@
 package dev.skyward.rf
 
 import android.content.Context
-import dev.skyward.rf.cloud.CloudAccount
-import dev.skyward.rf.cloud.CloudBackup
 import dev.skyward.rf.core.FileStore
 import dev.skyward.rf.core.LatLon
 import dev.skyward.rf.core.RfKind
@@ -50,7 +48,26 @@ class Container(context: Context) {
         .retryOnConnectionFailure(true)
         .build()
 
-    private val rootData = File(appContext.filesDir, "data").apply { mkdirs() }
+    /**
+     * Where the intel lives: a plain folder on shared storage, not app-private space.
+     *
+     * A PC that mounts the phone sees it as Android/data/dev.skyward.rf/files/data, so moving to
+     * another phone is a copy: the folder off, the folder back on. No account, and nothing that
+     * has to be running for it to work. The private folder remains only as the fallback for a
+     * phone with no shared storage mounted; on the first run after this move the old one is
+     * copied across so nothing already logged is left behind.
+     */
+    private val rootData: File = run {
+        val visible = appContext.getExternalFilesDir(null)?.let { File(it, "data") }
+        val legacy = File(appContext.filesDir, "data")
+        val target = visible ?: legacy
+        target.mkdirs()
+        if (target != legacy) adopt(legacy, target)
+        target
+    }
+
+    /** The folder to copy, as the phone reports its own path. */
+    val dataFolderPath: String get() = rootData.absolutePath
 
     val settingsStore = SettingsStore(FileStore(rootData))
     val settings get() = settingsStore.current
@@ -86,19 +103,6 @@ class Container(context: Context) {
     /** Uploads the logged signals to the user's own WiGLE account. */
     val wigle = WigleUpload(http)
 
-    /**
-     * The account, on a project the user owns. It carries the data directory between installs,
-     * which is the whole point: an uninstall then costs a sign-in, not the drives.
-     */
-    val account = CloudAccount(appContext, http)
-
-    val cloud = CloudBackup(
-        dataDir = rootData,
-        http = http,
-        account = account,
-        settings = { settingsStore.current },
-        context = appContext,
-    )
 
     init {
         // A wired board is a second radio: what it sweeps joins the handset's Wi-Fi/BLE tables,
@@ -266,12 +270,13 @@ class Container(context: Context) {
     }
 
     /**
-     * Updates the account copy as the app leaves the foreground. A no-op when signed out or when
-     * nothing has changed since the last upload, so it costs nothing to call on every pause.
+     * One-time move of the old private folder into the visible one. It never overwrites: a
+     * folder that already holds files is the one in use.
      */
-    fun autoBackup() {
-        if (!account.state.value.signedIn) return
-        scope.launch { cloud.autoBackup() }
+    private fun adopt(from: File, to: File) {
+        if (!from.isDirectory) return
+        if (to.listFiles()?.isNotEmpty() == true) return
+        runCatching { from.copyRecursively(to, overwrite = false) }
     }
 
     fun shutdown() {

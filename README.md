@@ -306,45 +306,25 @@ repository can sign an APK that Android will accept as this app.
 
 The workflow runs the unit tests before it builds, so a red build never becomes a download.
 
-## Account and cloud backup
+## Moving the intel to another phone
 
-The app can keep your drives, per-signal log and settings on an account of your own, so
-uninstalling - or moving to a new phone - does not lose them. There is no Signal_IntelGo server:
-the account is a free Supabase project you create, and the app talks to it directly.
-
-1. Create a project at <https://supabase.com> (email sign-in, free tier).
-2. In the project, open **Authentication -> Providers -> Email**. Turn *Confirm email* off for the
-   simplest flow, or leave it on and click the link the sign-up email sends.
-3. Open **SQL Editor**, paste this and press Run:
+Everything the app records is plain files in one folder:
 
 ```
-create table if not exists public.backups (
-  user_id uuid not null references auth.users(id) on delete cascade,
-  idx integer not null,
-  payload text not null,
-  updated_at timestamptz not null default now(),
-  primary key (user_id, idx)
-);
-
-alter table public.backups enable row level security;
-
-create policy "own backup" on public.backups
-  for all
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
+Internal storage/Android/data/dev.skyward.rf/files/data
 ```
 
-4. Open **Project Settings -> API**, copy **Project URL** and the **anon public** key, then paste
-   them into **Setup -> Account** and press SAVE SERVER.
+| Folder | Contents |
+| --- | --- |
+| `wardrives/` | one file per drive session |
+| `signals/` | the per-signal log, with the fix each signal was heard at |
+| `logged/` | the registry of what has already been captured |
+| `settings_v1.json` | the settings |
 
-Then press CREATE ACCOUNT with an email and password, and BACK UP NOW once. After that the app
-updates the copy by itself whenever it leaves the foreground and something has changed.
+To move it: plug the phone into a PC, choose **File transfer** on the phone, open
+`Internal storage/Android/data/dev.skyward.rf/files`, and copy the `data` folder somewhere safe.
+On the new phone, install the app, open it once and close it (that creates the folder), then copy
+`data` back to the same path and open the app.
 
-On a new install: sign in, press RESTORE, then close and reopen the app so it reloads what was
-restored. RESTORE replaces the files on the phone with the account's copy.
-
-The password is never stored. The refresh token is kept in the app's private preferences, and the
-row policy above means only the account that wrote a backup can read it.
-
-Android's own backup is on as well (allowBackup), covering the same data directory through the
-Google account on the phone, for when nobody has signed in to the app yet.
+Uninstalling deletes that folder along with the app, so copy it off before uninstalling. Setup ->
+**Data folder** shows the exact path on the phone in front of you.

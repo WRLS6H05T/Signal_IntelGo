@@ -26,7 +26,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,15 +33,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.skyward.rf.Container
 import dev.skyward.rf.core.Settings
 import dev.skyward.rf.peer.PeerProtocol
 import dev.skyward.rf.ui.theme.Sky
-import kotlinx.coroutines.launch
 
 @Composable
 fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: () -> Unit) {
@@ -60,7 +56,7 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
     ) {
         item { Spacer(Modifier.height(6.dp)) }
 
-        item { AccountCard(c, settings) }
+        item { DataFolderCard(c) }
 
         item {
             SectionCard(title = "Satellites", trailing = "${c.sat.cachedCount()} TLEs") {
@@ -483,137 +479,40 @@ private fun PermissionRow(label: String, granted: Boolean) {
 }
 
 /**
- * The email account, and the copy of the data that outlives an uninstall.
+ * Where the intel lives, and how to get it off the phone.
  *
- * It starts as a plain server-and-key pair because the account is the user's own project, not one
- * this app runs: pasting two values is the whole setup, and the README has the four steps behind
- * them. Once that is saved the card stops asking and shows who is signed in instead.
+ * The folder is on shared storage, so a PC that mounts the phone can copy it with the file manager
+ * it already has: no account to sign in to, and this app does not have to be running. That is the
+ * whole transfer story - copy the folder off, copy it back on the next phone.
  */
 @Composable
-private fun AccountCard(c: Container, settings: Settings) {
-    val account by c.account.state.collectAsState()
-    val cloud by c.cloud.state.collectAsState()
-    val scope = rememberCoroutineScope()
-    var url by remember(settings.cloudUrl) { mutableStateOf(settings.cloudUrl) }
-    var key by remember(settings.cloudKey) { mutableStateOf(settings.cloudKey) }
-    var email by remember(account.email) { mutableStateOf(account.email.orEmpty()) }
-    var password by remember { mutableStateOf("") }
-    val configured = settings.cloudUrl.isNotBlank() && settings.cloudKey.isNotBlank()
-
-    SectionCard(
-        title = "Account",
-        trailing = when {
-            account.busy || cloud.busy -> "working"
-            account.signedIn -> "signed in"
-            configured -> "signed out"
-            else -> "off"
-        },
-    ) {
+private fun DataFolderCard(c: Container) {
+    SectionCard(title = "Data folder") {
         Text(
-            "Drives, the signal log and settings are copied to an account of your own, so a " +
-                "reinstall gets them back. Nothing leaves the phone until you sign in.",
+            "Drives, the signal log, what has been captured and the settings are plain files in " +
+                "one folder on this phone.",
             color = Sky.textDim,
             fontSize = 11.sp,
         )
-
-        if (!configured) {
-            Spacer(Modifier.height(8.dp))
-            AccountField("Project URL", "https://your-project.supabase.co", url) { url = it }
-            Spacer(Modifier.height(6.dp))
-            AccountField("Anon key", "public key from the project's API page", key) { key = it }
-            Spacer(Modifier.height(8.dp))
-            SmallAction("SAVE SERVER", Sky.cyan) {
-                c.settingsStore.update { it.copy(cloudUrl = url.trim(), cloudKey = key.trim()) }
-            }
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "A free project is enough. The README lists the four steps, including the one " +
-                    "table to create.",
-                color = Sky.textDim,
-                fontSize = 9.sp,
-            )
-        } else if (!account.signedIn) {
-            Spacer(Modifier.height(8.dp))
-            AccountField("Email", "you@example.com", email) { email = it }
-            Spacer(Modifier.height(6.dp))
-            AccountField("Password", "at least 6 characters", password, secret = true) { password = it }
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                SmallAction("SIGN IN", Sky.cyan) {
-                    scope.launch { c.account.signIn(settings.cloudUrl, settings.cloudKey, email, password) }
-                }
-                SmallAction("CREATE ACCOUNT", Sky.mesh) {
-                    scope.launch { c.account.signUp(settings.cloudUrl, settings.cloudKey, email, password) }
-                }
-            }
-            Spacer(Modifier.height(6.dp))
-            // Swapping servers is not destructive: the file on this phone is not on either one.
-            SmallAction("CHANGE SERVER", Sky.textDim) {
-                c.settingsStore.update { it.copy(cloudUrl = "", cloudKey = "") }
-            }
-        } else {
-            Text(account.email.orEmpty(), color = Sky.text, fontSize = 13.sp)
-            Spacer(Modifier.height(2.dp))
-            Text(
-                if (cloud.lastAt > 0L) "Last backup ${ago(cloud.lastAt)}" else "Nothing backed up yet",
-                color = Sky.textDim,
-                fontSize = 10.sp,
-            )
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                SmallAction("BACK UP NOW", Sky.cyan) {
-                    scope.launch { c.cloud.backupNow() }
-                }
-                SmallAction("RESTORE", Sky.warn) {
-                    scope.launch { c.cloud.restoreNow() }
-                }
-                SmallAction("SIGN OUT", Sky.textDim) {
-                    scope.launch { c.account.signOut(settings.cloudUrl, settings.cloudKey) }
-                }
-            }
-        }
-
-        val note = account.message ?: cloud.message.takeIf { it.isNotBlank() }
-        if (!note.isNullOrBlank()) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                note,
-                color = when {
-                    note.startsWith("Signed out") || note.startsWith("Signed in") -> Sky.textDim
-                    note.startsWith("Backed up") || note.startsWith("Restored") -> Sky.mesh
-                    else -> Sky.warn
-                },
-                fontSize = 10.sp,
-            )
-        }
-    }
-}
-
-@Composable
-private fun AccountField(
-    label: String,
-    hint: String,
-    value: String,
-    secret: Boolean = false,
-    onChange: (String) -> Unit,
-) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onChange,
-        label = { Text(label, fontSize = 11.sp) },
-        placeholder = { Text(hint, fontSize = 10.sp, color = Sky.textDim) },
-        singleLine = true,
-        visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
-        modifier = Modifier.fillMaxWidth(),
-    )
-}
-
-private fun ago(at: Long): String {
-    val minutes = ((System.currentTimeMillis() - at) / 60_000L).coerceAtLeast(0L)
-    return when {
-        minutes < 1 -> "just now"
-        minutes < 60 -> "$minutes min ago"
-        minutes < 24 * 60 -> "${minutes / 60} h ago"
-        else -> "${minutes / (24 * 60)} d ago"
+        Spacer(Modifier.height(8.dp))
+        Text(
+            c.dataFolderPath,
+            color = Sky.cyan,
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "On a PC that is Internal storage/Android/data/dev.skyward.rf/files/data. Copy it off " +
+                "with the phone mounted over USB.",
+            color = Sky.textDim,
+            fontSize = 10.sp,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Uninstalling deletes the folder with the app, so copy it off first.",
+            color = Sky.warn,
+            fontSize = 10.sp,
+        )
     }
 }

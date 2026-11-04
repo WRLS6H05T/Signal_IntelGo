@@ -52,12 +52,6 @@ data class Settings(
     /** WiGLE account API name and token, used only by the CSV upload button. */
     val wigleName: String = "",
     val wigleToken: String = "",
-    /**
-     * The user's own account project: its URL and public anon key. Blank means no account, and
-     * nothing in the app talks to a server of its own.
-     */
-    val cloudUrl: String = "",
-    val cloudKey: String = "",
 )
 
 class SettingsStore(private val store: FileStore) {

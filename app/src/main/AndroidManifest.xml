@@ -52,9 +52,7 @@
 
     <application
         android:name=".SkywardApp"
-        android:allowBackup="true"
-        android:fullBackupContent="@xml/backup_rules"
-        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:allowBackup="false"
         android:icon="@drawable/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
