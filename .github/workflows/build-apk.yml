@@ -21,6 +21,10 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@v4
+        with:
+          # The build number is the commit count, and a shallow clone would report 1 - a
+          # versionCode below the installed one, which Android refuses as a downgrade.
+          fetch-depth: 0
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4

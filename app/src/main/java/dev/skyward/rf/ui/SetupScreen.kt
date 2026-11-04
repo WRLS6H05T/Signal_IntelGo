@@ -290,7 +290,18 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
 
         item {
             SectionCard(title = "About") {
-                Text("Signal_IntelGo 1.0", color = Sky.text, fontSize = 13.sp)
+                // The build number is how a phone proves it is running the build that was
+                // published, rather than an older one with the same name.
+                val version = remember {
+                    runCatching {
+                        context.packageManager.getPackageInfo(context.packageName, 0).versionName
+                    }.getOrNull()
+                }
+                Text(
+                    "Signal_IntelGo ${version ?: "1.1"}",
+                    color = Sky.text,
+                    fontSize = 13.sp,
+                )
                 Spacer(Modifier.height(6.dp))
                 Text(
                     "Live satellites (CelesTrak + SGP4), aircraft (ADS-B), drones (ASTM F3411 Remote ID over BLE), " +

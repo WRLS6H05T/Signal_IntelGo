@@ -2,6 +2,10 @@
 
 # Signal_IntelGo
 
+**Install or update:** [download the latest APK](https://github.com/WRLS6H05T/Signal_IntelGo/releases/latest/download/Signal_IntelGo-debug.apk) - that one link always serves the newest build. It is signed with the same key as every earlier build, so Android installs it over the old one instead of demanding an uninstall.
+
+The APK lives under [Releases](https://github.com/WRLS6H05T/Signal_IntelGo/releases) as the *Assets* of the **Latest build**, not in the file tree: it is rebuilt by CI on every push. Setup -> About shows the installed build (for example `Signal_IntelGo 1.1.11`), and the release notes name the commit it was built from, so the two can be compared.
+
 A native Android app for live airspace + RF awareness, built around a **Wi-Fi / BLE war-driving recorder**.
 
 One screen shows what is above you: **satellites** (SGP4), **aircraft** (ADS-B), **drones**

@@ -22,6 +22,19 @@ val stableKeystoreFile = rootProject.file(
 )
 val hasStableKeystore = stableKeystoreFile.exists()
 
+/**
+ * Commits reachable from HEAD, used as the build number.
+ *
+ * Every build then carries a version Android will install over the previous one, and a build
+ * on the phone can be matched to a commit on GitHub: the same number appears in the APK, in
+ * the release name and in Setup -> About. A shallow checkout reports 1, which would hand out
+ * a version below the one already installed, so CI fetches the whole history.
+ */
+val buildNumber: Int = runCatching {
+    providers.exec { commandLine("git", "rev-list", "--count", "HEAD") }
+        .standardOutput.asText.get().trim().toInt()
+}.getOrDefault(1)
+
 android {
     namespace = "dev.skyward.rf"
     compileSdk = 34
@@ -30,8 +43,8 @@ android {
         applicationId = "dev.skyward.rf"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 1 + buildNumber
+        versionName = "1.1.$buildNumber"
         resourceConfigurations += listOf("en")
     }
 
