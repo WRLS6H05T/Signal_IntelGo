@@ -28,8 +28,6 @@ data class Settings(
     val useDeviceMap: Boolean = false,
     val refreshSatMs: Long = 5_000,
     val refreshAircraftMs: Long = 12_000,
-    /** Satellites/aircraft closer than this are captured while a drive is recording. */
-    val logRadiusKm: Double = 250.0,
     val dropWeakDots: Boolean = false,
     /** Globe auto-spin as a speed step: 0 off, 1 slow, 2 fast. */
     val globeSpin: Int = 1,
@@ -51,10 +49,28 @@ data class Settings(
     val peerEnabled: Boolean = false,
     /** Peer address to dial when broadcast discovery is blocked; blank means find it. */
     val peerHost: String = "",
+    /**
+     * Link role: "auto" lets screen size decide, "host" takes the globe and pushes its
+     * settings to every linked device, "globe" is a view-only globe that follows the host.
+     */
+    val peerRoleMode: String = "auto",
+    /** While this phone is a globe view, apply the host's settings as they arrive. */
+    val followHost: Boolean = true,
+    /** Scan job per radio: keyed by ScanPlan.PEER_KEY or a board id. See ScanPlan. */
+    val scanAssign: Map<String, String> = emptyMap(),
     /** WiGLE account API name and token, used only by the CSV upload button. */
     val wigleName: String = "",
     val wigleToken: String = "",
 )
+
+/**
+ * Fixed capture radius for satellites, in kilometres.
+ *
+ * It was a slider, and a slider invited a number large enough to catch nearly the whole
+ * catalogue on every tick - which is not "overhead", it is the map. 150 km is a pass you can
+ * actually work, and it is the same number the engine logs out to.
+ */
+const val LOG_RADIUS_KM: Double = 150.0
 
 class SettingsStore(private val store: FileStore) {
     private val file = "settings_v1.json"

@@ -138,7 +138,25 @@ data class Esp32Node(
     /** 0..100 from GNSS quality, or from RSSI when the board has no fix. */
     val score: Int = 0,
     val logged: Boolean = false,
-)
+) {
+    /**
+     * True when the board identifies a dual-band radio. Classic ESP32 and S3 are 2.4 GHz only;
+     * the C5 is the one that hears 5 GHz, and a board that says so is offered the choice.
+     */
+    val dualBand: Boolean
+        get() = listOf(chip, board, firmware).any {
+            it.contains("C5", ignoreCase = true) ||
+                it.contains("dual", ignoreCase = true) ||
+                it.contains("5GHz", ignoreCase = true) ||
+                it.contains("5 GHz", ignoreCase = true)
+        }
+
+    /** A GPS module that has actually reported something. */
+    val hasGps: Boolean get() = sats > 0 || hdop != null
+
+    /** BLE sweeping is only offered when the firmware has shown it sweeps BLE at all. */
+    val hasBle: Boolean get() = bleCount > 0 || board.isNotBlank() || firmware.isNotBlank()
+}
 
 data class CellView(
     val key: String,

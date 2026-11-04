@@ -150,7 +150,6 @@ class Container(context: Context) {
         logged = logged,
         observer = observer,
         loggingActive = { wardrive.state.value.active },
-        logRadiusKm = { settingsStore.current.logRadiusKm },
     )
 
     @Volatile
@@ -201,6 +200,45 @@ class Container(context: Context) {
         peer.logSource = { id -> wardrive.sessionJson(id) }
         peer.onPeerLogs = { list -> peerLogs.value = list }
         peer.onPeerLog = { json, from -> wardrive.importSession(json, from) }
+
+        // The hand-picked role, this phone's assigned sweep, and - on a host - the settings
+        // every linked device should be using.
+        peer.modeProvider = { settingsStore.current.peerRoleMode }
+        peer.scanProvider = { settingsStore.current.scanAssign[dev.skyward.rf.core.ScanPlan.PEER_KEY].orEmpty() }
+        peer.settingsProvider = {
+            val cfg = settingsStore.current
+            if (cfg.peerRoleMode != PeerProtocol.MODE_HOST) {
+                null
+            } else {
+                PeerProtocol.HostSettings(
+                    tileSource = cfg.tileSource,
+                    dropWeakDots = cfg.dropWeakDots,
+                    aircraftEnabled = cfg.aircraftEnabled,
+                    satGroups = cfg.satGroups,
+                    globeSpin = cfg.globeSpin.coerceIn(0, 2),
+                    scanAssign = cfg.scanAssign,
+                )
+            }
+        }
+        // A globe view follows its host, and only a globe view does: a host is never rewritten
+        // by the phone it is controlling, which is what keeps the two from pushing at each
+        // other for the rest of the drive.
+        peer.onHostSettings = { hs ->
+            val cfg = settingsStore.current
+            if (cfg.peerRoleMode == PeerProtocol.MODE_GLOBE && cfg.followHost) {
+                val next = cfg.copy(
+                    tileSource = hs.tileSource,
+                    dropWeakDots = hs.dropWeakDots,
+                    aircraftEnabled = hs.aircraftEnabled,
+                    satGroups = if (hs.satGroups.isEmpty()) cfg.satGroups else hs.satGroups,
+                    globeSpin = hs.globeSpin.coerceIn(0, 2),
+                    scanAssign = cfg.scanAssign + hs.scanAssign,
+                )
+                // The host repeats its blob with every snapshot; writing the file on each one
+                // would be a disk write every five seconds for a picture that has not moved.
+                if (next != cfg) settingsStore.update { next }
+            }
+        }
 
         peer.onRemote = { wifi, ble, fix ->
             rf.ingestRemote(

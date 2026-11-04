@@ -25,6 +25,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -35,6 +37,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -75,6 +78,7 @@ import dev.skyward.rf.sky.SatTracker
 import dev.skyward.rf.core.Layer
 import dev.skyward.rf.core.MeshNode
 import dev.skyward.rf.core.SatView
+import dev.skyward.rf.core.ScanPlan
 import dev.skyward.rf.core.SignalScale
 import dev.skyward.rf.sky.AirspaceEngine
 import dev.skyward.rf.ui.theme.Sky
@@ -84,6 +88,7 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.pow
 import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 import kotlin.math.sqrt
 
 /** One plottable entity. */
@@ -102,6 +107,8 @@ data class MapMarker(
     val lines: List<Pair<String, String>> = emptyList(),
     /** Decided once in buildMarkers: the draw loop must not do string work per frame. */
     val station: Boolean = false,
+    /** One of the BIRDS-3 CubeSats: gold when caught, same glyph as every other satellite. */
+    val birds3: Boolean = false,
 )
 
 /**
@@ -116,6 +123,12 @@ private data class HwEntry(
     val title: String,
     val detail: String,
     val lines: List<Pair<String, String>>,
+    /** Board id this sweep is stored under; blank for hardware that is not a scanning radio. */
+    val assignKey: String = "",
+    /** What the board reports it can hear, which decides the bands offered in its card. */
+    val dualBand: Boolean = false,
+    val bleCap: Boolean = false,
+    val gpsCap: Boolean = false,
 )
 
 /**
@@ -170,6 +183,10 @@ private fun buildHardware(
                     "Battery" to (n?.batteryPct?.takeIf { it >= 0 }?.let { "$it%" } ?: "\u2014"),
                     "Console" to b.raw.ifBlank { "\u2014" },
                 ),
+                assignKey = b.key,
+                dualBand = n?.dualBand ?: false,
+                bleCap = n?.hasBle ?: true,
+                gpsCap = n?.hasGps ?: (r.gps == true),
             ),
         )
     }
@@ -209,11 +226,15 @@ private val SpinLabels = listOf("SPIN OFF", "SPIN 1X", "SPIN 4X")
 /** The station is gold: one object, the one everyone looks for, so it never shares a colour. */
 private val IssGold = Color(0xFFFFC53D)
 
+/** The BIRDS-3 set takes a warmer gold when caught: three first satellites, not the station. */
+private val BirdsGold = Color(0xFFFFD166)
+
 /** NORAD 25544 is the station; the name never decides, because SWISSCUBE also contains "ISS". */
 private fun isIss(m: MapMarker): Boolean = m.station
 
 private fun markerColor(m: MapMarker): Color = when {
     isIss(m) -> IssGold
+    m.birds3 && m.logged -> BirdsGold
     m.logged -> Sky.logged
     m.layer == Layer.SATELLITE -> Sky.satellite
     m.layer == Layer.AIRCRAFT -> Sky.aircraft
@@ -241,16 +262,22 @@ fun buildMarkers(
             MapMarker(
                 key = "SAT:${s.noradId}",
                 station = s.noradId == SatTracker.ISS_NORAD,
+                birds3 = s.noradId in SatTracker.BIRDS3_IDS,
                 layer = Layer.SATELLITE,
                 lat = s.lat,
                 lon = s.lon,
                 title = s.name,
-                subtitle = if (s.noradId == SatTracker.ISS_NORAD) "International Space Station" else "NORAD ${s.noradId}",
+                subtitle = when (s.noradId) {
+                    SatTracker.ISS_NORAD -> "International Space Station"
+                    in SatTracker.BIRDS3_IDS -> "BIRDS-3 · deployed from the ISS"
+                    else -> "NORAD ${s.noradId}"
+                },
                 score = s.score,
                 logged = s.logged,
                 altM = s.altKm * 1000.0,
                 lines = listOfNotNull(
                     if (s.noradId == SatTracker.ISS_NORAD) "Catalog" to SatTracker.ISS_DESIGNATOR else null,
+                    if (s.noradId in SatTracker.BIRDS3_IDS) "Deployed" to "ISS, 17 Jun 2019" else null,
                     "Elevation" to String.format("%.1f°", s.elevation),
                     "Azimuth" to String.format("%.1f°", s.azimuth),
                     "Range" to String.format("%.0f km", s.rangeKm),
@@ -431,6 +458,11 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
     var showSignals by remember { mutableStateOf(true) }
     var legendOpen by remember { mutableStateOf(true) }
     var selected by remember { mutableStateOf<MapMarker?>(null) }
+    // Offline tiles: a bounded save of the ground around the current centre, with the count
+    // on screen because a silent download looks like a dead button.
+    val tileScope = rememberCoroutineScope()
+    var offlineBusy by remember { mutableStateOf(false) }
+    var offlineNote by remember { mutableStateOf<String?>(null) }
 
     // Follow the phone on the first fix and whenever the user re-enables follow.
     LaunchedEffect(observer) {
@@ -507,6 +539,10 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
         }
         var espOpen by remember { mutableStateOf(false) }
         var meshOpen by remember { mutableStateOf(false) }
+        // The sweep assigned to the other phone. The host owns this value; the status card
+        // and the INTEL table both read it, so they cannot disagree.
+        val peerAssign = settings.scanAssign[ScanPlan.PEER_KEY].orEmpty()
+            .ifBlank { ScanPlan.phoneDefault() }
 
         // ---- status stack: top left, PEER then ESP32 then MESH ----
         // One column, so the right edge stays free for the map's own buttons and the eye can
@@ -551,6 +587,18 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                         fontSize = 9.sp,
                         maxLines = 1,
                     )
+                    Spacer(Modifier.height(4.dp))
+                    // What this phone has assigned the other one to sweep.
+                    ScanLine(
+                        code = peerAssign,
+                        options = ScanPlan.phoneOptions(ble = true),
+                        gpsAvailable = peer.peerGps,
+                        onPick = { code ->
+                            c.settingsStore.update {
+                                it.copy(scanAssign = it.scanAssign + (ScanPlan.PEER_KEY to code))
+                            }
+                        },
+                    )
                 }
             }
 
@@ -569,6 +617,29 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                         if (espOpen) {
                             h.lines.forEach { (k, v) ->
                                 Text("$k  $v", color = Sky.textDim, fontSize = 9.sp, maxLines = 1)
+                            }
+                            if (h.assignKey.isNotBlank()) {
+                                Spacer(Modifier.height(4.dp))
+                                val assign = settings.scanAssign[h.assignKey].orEmpty()
+                                    .ifBlank { ScanPlan.defaultBand(h.dualBand, h.bleCap) }
+                                ScanLine(
+                                    code = assign,
+                                    options = ScanPlan.bandOptions(h.dualBand, h.bleCap),
+                                    gpsAvailable = h.gpsCap,
+                                    onPick = { code ->
+                                        c.settingsStore.update {
+                                            it.copy(scanAssign = it.scanAssign + (h.assignKey to code))
+                                        }
+                                    },
+                                )
+                                if (!h.dualBand) {
+                                    Text(
+                                        "single band: no 5 GHz radio reported",
+                                        color = Sky.textDim,
+                                        fontSize = 8.sp,
+                                        maxLines = 1,
+                                    )
+                                }
                             }
                         }
                     }
@@ -624,7 +695,9 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
             // "the feed is off" without opening Setup.
             val meshBle = sky.mesh.count { it.source.equals("ble", ignoreCase = true) }
             val meshMqtt = sky.mesh.count { it.source.equals("mqtt", ignoreCase = true) }
-            StatusCard(
+            // No attached node, no card: an empty box of zeros was only taking the space the
+            // INTEL table needs.
+            if (sky.mesh.isNotEmpty()) StatusCard(
                 title = "MESH",
                 accent = Sky.mesh,
                 trailing = sky.mesh.size.toString(),
@@ -709,6 +782,15 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 IntelRow("SIG", signalDots.size, showSignals) { showSignals = !showSignals }
                 // What the other phone is hearing, so the table shows both devices' sweeps.
                 IntelRow("PEER", peer.peerWifiTotal + peer.peerBleTotal, peer.connected) { }
+                // The host's table carries the assignment too, so the whole picture is
+                // readable without opening the peer card.
+                Text(
+                    "peer scan · " + ScanPlan.label(peerAssign) +
+                        (if (peer.peerScan.isNotBlank()) " · reports " + ScanPlan.label(peer.peerScan) else ""),
+                    color = Sky.textDim,
+                    fontSize = 9.sp,
+                    maxLines = 1,
+                )
                 // A board is a second radio, so its sweep is a row of its own beside the
                 // peer's rather than being invisible in the combined counts.
                 val espWifi = espNodes.sumOf { it.wifiCount }
@@ -836,6 +918,38 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
             ) {
                 Text("◎", color = Sky.cyan, fontSize = 18.sp)
             }
+            // Saves the ground around the current centre so the map still draws with no
+            // network. Coarse zooms land first, so the area is readable even if stopped early.
+            if (!settings.useDeviceMap) {
+                IconButton(
+                    onClick = {
+                        if (!offlineBusy) {
+                            offlineBusy = true
+                            offlineNote = "SAVING…"
+                            tileScope.launch {
+                                val saved = tileStore.downloadArea(
+                                    source = settings.tileSource,
+                                    lat = camera.lat,
+                                    lon = camera.lon,
+                                    maxZoom = camera.zoom.toInt().coerceIn(13, 16),
+                                ) { done, total -> offlineNote = "SAVE $done/$total" }
+                                offlineNote = "OFFLINE $saved tiles"
+                                offlineBusy = false
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Sky.surface.copy(alpha = 0.95f))
+                        .border(1.dp, Sky.outline, RoundedCornerShape(12.dp)),
+                ) {
+                    Text(if (offlineBusy) "…" else "⇩", color = Sky.cyan, fontSize = 15.sp)
+                }
+                offlineNote?.let {
+                    Text(it, style = SkywardThemeLabel(), fontSize = 8.sp, color = Sky.textDim)
+                }
+            }
         }
 
         selected?.let { m ->
@@ -887,6 +1001,66 @@ private fun StatusCard(
             }
         }
         content()
+    }
+}
+
+/**
+ * One assigned sweep, with a drop-down to change it.
+ *
+ * Bands the radio cannot hear are not offered at all, and GPS is a separate switch because it
+ * belongs to every band - a board without a module simply never sees it.
+ */
+@Composable
+private fun ScanLine(
+    code: String,
+    options: List<String>,
+    gpsAvailable: Boolean,
+    onPick: (String) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("SCAN", style = SkywardThemeLabel(), fontSize = 8.sp, color = Sky.textDim)
+        Spacer(Modifier.weight(1f))
+        Box {
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Sky.surfaceHigh)
+                    .clickable { open = true }
+                    .padding(horizontal = 5.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(ScanPlan.label(code), color = Sky.cyan, fontSize = 8.sp, maxLines = 1)
+                Spacer(Modifier.width(4.dp))
+                Text("▾", color = Sky.textDim, fontSize = 8.sp)
+            }
+            DropdownMenu(
+                expanded = open,
+                onDismissRequest = { open = false },
+            ) {
+                options.forEach { option ->
+                    DropdownMenuItem(
+                        text = { Text(ScanPlan.label(option), color = Sky.text, fontSize = 11.sp) },
+                        onClick = {
+                            open = false
+                            // Keep the GPS switch as it was when only the band changes.
+                            if (ScanPlan.band(option) != ScanPlan.band(code)) {
+                                onPick(ScanPlan.withGps(option, ScanPlan.hasGps(code)))
+                            }
+                        },
+                    )
+                }
+            }
+        }
+    }
+    if (gpsAvailable) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("GPS", style = SkywardThemeLabel(), fontSize = 8.sp, color = Sky.textDim)
+            Spacer(Modifier.weight(1f))
+            ToggleChip("GPS", null, Sky.mesh, ScanPlan.hasGps(code)) {
+                onPick(ScanPlan.withGps(code, !ScanPlan.hasGps(code)))
+            }
+        }
     }
 }
 
@@ -1220,12 +1394,13 @@ private fun TacticalMap(
                 val r = (if (m.logged) 5.4f else 4.4f) * density
                 // The station is drawn a size up: it is one object, and it should read as one.
                 val iconR = if (isIss(m)) r * 1.9f else r
-                if (isIss(m) && m.logged) {
-                    // Caught on this device, the station glows gold instead of wearing the
-                    // purple every other logged entity takes: it is what people scroll for.
+                // The station and the BIRDS-3 set are the two gold objects on the map; both
+                // glow when caught instead of taking the purple every other logged entity uses.
+                if ((isIss(m) || m.birds3) && m.logged) {
+                    val goldTint = if (m.birds3) BirdsGold else IssGold
                     drawCircle(
                         brush = androidx.compose.ui.graphics.Brush.radialGradient(
-                            colors = listOf(IssGold.copy(alpha = 0.55f * a), Color.Transparent),
+                            colors = listOf(goldTint.copy(alpha = 0.55f * a), Color.Transparent),
                             center = p,
                             radius = iconR * 5.5f,
                         ),

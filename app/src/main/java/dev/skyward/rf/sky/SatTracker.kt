@@ -43,6 +43,24 @@ class SatTracker(
         const val ISS_NORAD = "25544"
         const val ISS_NAME = "ISS (ZARYA)"
         const val ISS_DESIGNATOR = "1998-067A"
+
+        data class Birds(val norad: String, val name: String, val country: String)
+
+        /**
+         * BIRDS-3: three 1U CubeSats deployed from the ISS on 17 June 2019 - NepaliSat-1,
+         * Raavana-1 and Uguisu.
+         *
+         * All three decayed in early October 2021, so CelesTrak publishes no element sets for
+         * them and this group is normally empty. They are still asked for on every refresh: if
+         * any is ever catalogued again it appears like any other satellite, and until then the
+         * app does not invent a position for a satellite that is no longer there.
+         */
+        val BIRDS3 = listOf(
+            Birds("44331", "NEPALISAT-1", "Nepal"),
+            Birds("44329", "RAAVANA-1", "Sri Lanka"),
+            Birds("44330", "UGUISU", "Japan"),
+        )
+        val BIRDS3_IDS: Set<String> = BIRDS3.map { it.norad }.toSet()
     }
 
     @Serializable
@@ -125,6 +143,9 @@ class SatTracker(
                 }
             }.onFailure { errors.add("$group: ${it.message ?: "network error"}") }
         }
+        // BIRDS-3 by catalogue number: it is not a CelesTrak group, and a 404 for a decayed
+        // object is the expected answer rather than an error worth showing.
+        collected.addAll(fetchBirds3())
         if (collected.isNotEmpty()) {
             val deduped = collapseIss(collected.associateBy { it.noradId }.values.toList())
             cache = CacheFile(
@@ -146,6 +167,29 @@ class SatTracker(
             )
         }
     }
+
+    /** Asks for the three BIRDS-3 objects by catalogue number; usually returns nothing. */
+    private fun fetchBirds3(): List<CachedTle> {
+        val out = ArrayList<CachedTle>(BIRDS3.size)
+        for (bird in BIRDS3) {
+            val req = Request.Builder()
+                .url("$BASE?CATNR=${bird.norad}&FORMAT=tle")
+                .header("User-Agent", "Signal_IntelGo/1.0 (wardriving)")
+                .build()
+            runCatching {
+                http.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use
+                    val hit = parseTle(resp.body?.string().orEmpty())
+                        .firstOrNull { it.noradId == bird.norad } ?: return@use
+                    out.add(hit.copy(name = "BIRDS-3 ${bird.name}"))
+                }
+            }
+        }
+        return out
+    }
+
+    /** How many BIRDS-3 objects currently have live elements; normally zero. */
+    fun birds3Count(): Int = cache.sats.count { it.noradId in BIRDS3_IDS }
 
     private fun parseTle(text: String): List<CachedTle> {
         val lines = text.split('\n').map { it.trimEnd('\r') }.filter { it.isNotBlank() }

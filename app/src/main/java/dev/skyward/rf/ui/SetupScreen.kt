@@ -18,7 +18,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,6 +35,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.skyward.rf.Container
+import dev.skyward.rf.core.LOG_RADIUS_KM
 import dev.skyward.rf.core.Settings
 import dev.skyward.rf.peer.PeerProtocol
 import dev.skyward.rf.ui.theme.Sky
@@ -73,6 +73,16 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                         GroupChip(g, settings) { c.settingsStore.update(it) }
                     }
                 }
+                Spacer(Modifier.height(8.dp))
+                // Named because they were asked for, and honest about why they are not on
+                // the map: a satellite that re-entered has no orbit left to draw.
+                Text(
+                    "BIRDS-3 - NepaliSat-1, Raavana-1 and Uguisu - deployed from the ISS in " +
+                        "June 2019 and re-entered in October 2021. CelesTrak has no live " +
+                        "elements, so they are tracked automatically if any are catalogued again.",
+                    color = Sky.textDim,
+                    fontSize = 10.sp,
+                )
             }
         }
 
@@ -207,16 +217,14 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
         }
 
         item {
-            SectionCard(title = "Logging", trailing = "${settings.logRadiusKm.toInt()} km") {
+            SectionCard(title = "Logging", trailing = "${LOG_RADIUS_KM.toInt()} km") {
+                // Fixed, not a dial. A wider radius caught most of the catalogue on every
+                // tick, which is the map rather than anything overhead.
                 Text(
-                    "Satellites within this radius are captured during a drive. Aircraft are the 30 mi set.",
+                    "Satellites within ${LOG_RADIUS_KM.toInt()} km are captured during a drive. " +
+                        "Aircraft are the 30 mi set.",
                     color = Sky.textDim,
                     fontSize = 11.sp,
-                )
-                Slider(
-                    value = settings.logRadiusKm.toFloat(),
-                    onValueChange = { v -> c.settingsStore.update { it.copy(logRadiusKm = v.toDouble()) } },
-                    valueRange = 25f..500f,
                 )
             }
         }
@@ -264,6 +272,47 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                         color = Sky.textDim,
                         fontSize = 10.sp,
                     )
+                    Spacer(Modifier.height(10.dp))
+                    Text("Link role", style = SkywardThemeLabel(), color = Sky.textDim)
+                    Spacer(Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        RoleChip("AUTO", PeerProtocol.MODE_AUTO, settings) { c.settingsStore.update(it) }
+                        RoleChip("HOST", PeerProtocol.MODE_HOST, settings) { c.settingsStore.update(it) }
+                        RoleChip("GLOBE VIEW", PeerProtocol.MODE_GLOBE, settings) { c.settingsStore.update(it) }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        when (settings.peerRoleMode) {
+                            PeerProtocol.MODE_HOST ->
+                                "This phone shows the globe and pushes its scan, map and layer " +
+                                    "settings to every linked device."
+                            PeerProtocol.MODE_GLOBE ->
+                                "This phone shows the globe and takes its settings from the " +
+                                    "host. Assigning a role here overrides the screen-size split."
+                            else ->
+                                "Auto: the larger screen takes the globe, the smaller one the " +
+                                    "wardriving view."
+                        },
+                        color = Sky.textDim,
+                        fontSize = 10.sp,
+                    )
+                    if (settings.peerRoleMode == PeerProtocol.MODE_GLOBE) {
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Follow host settings", color = Sky.text, fontSize = 13.sp)
+                                Text(
+                                    "Apply the host's map, layers and scan assignments as they arrive",
+                                    color = Sky.textDim,
+                                    fontSize = 10.sp,
+                                )
+                            }
+                            Switch(
+                                checked = settings.followHost,
+                                onCheckedChange = { on -> c.settingsStore.update { it.copy(followHost = on) } },
+                            )
+                        }
+                    }
                     Spacer(Modifier.height(6.dp))
                     Text(
                         "Bluetooth must be on for both phones, and the link is peer to peer - nothing leaves the two devices.",
@@ -416,6 +465,23 @@ private fun Esp32Config(c: Container, settings: Settings) {
             fontSize = 9.sp,
         )
     }
+}
+
+@Composable
+private fun RoleChip(label: String, value: String, settings: Settings, onChange: ((Settings) -> Settings) -> Unit) {
+    val selected = settings.peerRoleMode == value
+    FilterChip(
+        selected = selected,
+        onClick = { onChange { it.copy(peerRoleMode = value) } },
+        label = { Text(label, fontSize = 9.sp, fontFamily = FontFamily.Monospace) },
+        shape = RoundedCornerShape(9.dp),
+        colors = FilterChipDefaults.filterChipColors(
+            containerColor = Sky.surfaceHigh,
+            labelColor = Sky.textDim,
+            selectedContainerColor = Sky.cyan.copy(alpha = 0.22f),
+            selectedLabelColor = Sky.cyan,
+        ),
+    )
 }
 
 @Composable

@@ -28,6 +28,11 @@ object PeerProtocol {
     /** Wardriving device: the smaller screen, which shows the drive readout. */
     const val SENSOR = "sensor"
 
+    /** Roles chosen by hand, instead of by screen size. */
+    const val MODE_AUTO = "auto"
+    const val MODE_HOST = "host"
+    const val MODE_GLOBE = "globe"
+
     /** Discovery payloads. They are UDP datagrams, so they stay tiny and plain. */
     const val PROBE = "SKYWARD?"
     const val HERE = "SKYWARD!"
@@ -54,6 +59,24 @@ object PeerProtocol {
     /** One slice of a drive being sent; [total] must agree on every slice. */
     @Serializable
     data class LogPart(val id: String, val idx: Int, val total: Int, val data: String)
+
+    /**
+     * The settings a host is responsible for, pushed to every linked device.
+     *
+     * Deliberately a bounded, display-and-scan set: the follower is not told to re-flash a
+     * board or change a broker, because a bad value there would take the other phone off the
+     * air with no way back except picking up the handset.
+     */
+    @Serializable
+    data class HostSettings(
+        val tileSource: String = "streets",
+        val dropWeakDots: Boolean = false,
+        val aircraftEnabled: Boolean = true,
+        val satGroups: List<String> = emptyList(),
+        val globeSpin: Int = 1,
+        /** Band assigned to each radio, keyed ScanPlan.PEER_KEY or a board id. */
+        val scanAssign: Map<String, String> = emptyMap(),
+    )
 
     @Serializable
     data class Message(
@@ -83,6 +106,12 @@ object PeerProtocol {
         val want: String = "",
         /** One slice of a drive on its way over. */
         val part: LogPart? = null,
+        /** The role this phone was given by hand: auto, host or globe. */
+        val mode: String = "",
+        /** What this phone has been assigned to sweep, as a ScanPlan code. */
+        val scan: String = "",
+        /** Present only from a host, and only on a host's snapshot. */
+        val hostSettings: HostSettings? = null,
     )
 
     private val json = Json {
@@ -120,9 +149,23 @@ object PeerProtocol {
         else -> SENSOR
     }
 
+    /** An explicit role wins over the screen-size comparison; "auto" falls back to it. */
+    fun roleForMode(mode: String, mineInches: Float, peerInches: Float): String = when (mode) {
+        MODE_HOST, MODE_GLOBE -> DISPLAY
+        else -> roleFor(mineInches, peerInches)
+    }
+
     fun roleLabel(role: String): String = when (role) {
         DISPLAY -> "globe"
         SENSOR -> "wardrive"
         else -> "shared"
     }
+
+    fun modeLabel(mode: String): String = when (mode) {
+        MODE_HOST -> "host"
+        MODE_GLOBE -> "globe view"
+        else -> "auto"
+    }
+
+    fun isGlobeMode(mode: String): Boolean = mode == MODE_HOST || mode == MODE_GLOBE
 }

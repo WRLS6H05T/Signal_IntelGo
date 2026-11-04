@@ -30,12 +30,12 @@ import kotlinx.coroutines.launch
  * aggregation, and the optional capture of everything seen while a drive is recording.
  */
 /**
- * Satellites are logged out to 150 miles of ground distance from the observer, not the
- * drive's capture radius: a pass is over in minutes, and the point of the sky view is what is
- * actually overhead. Once logged, a satellite stays an entity for good.
+ * Satellites are logged out to a fixed 150 km of ground distance, not a user-set radius: a
+ * pass is over in minutes, the point of the sky view is what is actually overhead, and a
+ * larger number catches most of the catalogue rather than anything you could work. Once
+ * logged, a satellite stays an entity for good.
  */
-private const val SAT_RANGE_MI = 150.0
-private const val SAT_RANGE_KM = SAT_RANGE_MI * 1.609344
+private const val SAT_RANGE_KM = 150.0
 
 class AirspaceEngine(
     private val scope: CoroutineScope,
@@ -49,7 +49,6 @@ class AirspaceEngine(
     private val logged: LoggedRegistry,
     private val observer: StateFlow<LatLon?>,
     private val loggingActive: () -> Boolean,
-    private val logRadiusKm: () -> Double,
 ) {
 
     data class SkyState(
@@ -304,7 +303,6 @@ class AirspaceEngine(
 
     /** Marks everything currently in range as logged for this drive. */
     private fun capture(now: Long) {
-        val radius = logRadiusKm()
         val st = _state.value
         // Collected then written in one batch: logging entity by entity republished - and
         // re-allocated - the whole registry once per sighting, every tick, on a table that
@@ -312,8 +310,9 @@ class AirspaceEngine(
         val batch = ArrayList<LoggedRegistry.Sighting>(st.sats.size + 64)
         var sats = 0
         for (s in st.sats) {
-            if (s.elevation < 0) continue
-            if (s.rangeKm > radius * 4 && s.elevation < 5) continue
+            // The same fixed ring the engine marks overhead, so the number on screen and the
+            // number in the registry cannot disagree.
+            if (s.elevation < 0 || s.rangeKm > SAT_RANGE_KM) continue
             batch.add(LoggedRegistry.Sighting(Layer.SATELLITE, s.noradId, s.name, s.lat, s.lon))
             sats++
         }

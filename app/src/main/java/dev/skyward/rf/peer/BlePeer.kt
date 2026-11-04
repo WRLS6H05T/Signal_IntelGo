@@ -98,6 +98,9 @@ class BlePeer(private val context: Context) {
         val role: String = "",
         /** What the other device is showing, from its own side of the size comparison. */
         val peerRole: String = "",
+        /** The role the other phone was given by hand, and the sweep it was assigned. */
+        val peerMode: String = "",
+        val peerScan: String = "",
         val peerWifiTotal: Int = 0,
         val peerBleTotal: Int = 0,
         /** The other phone's own answer to whether it is using GPS and cellular. */
@@ -140,6 +143,22 @@ class BlePeer(private val context: Context) {
     @Volatile
     var onPeerLog: ((String, String) -> Unit)? = null
 
+    /** The role chosen by hand on this phone: auto, host or globe. */
+    @Volatile
+    var modeProvider: (() -> String)? = null
+
+    /** What this phone has been assigned to sweep, as a ScanPlan code. */
+    @Volatile
+    var scanProvider: (() -> String)? = null
+
+    /** Host only: the settings blob pushed with every snapshot. */
+    @Volatile
+    var settingsProvider: (() -> PeerProtocol.HostSettings?)? = null
+
+    /** A host's settings arrived on a follower. */
+    @Volatile
+    var onHostSettings: ((PeerProtocol.HostSettings) -> Unit)? = null
+
     @Volatile
     private var running = false
 
@@ -148,6 +167,10 @@ class BlePeer(private val context: Context) {
 
     @Volatile
     private var peerDiagIn = 0f
+
+    /** The other phone's hand-picked role, as last reported. */
+    @Volatile
+    private var peerMode = ""
 
     @Volatile
     private var sent = 0
@@ -201,10 +224,14 @@ class BlePeer(private val context: Context) {
         return hypot(dm.widthPixels.toFloat(), dm.heightPixels.toFloat()) / dm.densityDpi
     }
 
-    fun role(): String = PeerProtocol.roleFor(diagonalInches(), peerDiagIn)
+    fun role(): String = PeerProtocol.roleForMode(
+        modeProvider?.invoke().orEmpty(),
+        diagonalInches(),
+        peerDiagIn,
+    )
 
     /** The other phone's screen, as it sees itself: the roles are complementary. */
-    fun peerRole(): String = PeerProtocol.roleFor(peerDiagIn, diagonalInches())
+    fun peerRole(): String = PeerProtocol.roleForMode(peerMode, peerDiagIn, diagonalInches())
 
     fun isRunning(): Boolean = running
 
@@ -376,6 +403,8 @@ class BlePeer(private val context: Context) {
                     peerWifiTotal = 0,
                     peerBleTotal = 0,
                     peerRole = "",
+                    peerMode = "",
+                    peerScan = "",
                     peerGps = false,
                     peerCell = false,
                     detail = if (running) "waiting for the other device" else "off",
@@ -481,6 +510,8 @@ class BlePeer(private val context: Context) {
                     peerWifiTotal = 0,
                     peerBleTotal = 0,
                     peerRole = "",
+                    peerMode = "",
+                    peerScan = "",
                     peerGps = false,
                     peerCell = false,
                     detail = if (running) "searching" else "off",
@@ -534,6 +565,7 @@ class BlePeer(private val context: Context) {
         val decoded = PeerProtocol.decode(String(message, Charsets.UTF_8)) ?: return
         received++
         if (decoded.diagIn > 0f) peerDiagIn = decoded.diagIn
+        if (decoded.mode.isNotBlank()) peerMode = decoded.mode
         val fix = if (decoded.lat != null && decoded.lon != null) LatLon(decoded.lat, decoded.lon) else null
         if (fix != null) _peerFix.value = fix
         _state.value = _state.value.copy(
@@ -541,6 +573,8 @@ class BlePeer(private val context: Context) {
             role = role(),
             received = received,
             peerRole = peerRole(),
+            peerMode = peerMode,
+            peerScan = decoded.scan,
             peerWifi = decoded.wifi.size,
             peerBle = decoded.ble.size,
             // The totals are what the other phone actually holds, not just what got sent.
@@ -552,6 +586,10 @@ class BlePeer(private val context: Context) {
         if (decoded.logs.isNotEmpty()) onPeerLogs?.invoke(decoded.logs)
         if (decoded.wantList) sendLogList()
         if (decoded.want.isNotBlank()) startSending(decoded.want)
+        // Only a host's blob is applied; a follower cannot quietly rewrite the other phone.
+        if (decoded.mode == PeerProtocol.MODE_HOST) {
+            decoded.hostSettings?.let { onHostSettings?.invoke(it) }
+        }
         decoded.part?.let { takePart(it) }
         if (decoded.wifi.isNotEmpty() || decoded.ble.isNotEmpty() || fix != null) {
             onRemote?.invoke(decoded.wifi, decoded.ble, fix)
@@ -607,6 +645,13 @@ class BlePeer(private val context: Context) {
             bleTotal = if (snapshot.bleTotal > 0) snapshot.bleTotal else snapshot.ble.size,
             gpsUsed = snapshot.gpsUsed,
             cellUsed = snapshot.cellUsed,
+            mode = modeProvider?.invoke().orEmpty(),
+            scan = scanProvider?.invoke().orEmpty(),
+            hostSettings = if (modeProvider?.invoke() == PeerProtocol.MODE_HOST) {
+                settingsProvider?.invoke()
+            } else {
+                null
+            },
         )
         val bytes = PeerProtocol.encode(message).toByteArray(Charsets.UTF_8)
         // Too big for the pipe means too big: dropping it whole is honest, truncating it would

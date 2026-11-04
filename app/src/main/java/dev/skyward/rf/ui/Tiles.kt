@@ -10,6 +10,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.pow
 
@@ -38,11 +39,14 @@ class TileStore(
     context: Context,
     private val http: OkHttpClient,
 ) {
-    private val dir = File(context.cacheDir, "tiles_v2").apply {
+    // Files, not cacheDir: a tile the user deliberately saved for offline use must not be the
+    // first thing the system evicts when storage runs low. CLEAR TILE CACHE removes it.
+    private val dir = File(context.filesDir, "tiles_v2").apply {
         mkdirs()
         // Earlier builds cached CARTO's "API KEY REQUIRED" placeholder under "tiles"; a new
         // directory means those files can never be served again.
         runCatching { File(context.cacheDir, "tiles").deleteRecursively() }
+        runCatching { File(context.cacheDir, "tiles_v2").deleteRecursively() }
     }
     private val memory = object : LruCache<Long, Bitmap>(96) {
         override fun sizeOf(key: Long, value: Bitmap): Int = 1
@@ -149,6 +153,53 @@ class TileStore(
             }
         }
         return out
+    }
+
+    /**
+     * Warms the disk cache around a point so the map still draws with no network.
+     *
+     * Bounded on purpose. These tiles come from a volunteer-run server, so this saves a
+     * neighbourhood at street zooms - the ground you are about to walk or drive - rather than
+     * a country. Coarse zooms are fetched first because they cover the whole area, so the map
+     * is readable even if the download is stopped early.
+     */
+    suspend fun downloadArea(
+        source: String,
+        lat: Double,
+        lon: Double,
+        maxZoom: Int,
+        radiusKm: Double = 3.0,
+        cap: Int = 900,
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): Int {
+        if (!lat.isFinite() || !lon.isFinite()) return 0
+        val zMax = maxZoom.coerceIn(11, 17)
+        val zMin = (zMax - 3).coerceAtLeast(9)
+        val refs = LinkedHashSet<TileRef>()
+        for (z in zMin..zMax) {
+            val n = 1 shl z
+            // Ground width of one tile at this latitude and zoom.
+            val metresPerTile = 40_075_016.0 * cos(Math.toRadians(lat.coerceIn(-85.0, 85.0))) / n
+            val span = ((radiusKm * 1000.0) / metresPerTile).toInt().coerceIn(0, 12)
+            val cx = (dev.skyward.rf.core.Geo.lonToNorm(lon) * n).toInt()
+            val cy = (dev.skyward.rf.core.Geo.latToNorm(lat) * n).toInt()
+            for (dy in -span..span) {
+                val y = cy + dy
+                if (y < 0 || y >= n) continue
+                for (dx in -span..span) refs.add(TileRef(z, ((cx + dx) % n + n) % n, y))
+            }
+            if (refs.size >= cap) break
+        }
+        val list = refs.take(cap)
+        var saved = 0
+        var done = 0
+        for (t in list) {
+            if (cached(t.z, t.x, t.y) == null && load(source, t.z, t.x, t.y)) saved++
+            done++
+            // Not every tile: a few hundred recompositions of the label is wasted work.
+            if (done % 8 == 0 || done == list.size) onProgress(done, list.size)
+        }
+        return saved
     }
 
     fun clear() {

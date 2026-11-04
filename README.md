@@ -324,6 +324,53 @@ phone with it. WiGLE grants each account a daily query allowance; the panel make
 button press, and pagination is a press of its own, so the allowance is never spent on pages
 nobody asked for.
 
+## Offline map
+
+The map draws from a tile cache that fills as you pan. The **⇩** button on the map's right-hand
+stack saves the ground around the current centre for use with no network: coarse zooms first
+down to the zoom you are on, a few kilometres across, capped at a few hundred tiles. It reports
+`SAVE 128/377` while it runs and `OFFLINE 377 tiles` when it finishes.
+
+Saved tiles live in the app's `files/tiles_v2`, not `cacheDir`, so Android does not evict them to
+reclaim space; **CLEAR TILE CACHE** in Setup removes them. The tiles come from OpenStreetMap's
+volunteer servers, which is why the save is a neighbourhood rather than a country.
+
+## Two phones: host, globe view and scan assignments
+
+Setup -> **Two devices** -> **Link role** overrides the screen-size split:
+
+| Role | What it does |
+| --- | --- |
+| AUTO | the larger screen takes the globe, the smaller one the wardriving view |
+| HOST | shows the globe and pushes its settings to every linked device |
+| GLOBE VIEW | shows the globe and follows the host |
+
+The host sends its map style, weak-dot filter, aircraft switch, satellite groups, globe spin
+speed and scan assignments with every snapshot. A globe view applies them when **Follow host
+settings** is on; it never pushes anything back, so the two cannot fight over the same value.
+
+Every radio gets an assigned sweep. In the **PEER** card, and in each board's expanded **ESP32**
+card, a **SCAN** drop-down picks the band; **GPS** is a separate switch because it applies to any
+band. The choices follow what the device actually reports: 5 GHz is only offered on a dual-band
+board (an ESP32-C5), BLE only when the firmware has shown it sweeps BLE, and GPS only when a
+module has produced a fix or an HDOP. A single-band board says so instead of silently offering a
+band it cannot hear. The assignment is shown in the card and in the host's **INTEL** table as
+`peer scan · WI-FI 2.4+5 + GPS`.
+
+The **MESH** card now appears only when there is at least one node; with nothing attached the
+space goes back to the INTEL table.
+
+Satellite capture is fixed at **150 km** from the observer. The old slider is gone because a
+wider radius captured most of the catalogue on every tick rather than anything overhead.
+
+## BIRDS-3
+
+The three BIRDS-3 1U CubeSats - NepaliSat-1 (Nepal), Raavana-1 (Sri Lanka) and Uguisu (Japan) -
+were deployed from the ISS on 17 June 2019 and re-entered in October 2021. The app asks CelesTrak
+for their catalogue numbers on every element-set refresh and gives them the same satellite glyph
+as everything else, with a gold glow when caught, but there are no live elements to propagate, so
+nothing is plotted today. They appear automatically if any of them is catalogued again.
+
 ## Moving the intel to another phone
 
 Everything the app records is plain files in one folder:

@@ -70,7 +70,14 @@ fun AppRoot(c: Container) {
     // one the wardriving readout. The switch happens when the link or the role changes, never on
     // every message, so after that it leaves the user's own tab choice alone.
     val peer by c.peer.state.collectAsState()
-    LaunchedEffect(peer.connected, peer.role) {
+    val settings by c.settingsStore.state.collectAsState()
+    LaunchedEffect(peer.connected, peer.role, settings.peerRoleMode) {
+        // A hand-picked globe view or host always shows the map; "auto" keeps the screen-size
+        // split, and an unlinked phone is left on whichever tab the user chose.
+        if (PeerProtocol.isGlobeMode(settings.peerRoleMode)) {
+            tab = 0
+            return@LaunchedEffect
+        }
         if (!peer.connected) return@LaunchedEffect
         when (peer.role) {
             PeerProtocol.DISPLAY -> tab = 0
