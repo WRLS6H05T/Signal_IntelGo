@@ -42,6 +42,8 @@ data class Settings(
     val tempUnit: String = "c",
     /** Hands-free Cortana: listen for the wake word and obey the spoken commands. */
     val voiceEnabled: Boolean = false,
+    /** "cortana" (Halo 4), "watcher" (Watch Dogs) or "chappie": who answers. */
+    val voiceRole: String = "cortana",
     /** Speak the replies and the watch alerts out loud. */
     val voiceAudio: Boolean = true,
     /** ESP32 sensor boards: BLE advertisements always, MQTT when a Wi-Fi board publishes. */

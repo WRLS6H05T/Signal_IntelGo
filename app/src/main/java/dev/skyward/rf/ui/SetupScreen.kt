@@ -42,6 +42,7 @@ import dev.skyward.rf.Container
 import dev.skyward.rf.core.LOG_RADIUS_KM
 import dev.skyward.rf.core.Settings
 import dev.skyward.rf.core.Units
+import dev.skyward.rf.core.VoiceStyles
 import dev.skyward.rf.peer.PeerProtocol
 import dev.skyward.rf.sky.AircraftSource
 import dev.skyward.rf.ui.theme.Sky
@@ -341,6 +342,45 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                     )
                 }
                 Spacer(Modifier.height(8.dp))
+                Text("Voice", color = Sky.text, fontSize = 11.sp)
+                Spacer(Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (role in VoiceStyles.roles) {
+                        UnitChip(
+                            label = role.label,
+                            selected = settings.voiceRole.equals(role.name, ignoreCase = true),
+                            onClick = {
+                                c.settingsStore.update { it.copy(voiceRole = role.name.lowercase()) }
+                            },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        VoiceStyles.of(settings.voiceRole).let { "${it.role.detail} - ${it.locale}" },
+                        color = Sky.textDim,
+                        fontSize = 10.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (settings.voiceEnabled) {
+                        FilterChip(
+                            selected = false,
+                            onClick = {
+                                c.voice.speak(VoiceStyles.sample(VoiceStyles.of(settings.voiceRole).role))
+                            },
+                            label = {
+                                Text("hear it", fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                            },
+                            shape = RoundedCornerShape(9.dp),
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = Sky.surfaceHigh,
+                                labelColor = Sky.cyan,
+                            ),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Spoken replies", color = Sky.text, fontSize = 13.sp)
@@ -364,8 +404,18 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "The glitched voice is kept for the watch list: Axon, TASER, Flock and " +
-                        "trackers are announced in it, once per device per five minutes.",
+                    "A phone's engine has one voice per language and a pitch and rate dial, so each " +
+                        "voice is its cadence, accent and phrasing rather than a clone: Cortana calm " +
+                        "and close, the Watcher flat and clipped, Chappie young and chatty. " +
+                        "South African English is often not installed, in which case Chappie falls " +
+                        "back to a plain English voice.",
+                    color = Sky.textDim,
+                    fontSize = 10.sp,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "The glitched delivery is kept for the watch list in all three voices: Axon, " +
+                        "TASER, Flock and trackers, once per device per five minutes.",
                     color = Sky.textDim,
                     fontSize = 10.sp,
                 )

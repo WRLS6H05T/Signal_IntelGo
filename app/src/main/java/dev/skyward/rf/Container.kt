@@ -8,6 +8,7 @@ import dev.skyward.rf.core.RfObservation
 import dev.skyward.rf.core.Cortana
 import dev.skyward.rf.core.SettingsStore
 import dev.skyward.rf.core.Units
+import dev.skyward.rf.core.VoiceStyles
 import dev.skyward.rf.voice.CortanaVoice
 import dev.skyward.rf.location.LocationTracker
 import dev.skyward.rf.net.WeatherFeed
@@ -287,6 +288,7 @@ class Container(context: Context) {
         scope.launch {
             settingsStore.state.collect { cfg ->
                 voice.audible = cfg.voiceAudio
+                voice.style = VoiceStyles.of(cfg.voiceRole)
                 if (cfg.voiceEnabled) voice.start() else voice.stop()
             }
         }

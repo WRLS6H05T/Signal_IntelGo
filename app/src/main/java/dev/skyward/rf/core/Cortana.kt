@@ -150,7 +150,9 @@ object Cortana {
      * then the radio picture, then whether anything is being recorded.
      */
     fun intelReport(r: ReportInput): String {
-        val sb = StringBuilder("Cortana. ")
+        // No name in the text: the chosen voice prefixes itself, so the report reads the same
+        // whether it is Cortana, the Watcher or Chappie delivering it.
+        val sb = StringBuilder("Intel report. ")
         val groups = WatchKind.values().mapNotNull { kind ->
             val n = r.watches.count { it.kind == kind }
             if (n == 0) null else count(n, kind.spoken)

@@ -378,8 +378,15 @@ then the **signal intel**: Wi-Fi networks, Bluetooth devices, cell towers, mesh 
 and aircraft in range, whether a GPS fix is held, and whether a drive is being recorded and how
 far it has gone.
 
-Her own answers are spoken high and quick. The **glitched voice** is kept for the watch list:
-a Flock camera, an Axon body camera, a TASER or a tracker is announced in the broken, slowed-down
+There are three voices. **CORTANA** is the Halo 4 delivery - calm, close and measured. **WATCHER**
+is the Watch Dogs machine: low, flat, and clipped into one idea per sentence. **CHAPPIE** is the
+young South African robot, answering with "ja" and "okay?". A phone's text-to-speech engine has
+one voice per locale and a pitch and rate dial, so these are each character's accent, pitch, rate
+and phrasing rather than a clone of the performance itself; South African English is often not
+installed, and Chappie falls back to plain English rather than going mute.
+
+Whichever is chosen, the **glitched delivery** stays reserved for the watch list: a Flock camera,
+an Axon body camera, a TASER or a tracker is announced in the broken, slowed-down version of that
 voice - once per device per five minutes, so a drive does not become a monologue. Everything uses
 the phone's own recogniser and text-to-speech engine: no audio is written to a file and nothing is
 sent anywhere. She listens while the app is open and the screen is on; a background listener would

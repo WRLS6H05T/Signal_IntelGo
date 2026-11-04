@@ -12,6 +12,8 @@ import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import dev.skyward.rf.core.Cortana
+import dev.skyward.rf.core.VoiceStyle
+import dev.skyward.rf.core.VoiceStyles
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import java.util.Locale
@@ -52,6 +54,10 @@ class CortanaVoice(private val context: Context) {
     /** The settings switch owns this: off means she still listens, she just does not answer. */
     @Volatile
     var audible: Boolean = true
+
+    /** Who is speaking; the settings picker owns this. */
+    @Volatile
+    var style: VoiceStyle = VoiceStyles.of("cortana")
 
     private val main = Handler(Looper.getMainLooper())
     private var recognizer: SpeechRecognizer? = null
@@ -131,19 +137,23 @@ class CortanaVoice(private val context: Context) {
         if (now - lastSpokeAt < 120) return
         lastSpokeAt = now
 
+        val voice = style
+        val line = voice.render(text, glitch)
+
         state.update { it.copy(speaking = true) }
         // Pause the microphone instead of letting it hear the reply.
         main.removeCallbacks(restartTask)
         runCatching { recognizer?.cancel() }
 
-        // Cortana speaks high and quick; the watch alert drops two octaves and drags, which is
-        // as close as a TTS engine gets to a corrupted fragment of her voice.
-        runCatching { engine.setPitch(if (glitch) 0.45f else 1.16f) }
-        runCatching { engine.setSpeechRate(if (glitch) 0.80f else 1.02f) }
+        // Pitch and rate are the performance the engine actually offers, so each voice gets its
+        // own pair and the glitched alert drags below whichever one is chosen.
+        runCatching { engine.setPitch(if (glitch) voice.alertPitch else voice.pitch) }
+        runCatching { engine.setSpeechRate(if (glitch) voice.alertRate else voice.rate) }
+        applyLocale(engine, voice)
 
         val id = "cortana-${utterance++}"
         val queued = runCatching {
-            engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, id)
+            engine.speak(line, TextToSpeech.QUEUE_FLUSH, null, id)
         }.getOrDefault(TextToSpeech.ERROR)
         if (queued != TextToSpeech.SUCCESS) {
             state.update { it.copy(speaking = false) }
@@ -151,7 +161,7 @@ class CortanaVoice(private val context: Context) {
             return
         }
         // Some engines never deliver the callback; this puts the listener back either way.
-        main.postDelayed(watchdog, (1_400 + text.length * 65L).coerceAtMost(14_000L))
+        main.postDelayed(watchdog, (1_400 + line.length * 65L).coerceAtMost(14_000L))
     }
 
     // ---------------- recogniser ----------------
@@ -278,6 +288,19 @@ class CortanaVoice(private val context: Context) {
     }
 
     // ---------------- speaker ----------------
+
+    /**
+     * The accent is the half of a voice that a pitch dial cannot fake. en-ZA is often not
+     * installed, so an unavailable language falls back rather than leaving the engine mute.
+     */
+    private fun applyLocale(engine: TextToSpeech, voice: VoiceStyle) {
+        val wanted = runCatching { Locale.forLanguageTag(voice.locale) }.getOrDefault(Locale.US)
+        val available = runCatching { engine.isLanguageAvailable(wanted) }
+            .getOrDefault(TextToSpeech.LANG_NOT_SUPPORTED)
+        runCatching {
+            engine.language = if (available >= TextToSpeech.LANG_AVAILABLE) wanted else Locale.US
+        }
+    }
 
     private fun prepareSpeaker() {
         if (speaker != null) return
