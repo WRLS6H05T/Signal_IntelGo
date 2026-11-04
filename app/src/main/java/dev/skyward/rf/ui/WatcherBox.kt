@@ -71,19 +71,19 @@ fun WatcherBox(c: Container) {
                     android.content.pm.PackageManager.PERMISSION_GRANTED
                 if (granted) c.voice.wake() else mic.launch(Manifest.permission.RECORD_AUDIO)
             }
-            .padding(horizontal = 8.dp, vertical = 5.dp),
+            .padding(horizontal = 10.dp, vertical = 7.dp),
         horizontalAlignment = Alignment.End,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier
-                    .size(5.dp)
+                    .size(6.dp)
                     .clip(CircleShape)
                     .background(dot),
             )
-            Spacer(Modifier.width(5.dp))
-            Text("WATCHER", color = Sky.cyan, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+            Spacer(Modifier.width(6.dp))
+            Text("WATCHER", color = Sky.cyan, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
         }
-        Text(line, color = Sky.textDim, fontSize = 8.sp, maxLines = 1)
+        Text(line, color = Sky.textDim, fontSize = 10.sp, maxLines = 1)
     }
 }

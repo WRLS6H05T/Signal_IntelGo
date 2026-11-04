@@ -232,7 +232,24 @@ private val GreyscaleFilter: ColorFilter =
 private val NoTiles: List<TileRef> = emptyList()
 
 /** Globe spin speeds, in the order Settings.globeSpin uses. */
-private val SpinLabels = listOf("SPIN OFF", "SPIN 1X", "SPIN 4X")
+private val SpinLabels = listOf("SPIN OFF", "SPIN 1X", "SPIN 3X")
+
+/**
+ * The colours a logged satellite can take when it becomes an entity, in the order Setup draws
+ * them. Purple is the original and the default; the rest are there because a globe with Starlink
+ * lit up needs a ring that still reads against the rest of the sky.
+ */
+internal val EntityColors: Map<String, Color> = linkedMapOf(
+    "purple" to Sky.logged,
+    "cyan" to Sky.cyan,
+    "green" to Sky.mesh,
+    "amber" to Sky.warn,
+    "red" to Sky.danger,
+    "white" to Sky.text,
+)
+
+/** Resolves the stored name; an unknown name is the purple it has always been. */
+internal fun entityColor(name: String): Color = EntityColors[name] ?: Sky.logged
 
 /** The station is gold: one object, the one everyone looks for, so it never shares a colour. */
 private val IssGold = Color(0xFFFFC53D)
@@ -243,9 +260,10 @@ private val BirdsGold = Color(0xFFFFD166)
 /** NORAD 25544 is the station; the name never decides, because SWISSCUBE also contains "ISS". */
 private fun isIss(m: MapMarker): Boolean = m.station
 
-private fun markerColor(m: MapMarker): Color = when {
+private fun markerColor(m: MapMarker, satEntity: Color = Sky.logged): Color = when {
     isIss(m) -> IssGold
     m.birds3 && m.logged -> BirdsGold
+    m.logged && m.layer == Layer.SATELLITE -> satEntity
     m.logged -> Sky.logged
     m.layer == Layer.SATELLITE -> Sky.satellite
     m.layer == Layer.AIRCRAFT -> Sky.aircraft
@@ -275,9 +293,15 @@ fun buildMarkers(
     minScore: Int,
     /** A worldwide feed is tens of thousands of points; the map plots the nearest slice. */
     maxAircraft: Int = 900,
+    /**
+     * The other crowded layer. With the Starlink shell on, the catalogue runs to thousands of
+     * objects and the globe has to draw them all in one frame; the strongest slice is enough
+     * to see the shell, and the table still holds every one of them.
+     */
+    maxSats: Int = 1_500,
 ): List<MapMarker> {
     val out = ArrayList<MapMarker>(sky.sats.size + sky.aircraft.size + sky.drones.size + sky.mesh.size)
-    if (showSats) sky.sats.forEach { s: SatView ->
+    if (showSats) sky.sats.take(maxSats).forEach { s: SatView ->
         if (s.score < minScore) return@forEach
         out.add(
             MapMarker(
@@ -579,6 +603,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
             selectedKey = selected?.key,
             onSelect = { selected = it },
             spinSpeed = settings.globeSpin,
+            satEntity = entityColor(settings.satEntityColor),
             modifier = Modifier.fillMaxSize(),
         )
 
@@ -1058,6 +1083,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 12.dp, start = 12.dp, end = 12.dp),
+                satEntity = entityColor(settings.satEntityColor),
                 onClose = { selected = null },
             )
         }
@@ -1165,17 +1191,23 @@ private fun ScanLine(
 }
 
 @Composable
-private fun MarkerCard(marker: MapMarker, modifier: Modifier = Modifier, onClose: () -> Unit) {
+private fun MarkerCard(
+    marker: MapMarker,
+    modifier: Modifier = Modifier,
+    /** The colour this build uses for a logged satellite, chosen in Setup. */
+    satEntity: Color = Sky.logged,
+    onClose: () -> Unit,
+) {
     Column(
         modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(Sky.surface)
-            .border(1.dp, markerColor(marker).copy(alpha = 0.55f), RoundedCornerShape(14.dp))
+            .border(1.dp, markerColor(marker, satEntity).copy(alpha = 0.55f), RoundedCornerShape(14.dp))
             .padding(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Dot(markerColor(marker), 9)
+            Dot(markerColor(marker, satEntity), 9)
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
                 Text(marker.title, color = Sky.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
@@ -1206,8 +1238,10 @@ private fun TacticalMap(
     accuracyM: Float?,
     selectedKey: String?,
     onSelect: (MapMarker?) -> Unit,
-    /** 0 off, 1 slow, 2 fast: how fast the ball turns on its own axis. */
+    /** 0 off, 1 = 1x, 2 = 3x: how fast the ball turns on its own axis. */
     spinSpeed: Int,
+    /** The entity colour a logged satellite is drawn in, from Settings.satEntityColor. */
+    satEntity: Color = Sky.logged,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current.density
@@ -1235,7 +1269,9 @@ private fun TacticalMap(
         // per frame rather than per second: a timer would step the longitude in visible jumps.
         LaunchedEffect(globeMode, spinSpeed) {
             if (!globeMode || spinSpeed <= 0) return@LaunchedEffect
-            val degPerSecond = if (spinSpeed >= 2) 18.0 else 4.5
+            // 1x and 3x of the same base turn: two speeds that read as slow and fast on a
+            // sphere, rather than four settings where two of them are near enough the same.
+            val degPerSecond = 4.5 * spinSpeed
             var last = 0L
             while (true) {
                 withFrameNanos { now ->
@@ -1471,7 +1507,7 @@ private fun TacticalMap(
                 val a = if (cull) smoothstep(pr.front) else 1f
                 if (a <= 0.02f) continue
 
-                val base = markerColor(m)
+                val base = markerColor(m, satEntity)
                 val color = base.copy(alpha = a)
                 val p = Offset(pr.x, pr.y)
 
@@ -1508,9 +1544,12 @@ private fun TacticalMap(
                         center = p,
                     )
                 } else if (m.logged) {
-                    drawCircle(color = Sky.logged.copy(alpha = 0.18f * a), radius = r * 3.2f, center = p)
+                    // The entity circle. A satellite takes whichever colour was picked in
+                    // Setup; every other layer keeps the purple, so nothing else changes.
+                    val ring = if (m.layer == Layer.SATELLITE) satEntity else Sky.logged
+                    drawCircle(color = ring.copy(alpha = 0.18f * a), radius = r * 3.2f, center = p)
                     drawCircle(
-                        color = Sky.logged.copy(alpha = a),
+                        color = ring.copy(alpha = a),
                         radius = r * 2.4f,
                         center = p,
                         style = Stroke(width = 1.2f * density),
@@ -1678,20 +1717,22 @@ private fun LiveClock(
                     // decides whether it has anything to fetch.
                     observer?.let { pin -> scope.launch { runCatching { c.weather.refresh(pin.lat, pin.lon) } } }
                 }
-                .padding(horizontal = 10.dp, vertical = 6.dp),
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             horizontalAlignment = Alignment.End,
         ) {
             Text(
                 timeFmt.format(Date(now)),
                 color = Sky.cyan,
                 fontFamily = FontFamily.Monospace,
-                fontSize = if (showSeconds) 16.sp else 23.sp,
+                // A step up from the first cut: read at a glance off a dash mount rather
+                // than leaned in for, which is how it was being used.
+                fontSize = if (showSeconds) 19.sp else 26.sp,
                 fontWeight = FontWeight.Bold,
             )
             Text(
                 dayFmt.format(Date(now)) + " \u25BE",
                 color = Sky.textDim,
-                fontSize = 8.sp,
+                fontSize = 9.sp,
             )
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {

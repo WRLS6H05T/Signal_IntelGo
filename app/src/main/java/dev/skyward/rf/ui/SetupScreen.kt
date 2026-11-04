@@ -100,6 +100,38 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                         GroupChip(g, settings) { c.settingsStore.update(it) }
                     }
                 }
+                Spacer(Modifier.height(6.dp))
+                // The two constellations people ask for by name. Starlink is one group of
+                // thousands; PRIVATE is the CubeSat catalogue, which is where privately built
+                // and operated smallsats live - they are not a government series like the
+                // weather or GPS groups above.
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    GroupChip("starlink", settings, name = "STRLINK") { c.settingsStore.update(it) }
+                    GroupChip("cubesat", settings, name = "PRIVATE") { c.settingsStore.update(it) }
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "PRIVATE is the CubeSat catalogue: privately built and operated smallsats. " +
+                        "STRLINK is the whole Starlink shell, so the sky tick slows while it is on.",
+                    color = Sky.textDim,
+                    fontSize = 9.sp,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text("ENTITY COLOUR", color = Sky.textDim, fontSize = 9.sp)
+                Spacer(Modifier.height(4.dp))
+                // What a satellite takes the moment it becomes an entity. Purple is the
+                // original ring; the others exist so it still reads with Starlink lit up.
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for ((key, swatch) in EntityColors.entries.take(3)) {
+                        EntityColorChip(key, swatch, settings) { c.settingsStore.update(it) }
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for ((key, swatch) in EntityColors.entries.drop(3)) {
+                        EntityColorChip(key, swatch, settings) { c.settingsStore.update(it) }
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
                 // Named because they were asked for, and honest about why they are not on
                 // the map: a satellite that re-entered has no orbit left to draw.
@@ -819,7 +851,13 @@ private fun RoleChip(label: String, value: String, settings: Settings, onChange:
 }
 
 @Composable
-private fun GroupChip(label: String, settings: Settings, onChange: ((Settings) -> Settings) -> Unit) {
+private fun GroupChip(
+    label: String,
+    settings: Settings,
+    /** What the chip says, when the CelesTrak group name is not the word wanted on screen. */
+    name: String = label,
+    onChange: ((Settings) -> Settings) -> Unit,
+) {
     val selected = settings.satGroups.contains(label)
     FilterChip(
         selected = selected,
@@ -829,13 +867,44 @@ private fun GroupChip(label: String, settings: Settings, onChange: ((Settings) -
                 s.copy(satGroups = if (next.isEmpty()) listOf(label) else next)
             }
         },
-        label = { Text(label, fontSize = 10.sp, fontFamily = FontFamily.Monospace) },
+        label = { Text(name, fontSize = 10.sp, fontFamily = FontFamily.Monospace) },
         shape = RoundedCornerShape(9.dp),
         colors = FilterChipDefaults.filterChipColors(
             containerColor = Sky.surfaceHigh,
             labelColor = Sky.textDim,
             selectedContainerColor = Sky.satellite.copy(alpha = 0.22f),
             selectedLabelColor = Sky.satellite,
+        ),
+    )
+}
+
+/** One preset for the colour a logged satellite is drawn in, with its swatch on the chip. */
+@Composable
+private fun EntityColorChip(
+    key: String,
+    swatch: androidx.compose.ui.graphics.Color,
+    settings: Settings,
+    onChange: ((Settings) -> Settings) -> Unit,
+) {
+    FilterChip(
+        selected = settings.satEntityColor == key,
+        onClick = { onChange { it.copy(satEntityColor = key) } },
+        label = { Text(key.uppercase(), fontSize = 9.sp, fontFamily = FontFamily.Monospace) },
+        leadingIcon = {
+            Box(
+                Modifier
+                    .width(8.dp)
+                    .height(8.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(swatch),
+            )
+        },
+        shape = RoundedCornerShape(9.dp),
+        colors = FilterChipDefaults.filterChipColors(
+            containerColor = Sky.surfaceHigh,
+            labelColor = Sky.textDim,
+            selectedContainerColor = swatch.copy(alpha = 0.22f),
+            selectedLabelColor = swatch,
         ),
     )
 }

@@ -29,8 +29,13 @@ data class Settings(
     val refreshSatMs: Long = 5_000,
     val refreshAircraftMs: Long = 12_000,
     val dropWeakDots: Boolean = false,
-    /** Globe auto-spin as a speed step: 0 off, 1 slow, 2 fast. */
+    /** Globe auto-spin as a speed step: 0 off, 1 = 1x, 2 = 3x. */
     val globeSpin: Int = 1,
+    /**
+     * The colour a logged satellite takes when it becomes an entity: "purple" by default, or
+     * one of the presets in [dev.skyward.rf.ui.EntityColors]. Other layers keep purple.
+     */
+    val satEntityColor: String = "purple",
     /**
      * A running clock in the map's top-right corner; tapping it opens the weather at the GPS
      * pin. Off, nothing is drawn and the weather feed is never asked.

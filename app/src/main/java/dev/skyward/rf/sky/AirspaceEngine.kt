@@ -126,7 +126,11 @@ class AirspaceEngine(
                 sat.refresh((cfg.satGroups + "stations").distinct())
             }
 
-            if (now - lastSat >= cfg.refreshSatMs) {
+            // A Starlink shell is thousands of element sets. Propagating all of them at the
+            // interval meant for a few hundred objects is what would make the globe crawl,
+            // so the sky tick stretches while the catalogue is that large.
+            val satMs = if (sat.cachedCount() > 2_000) maxOf(cfg.refreshSatMs, 20_000L) else cfg.refreshSatMs
+            if (now - lastSat >= satMs) {
                 lastSat = now
                 val sats = sat.positions(obs, now).map { s ->
                     s.copy(logged = logged.contains(Layer.SATELLITE, s.noradId))
