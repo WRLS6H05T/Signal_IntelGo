@@ -28,8 +28,17 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # ubuntu runners already carry the SDK with platform 34 and the build tools; the
+      # setup-android action failed here, so the preinstalled one is used and its contents
+      # are printed to make a missing platform obvious in the log.
+      - name: Check the preinstalled Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME/platforms" || true
+          ls "$ANDROID_HOME/build-tools" || true
+
+      - name: Make the wrapper executable
+        run: chmod +x gradlew
 
       - name: Unit tests
         run: ./gradlew :app:testDebugUnitTest --console=plain
