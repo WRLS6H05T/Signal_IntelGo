@@ -19,6 +19,9 @@ object PeerProtocol {
     const val VERSION = 1
     const val KIND_SKY = "sky"
 
+    /** Messages about recorded drives, as opposed to live sweeps. */
+    const val KIND_LOGS = "logs"
+
     /** Globe device: the bigger screen, which shows the map and the sphere. */
     const val DISPLAY = "display"
 
@@ -34,6 +37,23 @@ object PeerProtocol {
 
     @Serializable
     data class Device(val id: String, val name: String, val rssi: Int)
+
+    /** One recorded drive this phone is offering, as the other one sees it in its list. */
+    @Serializable
+    data class LogInfo(
+        val id: String,
+        val name: String,
+        val at: Long,
+        val points: Int,
+        val km: Double,
+        val wifi: Int,
+        val ble: Int,
+        val best: Int,
+    )
+
+    /** One slice of a drive being sent; [total] must agree on every slice. */
+    @Serializable
+    data class LogPart(val id: String, val idx: Int, val total: Int, val data: String)
 
     @Serializable
     data class Message(
@@ -55,6 +75,14 @@ object PeerProtocol {
         val cellUsed: Boolean = false,
         val wifi: List<Ap> = emptyList(),
         val ble: List<Device> = emptyList(),
+        /** The drives this phone has recorded and is willing to hand over. */
+        val logs: List<LogInfo> = emptyList(),
+        /** Asks the other phone to push its list of drives. */
+        val wantList: Boolean = false,
+        /** The id of a drive to fetch; it answers with a run of [part] messages. */
+        val want: String = "",
+        /** One slice of a drive on its way over. */
+        val part: LogPart? = null,
     )
 
     private val json = Json {

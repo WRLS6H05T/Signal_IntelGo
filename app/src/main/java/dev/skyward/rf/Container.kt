@@ -100,6 +100,9 @@ class Container(context: Context) {
      */
     val peer = BlePeer(appContext)
 
+    /** The drives the other phone says it has, as last offered over the link. */
+    val peerLogs = MutableStateFlow<List<PeerProtocol.LogInfo>>(emptyList())
+
     /** Uploads the logged signals to the user's own WiGLE account. */
     val wigle = WigleUpload(http)
 
@@ -176,6 +179,26 @@ class Container(context: Context) {
                 cellUsed = cell.count() > 0,
             )
         }
+        // Recorded drives travel on request, not with every sweep: a long drive would hold the
+        // pipe for a minute and stall the live picture both phones are watching.
+        peer.logProvider = {
+            wardrive.sessions.value.map {
+                PeerProtocol.LogInfo(
+                    id = it.id,
+                    name = it.name,
+                    at = it.startedAt,
+                    points = it.points,
+                    km = it.km,
+                    wifi = it.wifiAps,
+                    ble = it.bleDevices,
+                    best = it.bestScore,
+                )
+            }
+        }
+        peer.logSource = { id -> wardrive.sessionJson(id) }
+        peer.onPeerLogs = { list -> peerLogs.value = list }
+        peer.onPeerLog = { json, from -> wardrive.importSession(json, from) }
+
         peer.onRemote = { wifi, ble, fix ->
             rf.ingestRemote(
                 wifi = wifi.map { RfScanner.RemoteObs(it.id, it.name, it.rssi, it.ch) },

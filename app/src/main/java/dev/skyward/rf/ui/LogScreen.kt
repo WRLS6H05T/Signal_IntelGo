@@ -197,6 +197,8 @@ fun LogScreen(c: Container, modifier: Modifier = Modifier, onShowOnMap: () -> Un
             }
         }
 
+        item { PeerLogsCard(c, df) }
+
         item {
             Text(
                 "DRIVES",
@@ -271,8 +273,9 @@ private fun SessionRow(
             Column(Modifier.weight(1f)) {
                 Text(s.name, color = Sky.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "${df.format(Date(s.startedAt))} · ${(s.endedAt - s.startedAt) / 60000} min",
-                    color = Sky.textDim,
+                    "${df.format(Date(s.startedAt))} · ${(s.endedAt - s.startedAt) / 60000} min" +
+                        if (s.from.isNotBlank()) " · from ${s.from}" else "",
+                    color = if (s.from.isNotBlank()) Sky.mesh else Sky.textDim,
                     fontSize = 10.sp,
                 )
             }
@@ -303,6 +306,53 @@ private fun SessionRow(
             SmallAction("CSV", onClick = onExportCsv)
             Spacer(Modifier.weight(1f))
             SmallAction("DEL", color = Sky.danger, onClick = onDelete)
+        }
+    }
+}
+
+@Composable
+/**
+ * The drives the other phone has recorded.
+ *
+ * The link carries live sweeps all the time; a recorded drive is a file, so it is fetched on
+ * request instead of pushed. Fetching copies it into this phone's list, marked with the name of
+ * the phone it came from.
+ */
+private fun PeerLogsCard(c: Container, df: SimpleDateFormat) {
+    val peer by c.peer.state.collectAsState()
+    val offered by c.peerLogs.collectAsState()
+    if (!peer.connected) return
+
+    SectionCard(title = "Peer drives", trailing = peer.peerName.ifBlank { "linked" }) {
+        Text(
+            "Recorded on the other phone. FETCH copies a drive here, where it joins the list " +
+                "below and can be shown on the map or exported.",
+            color = Sky.textDim,
+            fontSize = 11.sp,
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SmallAction("REFRESH LIST", Sky.cyan) { c.peer.requestLogList() }
+            SmallAction("OFFER MINE", Sky.mesh) { c.peer.sendLogList() }
+        }
+        if (offered.isEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Text("Nothing offered yet.", color = Sky.textDim, fontSize = 10.sp)
+        }
+        offered.forEach { info ->
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(info.name, color = Sky.text, fontSize = 12.sp)
+                    Text(
+                        "${df.format(Date(info.at))} · ${info.points} fixes · " +
+                            String.format(Locale.US, "%.2f", info.km) + " km",
+                        color = Sky.textDim,
+                        fontSize = 9.sp,
+                    )
+                }
+                SmallAction("FETCH", Sky.cyan) { c.peer.requestLog(info.id) }
+            }
         }
     }
 }

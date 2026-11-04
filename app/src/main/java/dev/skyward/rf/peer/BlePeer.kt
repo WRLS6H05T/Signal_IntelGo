@@ -67,6 +67,12 @@ class BlePeer(private val context: Context) {
         private const val MAX_ITEMS = 32
         private const val NAME_CHARS = 20
         private const val MAX_MESSAGE = 4_800
+
+        /** How long one drive part may wait before the next is queued, so control messages fit. */
+        private const val PART_GAP_MS = 150L
+
+        /** How many drives are offered at once; more would not fit one message. */
+        private const val MAX_OFFERS = 12
     }
 
     /** What this device offers the other one. */
@@ -120,6 +126,20 @@ class BlePeer(private val context: Context) {
     @Volatile
     var snapshotProvider: (() -> Snapshot)? = null
 
+    /** The drives this phone can offer, and the JSON behind one id. */
+    @Volatile
+    var logProvider: (() -> List<PeerProtocol.LogInfo>)? = null
+
+    @Volatile
+    var logSource: ((String) -> String?)? = null
+
+    /** The other phone's list, and a drive it has finished sending. */
+    @Volatile
+    var onPeerLogs: ((List<PeerProtocol.LogInfo>) -> Unit)? = null
+
+    @Volatile
+    var onPeerLog: ((String, String) -> Unit)? = null
+
     @Volatile
     private var running = false
 
@@ -139,6 +159,16 @@ class BlePeer(private val context: Context) {
     private var transmitting = false
 
     private val frameId = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /** Drive parts waiting for the pipe, and the slices of a drive arriving. */
+    private val outParts = ArrayDeque<PeerProtocol.LogPart>()
+
+    private val inParts = HashMap<String, HashMap<Int, String>>()
+
+    private val inTotals = HashMap<String, Int>()
+
+    @Volatile
+    private var lastPartAt = 0L
     private val assembler = PeerFrames.Assembler()
     private val outbox = ArrayDeque<ByteArray>()
     private val lock = Any()
@@ -238,8 +268,15 @@ class BlePeer(private val context: Context) {
         subscription = null
         peerAddress = null
         peerDiagIn = 0f
-        synchronized(lock) { outbox.clear() }
+        synchronized(lock) {
+            outbox.clear()
+            outParts.clear()
+            inParts.clear()
+            inTotals.clear()
+        }
+        lastPartAt = 0L
         assembler.reset()
+        onPeerLogs?.invoke(emptyList())
         _peerFix.value = null
         _state.value = State(detail = "off")
     }
@@ -326,6 +363,8 @@ class BlePeer(private val context: Context) {
                     role = role(),
                     detail = "linked",
                 )
+                // Both ends offer their drives straight away; the lists are small.
+                sendLogList()
             } else {
                 connection = null
                 subscription = null
@@ -341,6 +380,8 @@ class BlePeer(private val context: Context) {
                     peerCell = false,
                     detail = if (running) "waiting for the other device" else "off",
                 )
+                onPeerLogs?.invoke(emptyList())
+                synchronized(lock) { outParts.clear() }
                 if (running) adapter()?.let { startAdvertising(it) }
             }
         }
@@ -429,6 +470,7 @@ class BlePeer(private val context: Context) {
                 runCatching { g?.requestMtu(517) }
                 runCatching { g?.discoverServices() }
                 _state.value = _state.value.copy(connected = true, detail = "linked", role = role())
+                sendLogList()
             } else {
                 runCatching { g?.close() }
                 gatt = null
@@ -443,6 +485,8 @@ class BlePeer(private val context: Context) {
                     peerCell = false,
                     detail = if (running) "searching" else "off",
                 )
+                onPeerLogs?.invoke(emptyList())
+                synchronized(lock) { outParts.clear() }
                 adapter()?.let { startScanning(it) }
             }
         }
@@ -505,6 +549,10 @@ class BlePeer(private val context: Context) {
             peerGps = decoded.gpsUsed,
             peerCell = decoded.cellUsed,
         )
+        if (decoded.logs.isNotEmpty()) onPeerLogs?.invoke(decoded.logs)
+        if (decoded.wantList) sendLogList()
+        if (decoded.want.isNotBlank()) startSending(decoded.want)
+        decoded.part?.let { takePart(it) }
         if (decoded.wifi.isNotEmpty() || decoded.ble.isNotEmpty() || fix != null) {
             onRemote?.invoke(decoded.wifi, decoded.ble, fix)
         }
@@ -521,6 +569,7 @@ class BlePeer(private val context: Context) {
             lastQueuedAt = System.currentTimeMillis()
             queueSnapshot()
         }
+        pushPartIfDue()
         if (transmitting) return
         val chunk = synchronized(lock) { outbox.removeFirstOrNull() } ?: return
         transmitting = true
@@ -539,6 +588,9 @@ class BlePeer(private val context: Context) {
     }
 
     private fun queueSnapshot() {
+        // A drive owns the pipe until its last slice is out: replacing the queue mid-file would
+        // leave the other phone holding a transfer that can never complete.
+        if (synchronized(lock) { outParts.isNotEmpty() }) return
         val snapshot = snapshotProvider?.invoke() ?: return
         val message = PeerProtocol.Message(
             kind = PeerProtocol.KIND_SKY,
@@ -566,6 +618,130 @@ class BlePeer(private val context: Context) {
             outbox.clear()
             outbox.addAll(frames)
         }
+    }
+
+    /** Offers this phone's recorded drives. Small: twelve names and their counts. */
+    fun sendLogList() {
+        if (!_state.value.connected) return
+        val logs = logProvider?.invoke()?.take(MAX_OFFERS)?.map { it.copy(name = it.name.take(40)) }
+            ?: return
+        queue(
+            PeerProtocol.Message(
+                kind = PeerProtocol.KIND_LOGS,
+                id = id,
+                name = deviceName,
+                diagIn = diagonalInches(),
+                at = System.currentTimeMillis(),
+                logs = logs,
+            ),
+        )
+    }
+
+    /** Asks the other phone to send its list again. */
+    fun requestLogList() {
+        if (!_state.value.connected) return
+        queue(
+            PeerProtocol.Message(
+                kind = PeerProtocol.KIND_LOGS,
+                id = id,
+                name = deviceName,
+                diagIn = diagonalInches(),
+                at = System.currentTimeMillis(),
+                wantList = true,
+            ),
+        )
+    }
+
+    /** Asks for one drive by id; it arrives as a run of parts. */
+    fun requestLog(logId: String) {
+        if (!_state.value.connected || logId.isBlank()) return
+        queue(
+            PeerProtocol.Message(
+                kind = PeerProtocol.KIND_LOGS,
+                id = id,
+                name = deviceName,
+                diagIn = diagonalInches(),
+                at = System.currentTimeMillis(),
+                want = logId,
+            ),
+        )
+        _state.value = _state.value.copy(detail = "fetching a drive from ${_state.value.peerName}")
+    }
+
+    /** Packs the requested drive and queues it a slice at a time. */
+    private fun startSending(logId: String) {
+        val json = logSource?.invoke(logId) ?: return
+        val parts = PeerLogs.pack(json)
+        if (parts.isEmpty()) return
+        if (parts.size > PeerLogs.MAX_PARTS) {
+            // Honest refusal: half a drive would look like a complete one on the other side.
+            _state.value = _state.value.copy(detail = "that drive is too large to send")
+            return
+        }
+        synchronized(lock) {
+            outParts.clear()
+            parts.forEachIndexed { idx, data ->
+                outParts.add(PeerProtocol.LogPart(id = logId, idx = idx, total = parts.size, data = data))
+            }
+        }
+        _state.value = _state.value.copy(detail = "sending a drive to ${_state.value.peerName}")
+    }
+
+    private fun pushPartIfDue() {
+        val next = synchronized(lock) { outParts.firstOrNull() } ?: return
+        val now = System.currentTimeMillis()
+        if (now - lastPartAt < PART_GAP_MS) return
+        val queued = queue(
+            PeerProtocol.Message(
+                kind = PeerProtocol.KIND_LOGS,
+                id = id,
+                name = deviceName,
+                diagIn = diagonalInches(),
+                at = now,
+                part = next,
+            ),
+        )
+        synchronized(lock) {
+            if (queued) outParts.removeFirstOrNull() else outParts.clear()
+        }
+        lastPartAt = now
+        if (!queued) _state.value = _state.value.copy(detail = "could not send the drive")
+    }
+
+    /** Keeps the slices of a drive until the last one lands, then hands the JSON over. */
+    private fun takePart(part: PeerProtocol.LogPart) {
+        if (part.id.isBlank() || part.data.isEmpty()) return
+        if (part.total <= 0 || part.total > PeerLogs.MAX_PARTS || part.idx !in 0 until part.total) return
+        val complete = synchronized(lock) {
+            val total = inTotals[part.id]
+            if (total != null && total != part.total) {
+                // A newer transfer of the same drive: start over rather than splice two files.
+                inParts.remove(part.id)
+                inTotals.remove(part.id)
+            }
+            inTotals[part.id] = part.total
+            val slices = inParts.getOrPut(part.id) { HashMap() }
+            slices[part.idx] = part.data
+            if (slices.size < part.total) return@synchronized null
+            val ordered = (0 until part.total).map { slices[it] ?: return@synchronized null }
+            inParts.remove(part.id)
+            inTotals.remove(part.id)
+            ordered
+        } ?: return
+        val json = PeerLogs.unpack(complete) ?: return
+        val from = _state.value.peerName.ifBlank { "peer" }
+        onPeerLog?.invoke(json, from)
+        _state.value = _state.value.copy(detail = "received a drive from $from")
+    }
+
+    /** Encodes one message into frames and appends them; false when it cannot be sent. */
+    private fun queue(message: PeerProtocol.Message): Boolean {
+        val bytes = PeerProtocol.encode(message).toByteArray(Charsets.UTF_8)
+        if (bytes.size > MAX_MESSAGE) return false
+        val frames = PeerFrames.split(bytes, payloadSize(), frameId.incrementAndGet() and 0xFF)
+        if (frames.isEmpty()) return false
+        synchronized(lock) { outbox.addAll(frames) }
+        return true
     }
 
     private fun payloadSize(): Int = (mtuSize - PeerFrames.HEADER).coerceIn(16, 240)

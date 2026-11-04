@@ -1,11 +1,13 @@
 package dev.skyward.rf.wardrive
 
 import dev.skyward.rf.core.FileStore
+import dev.skyward.rf.core.appJson
 import dev.skyward.rf.core.Geo
 import dev.skyward.rf.core.SignalScale
 import dev.skyward.rf.scan.RfScanner
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.serialization.decodeFromString
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -203,6 +205,7 @@ class WardriveEngine(
                     wifiAps = s.wifiAps,
                     bleDevices = s.bleDevices,
                     bestScore = s.bestScore,
+                    from = s.from,
                 ),
             )
         }
@@ -213,6 +216,24 @@ class WardriveEngine(
 
     fun showSession(id: String?) {
         _overlay.value = if (id == null) null else loadSession(id)
+    }
+
+    /** The stored JSON for one drive, as the peer link sends it. */
+    fun sessionJson(id: String): String? = store.readText("session_$id.json")
+
+    /**
+     * Stores a drive another phone sent. The id is kept, so fetching the same drive twice
+     * replaces the copy instead of stacking duplicates, and the sender's name is recorded so
+     * the list can say where it came from.
+     */
+    fun importSession(json: String, from: String): Boolean {
+        val session = runCatching { appJson.decodeFromString<WardriveSession>(json) }.getOrNull()
+            ?: return false
+        if (session.id.isBlank()) return false
+        val stamped = if (session.from.isBlank()) session.copy(from = from.take(32)) else session
+        store.write("session_${stamped.id}.json", stamped)
+        refreshSessions()
+        return true
     }
 
     fun deleteSession(id: String) {

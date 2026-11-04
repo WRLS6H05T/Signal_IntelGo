@@ -46,6 +46,8 @@ data class WardriveSession(
     val loggedSats: Int = 0,
     val loggedAircraft: Int = 0,
     val loggedMesh: Int = 0,
+    /** The phone this drive came from, when it was sent over the peer link. */
+    val from: String = "",
 ) {
     val durationMs: Long get() = if (endedAt > 0) (endedAt - startedAt).coerceAtLeast(0) else 0L
     val km: Double get() = distanceM / 1000.0
@@ -70,4 +72,5 @@ data class SessionSummary(
     val wifiAps: Int,
     val bleDevices: Int,
     val bestScore: Int,
+    val from: String = "",
 )
