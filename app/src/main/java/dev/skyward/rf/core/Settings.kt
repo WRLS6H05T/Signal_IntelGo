@@ -31,6 +31,8 @@ data class Settings(
     /** Satellites/aircraft closer than this are captured while a drive is recording. */
     val logRadiusKm: Double = 250.0,
     val dropWeakDots: Boolean = false,
+    /** Globe auto-spin as a speed step: 0 off, 1 slow, 2 fast. */
+    val globeSpin: Int = 1,
     /** ESP32 sensor boards: BLE advertisements always, MQTT when a Wi-Fi board publishes. */
     val esp32Enabled: Boolean = true,
     /** GhostESP, ESP32 Marauder, Biscuit and anything else ESP32 plugged into the USB port. */

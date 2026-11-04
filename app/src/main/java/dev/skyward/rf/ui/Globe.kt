@@ -22,9 +22,12 @@ class ViewProjection(
     centerLon: Double,
     private val radius: Float,
     private val t: Float,
+    private val tiltDeg: Double = 0.0,
 ) {
-    private val cx = flat.width / 2f
+    private val cx = flat.width / 2f + flat.shiftX
     private val cy = flat.height / 2f
+    private val cosTilt = cos(Math.toRadians(tiltDeg))
+    private val sinTilt = sin(Math.toRadians(tiltDeg))
     private val sinLat0 = sin(Math.toRadians(centerLat))
     private val cosLat0 = cos(Math.toRadians(centerLat))
     private val lon0 = Math.toRadians(centerLon)
@@ -45,13 +48,19 @@ class ViewProjection(
 
         val x3 = cosLat * sin(dLon)
         val y3 = cosLat0 * sin(la) - sinLat0 * cosLat * cos(dLon)
+        // Tilt the ball toward the viewer about the screen's horizontal axis. An orthographic
+        // sphere is still a circle under that rotation, so nothing changes shape: the poles tip
+        // in, the graticule curves like a globe on a stand, and a spinning longitude reads as a
+        // turning ball rather than a flat disc sliding sideways.
+        val ty = y3 * cosTilt - cosc * sinTilt
+        val tz = y3 * sinTilt + cosc * cosTilt
         val k = radius * (1.0 + lift)
         val gx = (cx + k * x3).toFloat()
-        val gy = (cy - k * y3).toFloat()
+        val gy = (cy - k * ty).toFloat()
         return Projected(
             x = m.x + (gx - m.x) * t,
             y = m.y + (gy - m.y) * t,
-            front = 1f - (1f - cosc.coerceIn(0.0, 1.0).toFloat()) * t,
+            front = 1f - (1f - tz.coerceIn(0.0, 1.0).toFloat()) * t,
             lift = (lift * t).toFloat(),
         )
     }
@@ -95,9 +104,29 @@ fun globeRadius(zoom: Double, w: Float, h: Float): Float {
  * projected to must come from the same switch, or icons end up beside the globe.
  */
 fun viewProjection(camera: MapCameraState, w: Float, h: Float, t: Float): ViewProjection = ViewProjection(
-    flat = Projection(camera.lat, camera.lon, camera.zoom, w, h),
+    flat = Projection(camera.lat, camera.lon, camera.zoom, w, h, viewShiftX(w)),
     centerLat = camera.lat,
     centerLon = camera.lon,
     radius = globeRadius(camera.zoom, w, h),
     t = t,
+    tiltDeg = GLOBE_TILT_DEG,
 )
+
+/**
+ * Degrees the sphere's axis tips toward the viewer.
+ *
+ * Fixed rather than adjustable: a tilt needs a turning ball to be visible at all, and 20
+ * degrees is the point where the poles are clearly in view without the disc turning into an
+ * ellipse of continents near the limb.
+ */
+const val GLOBE_TILT_DEG: Double = 20.0
+
+/**
+ * Where the map and the globe are centred: slightly right of the canvas centre.
+ *
+ * The PEER / ESP32 / MESH stack now owns the left edge in globe mode, so a dead-centre ball
+ * sits under the cards. A few percent of the width is enough to clear them without pushing
+ * the far edge of the world off screen.
+ */
+fun viewShiftX(widthPx: Float): Float =
+    if (widthPx.isFinite() && widthPx > 0f) widthPx * 0.06f else 0f

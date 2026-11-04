@@ -37,6 +37,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -198,6 +199,12 @@ private fun buildHardware(
  */
 private val GreyscaleFilter: ColorFilter =
     ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
+
+/** Nothing to draw, shared: the globe has no tiles, and spinning must not churn lists. */
+private val NoTiles: List<TileRef> = emptyList()
+
+/** Globe spin speeds, in the order Settings.globeSpin uses. */
+private val SpinLabels = listOf("SPIN OFF", "SPIN 1X", "SPIN 4X")
 
 /** The station is gold: one object, the one everyone looks for, so it never shares a colour. */
 private val IssGold = Color(0xFFFFC53D)
@@ -488,129 +495,160 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
             accuracyM = null,
             selectedKey = selected?.key,
             onSelect = { selected = it },
+            spinSpeed = settings.globeSpin,
             modifier = Modifier.fillMaxSize(),
         )
 
         val peer by c.peer.state.collectAsState()
-
-        // ---- BLE peer: top left, the same width as the INTEL box ----
-        if (peer.running) {
-            Column(
-                Modifier
-                    .align(Alignment.TopStart)
-                    .padding(10.dp)
-                    .width(216.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Sky.surface.copy(alpha = 0.94f))
-                    .border(1.dp, Sky.cyan.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("PEER", style = SkywardThemeLabel(), color = Sky.cyan)
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        if (peer.connected) "linked" else "searching",
-                        color = Sky.textDim,
-                        fontSize = 9.sp,
-                    )
-                }
-                // The card describes the other phone, so it names the other phone's screen:
-                // this phone's role is already obvious from what is on it.
-                Text(
-                    peer.peerName.ifBlank { "BLE peer" } + " · " + PeerProtocol.roleLabel(peer.peerRole),
-                    color = Sky.text,
-                    fontSize = 10.sp,
-                    maxLines = 1,
-                )
-                Text(
-                    "wifi ${peer.peerWifiTotal} · ble ${peer.peerBleTotal} · gps ${if (peer.peerGps) "yes" else "no"} · cell ${if (peer.peerCell) "yes" else "no"}",
-                    color = Sky.textDim,
-                    fontSize = 9.sp,
-                    maxLines = 1,
-                )
-            }
-        }
-
-        // ---- attached hardware: top right, only while something is plugged in ----
         val usbBoards by c.esp32Usb.state.collectAsState()
         val espNodes by c.esp32.state.collectAsState()
         val hardware = remember(usbBoards, espNodes, sky.mesh) {
             buildHardware(usbBoards, espNodes, sky.mesh)
         }
-        if (hardware.isNotEmpty()) {
-            val cfg by c.settingsStore.state.collectAsState()
-            var hwOpen by remember { mutableStateOf(false) }
-            Column(
-                Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(10.dp)
-                    .width(216.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Sky.surface.copy(alpha = 0.94f))
-                    .border(1.dp, Sky.esp32.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
-                    .clickable { hwOpen = !hwOpen }
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("HARDWARE", style = SkywardThemeLabel(), color = Sky.esp32)
-                    Spacer(Modifier.weight(1f))
-                    Text("${hardware.size}", color = Sky.textDim, fontSize = 9.sp)
-                    Spacer(Modifier.width(5.dp))
-                    Text(if (hwOpen) "\u25BC" else "\u25B2", color = Sky.textDim, fontSize = 9.sp)
-                }
-                hardware.take(3).forEach { h ->
-                    Spacer(Modifier.height(4.dp))
-                    Text(h.title, color = Sky.text, fontSize = 11.sp, maxLines = 1)
-                    Text(h.detail, color = Sky.textDim, fontSize = 9.sp, maxLines = 1)
-                    if (hwOpen) {
-                        h.lines.forEach { (k, v) ->
-                            Text("$k  $v", color = Sky.textDim, fontSize = 9.sp, maxLines = 1)
-                        }
+        var espOpen by remember { mutableStateOf(false) }
+        var meshOpen by remember { mutableStateOf(false) }
+
+        // ---- status stack: top left, PEER then ESP32 then MESH ----
+        // One column, so the right edge stays free for the map's own buttons and the eye can
+        // read down a single list of what is attached. INTEL is drawn after this, which is why
+        // the table flows over these cards rather than shoving them aside.
+        Column(
+            Modifier
+                .align(Alignment.TopStart)
+                .padding(10.dp)
+                .width(216.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (peer.running) {
+                StatusCard(title = "PEER", accent = Sky.cyan) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            peer.peerName.ifBlank { "BLE peer" },
+                            color = Sky.text,
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            if (peer.connected) "linked" else "searching",
+                            color = Sky.textDim,
+                            fontSize = 9.sp,
+                        )
                     }
+                    // The card describes the other phone, so it names the other phone's screen:
+                    // this phone's role is already obvious from what is on it.
+                    Text(
+                        PeerProtocol.roleLabel(peer.peerRole) + " \u00b7 wifi " + peer.peerWifiTotal +
+                            " \u00b7 ble " + peer.peerBleTotal,
+                        color = Sky.textDim,
+                        fontSize = 9.sp,
+                        maxLines = 1,
+                    )
+                    Text(
+                        "gps " + (if (peer.peerGps) "yes" else "no") +
+                            " \u00b7 cell " + (if (peer.peerCell) "yes" else "no"),
+                        color = Sky.textDim,
+                        fontSize = 9.sp,
+                        maxLines = 1,
+                    )
                 }
-                if (hardware.size > 3) {
-                    Spacer(Modifier.height(3.dp))
-                    Text("+${hardware.size - 3} more", color = Sky.textDim, fontSize = 9.sp)
-                }
-                Spacer(Modifier.height(5.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("BAUD", style = SkywardThemeLabel(), color = Sky.textDim)
-                    Spacer(Modifier.weight(1f))
-                    Text("${cfg.esp32Baud}", color = Sky.text, fontSize = 9.sp)
-                }
-                Spacer(Modifier.height(4.dp))
-                // The rates as a list to pick from, not a stepper: a board flashed at 921600 is
-                // one tap away, and the rate in use is the one drawn solid.
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+            }
+
+            // Attached hardware: ESP32 boards on a cable and Meshtastic radios heard over BLE.
+            if (hardware.isNotEmpty()) {
+                StatusCard(
+                    title = "ESP32",
+                    accent = Sky.esp32,
+                    trailing = hardware.size.toString(),
+                    open = espOpen,
+                    onToggle = { espOpen = !espOpen },
                 ) {
-                    dev.skyward.rf.scan.UsbBoards.BAUD_RATES.forEach { rate ->
-                        val chosen = rate == cfg.esp32Baud
-                        Box(
-                            Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(
-                                    if (chosen) Sky.esp32.copy(alpha = 0.30f)
-                                    else Sky.outline.copy(alpha = 0.30f),
-                                )
-                                .clickable(enabled = !chosen) {
-                                    // Reopening the port is what applies it: the bridge rate is
-                                    // set once, when the console is opened.
-                                    c.settingsStore.update { it.copy(esp32Baud = rate) }
-                                    c.esp32Usb.setBaud(rate)
-                                    c.esp32Usb.stop()
-                                    c.esp32Usb.start()
-                                }
-                                .padding(horizontal = 5.dp, vertical = 2.dp),
-                        ) {
-                            Text(
-                                "$rate",
-                                color = if (chosen) Sky.esp32 else Sky.textDim,
-                                fontSize = 8.5.sp,
-                            )
+                    hardware.take(3).forEach { h ->
+                        Text(h.title, color = Sky.text, fontSize = 11.sp, maxLines = 1)
+                        Text(h.detail, color = Sky.textDim, fontSize = 9.sp, maxLines = 1)
+                        if (espOpen) {
+                            h.lines.forEach { (k, v) ->
+                                Text("$k  $v", color = Sky.textDim, fontSize = 9.sp, maxLines = 1)
+                            }
                         }
                     }
+                    if (hardware.size > 3) {
+                        Text("+${hardware.size - 3} more", color = Sky.textDim, fontSize = 9.sp)
+                    }
+                    if (espOpen) {
+                        Spacer(Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("BAUD", style = SkywardThemeLabel(), color = Sky.textDim)
+                            Spacer(Modifier.weight(1f))
+                            Text("${settings.esp32Baud}", color = Sky.text, fontSize = 9.sp)
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        // The rates as a list to pick from, not a stepper: a board flashed at
+                        // 921600 is one tap away, and the rate in use is the one drawn solid.
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            dev.skyward.rf.scan.UsbBoards.BAUD_RATES.forEach { rate ->
+                                val chosen = rate == settings.esp32Baud
+                                Box(
+                                    Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(
+                                            if (chosen) Sky.esp32.copy(alpha = 0.30f)
+                                            else Sky.outline.copy(alpha = 0.30f),
+                                        )
+                                        .clickable(enabled = !chosen) {
+                                            // Reopening the port is what applies it: the bridge
+                                            // rate is set once, when the console is opened.
+                                            c.settingsStore.update { it.copy(esp32Baud = rate) }
+                                            c.esp32Usb.setBaud(rate)
+                                            c.esp32Usb.stop()
+                                            c.esp32Usb.start()
+                                        }
+                                        .padding(horizontal = 5.dp, vertical = 2.dp),
+                                ) {
+                                    Text(
+                                        "$rate",
+                                        color = if (chosen) Sky.esp32 else Sky.textDim,
+                                        fontSize = 8.5.sp,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Mesh: the broker's state plus the nodes, so "no nodes" can be told apart from
+            // "the feed is off" without opening Setup.
+            val meshBle = sky.mesh.count { it.source.equals("ble", ignoreCase = true) }
+            val meshMqtt = sky.mesh.count { it.source.equals("mqtt", ignoreCase = true) }
+            StatusCard(
+                title = "MESH",
+                accent = Sky.mesh,
+                trailing = sky.mesh.size.toString(),
+                open = meshOpen,
+                onToggle = { meshOpen = !meshOpen },
+            ) {
+                Text(
+                    (if (settings.meshMqttEnabled) "broker on" else "broker off") +
+                        " \u00b7 ble " + meshBle + " \u00b7 mqtt " + meshMqtt,
+                    color = Sky.textDim,
+                    fontSize = 9.sp,
+                    maxLines = 1,
+                )
+                sky.mesh.take(if (meshOpen) 6 else 2).forEach { n ->
+                    Text(
+                        (n.name.ifBlank { n.id }).take(16) +
+                            " \u00b7 " + String.format("%.1f dB", n.snr) + " \u00b7 " + n.hops + "hp",
+                        color = Sky.text,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                    )
+                }
+                if (!meshOpen && sky.mesh.size > 2) {
+                    Text("+${sky.mesh.size - 2} more", color = Sky.textDim, fontSize = 9.sp)
                 }
             }
         }
@@ -741,8 +779,9 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
             horizontalAlignment = Alignment.End,
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            // The globe has no pinch-in, so this is the explicit way back to the flat map.
-            // Same threshold the map uses to switch to the sphere.
+            // One switch, two directions: on the street map this swings out to the ball, and
+            // on the ball it brings the map back. A pinch is not the only way to travel -
+            // the globe is a destination, and it needed a door.
             if (camera.zoom < 4.35) {
                 IconButton(
                     onClick = { camera.centerOn(camera.lat, camera.lon, 9.0, resumeFollow = false) },
@@ -753,6 +792,35 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                         .border(1.dp, Sky.outline, RoundedCornerShape(12.dp)),
                 ) {
                     Text("MAP", color = Sky.cyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+                // Speed of the turn, cycled in place: off, slow, fast and round again.
+                IconButton(
+                    onClick = {
+                        c.settingsStore.update { s -> s.copy(globeSpin = (s.globeSpin + 1) % 3) }
+                    },
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Sky.surface.copy(alpha = 0.95f))
+                        .border(1.dp, Sky.outline, RoundedCornerShape(12.dp)),
+                ) {
+                    Text(
+                        SpinLabels[settings.globeSpin.coerceIn(0, SpinLabels.lastIndex)],
+                        color = if (settings.globeSpin == 0) Sky.textDim else Sky.cyan,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            } else {
+                IconButton(
+                    onClick = { camera.centerOn(camera.lat, camera.lon, 3.0, resumeFollow = false) },
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Sky.surface.copy(alpha = 0.95f))
+                        .border(1.dp, Sky.outline, RoundedCornerShape(12.dp)),
+                ) {
+                    Text("GLOBE", color = Sky.cyan, fontSize = 8.sp, fontWeight = FontWeight.Bold)
                 }
             }
             IconButton(
@@ -779,6 +847,46 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 onClose = { selected = null },
             )
         }
+    }
+}
+
+/**
+ * One box in the top-left status stack.
+ *
+ * PEER, ESP32 and MESH share it so they line up at one width, and each header opens to show
+ * its detail. The cards are drawn before the INTEL table, so the table flows over them when
+ * it is open instead of the stack and the table fighting for the same corner.
+ */
+@Composable
+private fun StatusCard(
+    title: String,
+    accent: Color,
+    trailing: String? = null,
+    open: Boolean = false,
+    onToggle: (() -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(Sky.surface.copy(alpha = 0.94f))
+            .border(1.dp, accent.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+            .then(if (onToggle != null) Modifier.clickable { onToggle() } else Modifier)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(title, style = SkywardThemeLabel(), color = accent)
+            Spacer(Modifier.weight(1f))
+            if (trailing != null) {
+                Text(trailing, color = Sky.textDim, fontSize = 9.sp)
+            }
+            if (onToggle != null) {
+                Spacer(Modifier.width(5.dp))
+                Text(if (open) "▼" else "▲", color = Sky.textDim, fontSize = 9.sp)
+            }
+        }
+        content()
     }
 }
 
@@ -824,6 +932,8 @@ private fun TacticalMap(
     accuracyM: Float?,
     selectedKey: String?,
     onSelect: (MapMarker?) -> Unit,
+    /** 0 off, 1 slow, 2 fast: how fast the ball turns on its own axis. */
+    spinSpeed: Int,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current.density
@@ -846,12 +956,35 @@ private fun TacticalMap(
             globeMode = if (globeMode) camera.zoom < 4.35 else camera.zoom < 4.05
         }
         val globeT = if (globeMode) 1f else 0f
+        // The frame clock turns the ball. A still globe this size reads as a drawing, and the
+        // tilt only becomes visible once it moves, so the two changes need each other. Driven
+        // per frame rather than per second: a timer would step the longitude in visible jumps.
+        LaunchedEffect(globeMode, spinSpeed) {
+            if (!globeMode || spinSpeed <= 0) return@LaunchedEffect
+            val degPerSecond = if (spinSpeed >= 2) 18.0 else 4.5
+            var last = 0L
+            while (true) {
+                withFrameNanos { now ->
+                    if (last != 0L) {
+                        val dt = ((now - last) / 1_000_000_000.0).coerceIn(0.0, 0.1)
+                        camera.spinGlobe(degPerSecond * dt)
+                    }
+                    last = now
+                }
+            }
+        }
         // Pointer handlers are keyed on Unit, so they keep the first value they ever saw.
         val globeModeNow by rememberUpdatedState(globeMode)
         // Device-map mode: no tile requests at all, the phone's map app draws the streets.
         val showTiles = !globeMode && !useDeviceMap
         val visible = remember(tileSource, camera.zoom, camera.lat, camera.lon, w, h, showTiles) {
-            if (showTiles) tileStore.visible(tileSource, camera.lat, camera.lon, camera.zoom, w, h) else emptyList()
+            if (showTiles) {
+                tileStore.visible(tileSource, camera.lat, camera.lon, camera.zoom, w, h, viewShiftX(w))
+            } else {
+                // One shared empty list: a fresh one each frame would restart the loader
+                // effect once per frame while the globe spins.
+                NoTiles
+            }
         }
 
         LaunchedEffect(visible) {
@@ -929,7 +1062,14 @@ private fun TacticalMap(
         ) {
             try {
             tileVersion // read state so new tiles repaint
-            val proj = Projection(camera.lat, camera.lon, camera.zoom, size.width, size.height)
+            val proj = Projection(
+                camera.lat,
+                camera.lon,
+                camera.zoom,
+                size.width,
+                size.height,
+                viewShiftX(size.width),
+            )
 
             // ---- basemap: flat tiles near the ground, a lit sphere from orbit ----
             drawRect(color = Sky.bg)
@@ -977,7 +1117,8 @@ private fun TacticalMap(
                     alpha = 1f,
                     centerLat = camera.lat,
                     centerLon = camera.lon,
-                    center = Offset(size.width / 2f, size.height / 2f),
+                    center = Offset(size.width / 2f + viewShiftX(size.width), size.height / 2f),
+                    tiltDeg = GLOBE_TILT_DEG,
                     // Same radius the markers are projected with, or icons drift off the coast.
                     // From the canvas itself, so the disc and the markers cannot disagree.
                     radius = globeRadius(camera.zoom, size.width, size.height),

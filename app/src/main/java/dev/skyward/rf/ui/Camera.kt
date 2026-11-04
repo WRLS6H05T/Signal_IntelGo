@@ -73,6 +73,20 @@ class MapCameraState(
         follow = false
     }
 
+    /**
+     * Turns the sphere one step under its own momentum. Separate from [rotateGlobe] so the
+     * auto-spin is not mistaken for the user's finger having moved: it never takes a pixel
+     * amount and it leaves the zoom alone.
+     */
+    fun spinGlobe(degrees: Double) {
+        if (!degrees.isFinite() || degrees == 0.0) return
+        val next = lon + degrees
+        lon = ((next + 180.0) % 360.0 + 360.0) % 360.0 - 180.0
+        // A spinning ball cannot also be pinned to a fix: following would snap it back
+        // every second and the spin would look like a stutter.
+        if (follow) follow = false
+    }
+
     fun centerOn(latitude: Double, longitude: Double, targetZoom: Double? = null, resumeFollow: Boolean = true) {
         if (!latitude.isFinite() || !longitude.isFinite()) return
         lat = latitude
@@ -89,8 +103,15 @@ class Projection(
     val zoom: Double,
     val width: Float,
     val height: Float,
+    /**
+     * Pixels to push the centre right of the canvas centre. The status stack owns the left
+     * edge, so the thing being looked at sits where the open screen is, not in the middle
+     * of the glass.
+     */
+    val shiftX: Float = 0f,
 ) {
     private val safeZoom = if (zoom.isFinite()) zoom.coerceIn(0.0, 22.0) else 4.0
+    private val safeShift = if (shiftX.isFinite()) shiftX else 0f
     private val world = 256.0 * 2.0.pow(safeZoom)
     private val cx = Geo.lonToNorm(centerLon) * world
     private val cy = Geo.latToNorm(centerLat) * world
@@ -98,11 +119,14 @@ class Projection(
     fun toScreen(lat: Double, lon: Double): Offset {
         val wx = Geo.lonToNorm(lon) * world
         val wy = Geo.latToNorm(lat.coerceIn(-85.0, 85.0)) * world
-        return Offset((wx - cx + width / 2.0).toFloat(), (wy - cy + height / 2.0).toFloat())
+        return Offset(
+            (wx - cx + width / 2.0 + safeShift).toFloat(),
+            (wy - cy + height / 2.0).toFloat(),
+        )
     }
 
     fun toGeo(x: Float, y: Float): Pair<Double, Double> {
-        val wx = cx + (x - width / 2f)
+        val wx = cx + (x - width / 2f - safeShift)
         val wy = cy + (y - height / 2f)
         return Geo.normToLat((wy / world).coerceIn(0.0, 1.0)) to Geo.normToLon(wx / world)
     }
@@ -110,7 +134,7 @@ class Projection(
     fun tileOrigin(z: Int, tx: Int, ty: Int): Pair<Float, Float> {
         val n = 1 shl z
         val tileWorld = world / n
-        val sx = (tx * tileWorld - cx + width / 2.0).toFloat()
+        val sx = (tx * tileWorld - cx + width / 2.0 + safeShift).toFloat()
         val sy = (ty * tileWorld - cy + height / 2.0).toFloat()
         return sx to sy
     }

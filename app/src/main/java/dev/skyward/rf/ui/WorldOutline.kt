@@ -102,12 +102,16 @@ fun DrawScope.drawGlobeWorld(
     centerLon: Double,
     center: Offset,
     radius: Float,
+    /** Same tilt the markers use: the disc and the icons have to rotate together. */
+    tiltDeg: Double = 0.0,
 ) {
     if (alpha <= 0.02f || radius <= 2f) return
 
     val sinLat0 = sin(Math.toRadians(centerLat))
     val cosLat0 = cos(Math.toRadians(centerLat))
     val lon0 = Math.toRadians(centerLon)
+    val cosTilt = cos(Math.toRadians(tiltDeg))
+    val sinTilt = sin(Math.toRadians(tiltDeg))
 
     // Single 3-slot buffer: x, y, facing. Projecting a point allocates nothing.
     val pt = FloatArray(3)
@@ -116,9 +120,13 @@ fun DrawScope.drawGlobeWorld(
         val dLon = Math.toRadians(lonDeg) - lon0
         val cosLat = cos(la)
         val cosc = sinLat0 * sin(la) + cosLat0 * cosLat * cos(dLon)
-        pt[2] = cosc.toFloat()
+        // Rotate about the screen's horizontal axis before projecting, which is what tips the
+        // poles toward the viewer. Facing is the rotated z, or land near the limb would be
+        // drawn as if it were still on the near side.
+        val y3 = cosLat0 * sin(la) - sinLat0 * cosLat * cos(dLon)
+        pt[2] = (y3 * sinTilt + cosc * cosTilt).toFloat()
         pt[0] = (center.x + radius * (cosLat * sin(dLon))).toFloat()
-        pt[1] = (center.y - radius * (cosLat0 * sin(la) - sinLat0 * cosLat * cos(dLon))).toFloat()
+        pt[1] = (center.y - radius * (y3 * cosTilt - cosc * sinTilt)).toFloat()
     }
 
     // Evenly lit disc. The old radial highlight - however subtly offset - read as a second,

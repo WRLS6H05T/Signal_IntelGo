@@ -118,14 +118,23 @@ class TileStore(
     }
 
     /** Tiles covering the viewport for the current camera. */
-    fun visible(source: String, lat: Double, lon: Double, zoom: Double, widthPx: Float, heightPx: Float): List<TileRef> {
+    fun visible(
+        source: String,
+        lat: Double,
+        lon: Double,
+        zoom: Double,
+        widthPx: Float,
+        heightPx: Float,
+        /** Same centre offset the projection draws with, or the tiles and the pins drift apart. */
+        shiftX: Float = 0f,
+    ): List<TileRef> {
         val z = zoom.toInt().coerceIn(2, 18)
         val n = 1 shl z
         val world = 256.0 * 2.0.pow(zoom)
         val tileWorld = world / n
         val cx = dev.skyward.rf.core.Geo.lonToNorm(lon) * world
         val cy = dev.skyward.rf.core.Geo.latToNorm(lat) * world
-        val left = cx - widthPx / 2.0
+        val left = cx - widthPx / 2.0 - (if (shiftX.isFinite()) shiftX else 0f)
         val top = cy - heightPx / 2.0
         val x0 = floor(left / tileWorld).toInt()
         val x1 = floor((left + widthPx) / tileWorld).toInt()

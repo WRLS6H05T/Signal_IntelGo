@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.List
@@ -98,24 +99,63 @@ fun AppRoot(c: Container) {
         if (missing) runCatching { launcher.launch(requiredPermissions().toTypedArray()) }
     }
 
+    // The tab strip folds away: closed it is one line naming the tab you are on, and a tap
+    // opens the four choices. Choosing one puts it back, so the bar does not sit over the map.
+    // The strip shrinking is also what lets the INTEL box on the map drop into the space it
+    // gives back, because the Scaffold pads the screen by whatever the bar occupies.
+    var barOpen by remember { mutableStateOf(false) }
+    val tabs = listOf(
+        Triple("Map", Icons.Filled.Place, 0),
+        Triple("Drive", Icons.Filled.PlayArrow, 1),
+        Triple("Log", Icons.Filled.List, 2),
+        Triple("Setup", Icons.Filled.Settings, 3),
+    )
+    val current = tabs[tab.coerceIn(0, tabs.lastIndex)]
+
     Scaffold(
         containerColor = Sky.bg,
         bottomBar = {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .background(Sky.surface)
-                    .padding(vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically,
+            Column(
+                Modifier.fillMaxWidth().background(Sky.surface),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                BottomTab("Map", Icons.Filled.Place, tab == 0) { tab = 0 }
-                BottomTab("Drive", Icons.Filled.PlayArrow, tab == 1) { tab = 1 }
-                BottomTab("Log", Icons.Filled.List, tab == 2) {
-                    c.wardrive.refreshSessions()
-                    tab = 2
+                if (barOpen) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        tabs.forEach { (label, icon, index) ->
+                            BottomTab(label, icon, tab == index) {
+                                if (index == 2) c.wardrive.refreshSessions()
+                                tab = index
+                                barOpen = false
+                            }
+                        }
+                    }
                 }
-                BottomTab("Setup", Icons.Filled.Settings, tab == 3) { tab = 3 }
+                Row(
+                    Modifier
+                        .padding(horizontal = 18.dp, vertical = 4.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { barOpen = !barOpen },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (!barOpen) {
+                        Icon(
+                            current.second,
+                            contentDescription = current.first,
+                            tint = Sky.cyan,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Spacer(Modifier.size(6.dp))
+                        Text(current.first, fontSize = 10.sp, color = Sky.cyan)
+                        Spacer(Modifier.size(10.dp))
+                    }
+                    Text(if (barOpen) "\u25BC" else "\u25B2", fontSize = 11.sp, color = Sky.textDim)
+                }
             }
         },
     ) { inner ->
