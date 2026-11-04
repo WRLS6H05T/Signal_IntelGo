@@ -54,6 +54,13 @@ class WatcherTest {
     }
 
     @Test
+    fun `a tapped session needs no wake word at all`() {
+        assertEquals(Watcher.Command.REPORT, Watcher.parse("intel report"))
+        assertEquals(Watcher.Command.SETUP, Watcher.parse("open setup"))
+        assertEquals(Watcher.Command.START, Watcher.parse("start logging"))
+    }
+
+    @Test
     fun `the wake word alone is not a command`() {
         assertNull(Watcher.parse("watcher"))
         assertNull(Watcher.parse("Watcher,"))

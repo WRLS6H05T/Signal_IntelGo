@@ -1,5 +1,8 @@
 package dev.skyward.rf.ui
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,36 +22,43 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import dev.skyward.rf.Container
 import dev.skyward.rf.ui.theme.Sky
 
 /**
  * The Watcher's status box, drawn directly under the clock in the map's top-right corner.
  *
- * It is deliberately the same width as the clock above it and the same surface: the corner then
- * answers both "what time is it" and "is it listening" without a control floating over the map.
- * It shows the state (listening, awake, speaking) and the last phrase heard, and a tap wakes it
- * without saying the name.
+ * It is the microphone's switch: the Watcher only listens between a tap here and the end of the
+ * command that follows, so this box is the whole interface for the voice. It shows the state and
+ * the last phrase heard, and asking for the microphone permission happens on the tap that needs
+ * it rather than at launch.
  */
 @Composable
 fun WatcherBox(c: Container) {
     val state by c.voice.state.collectAsState()
+    val context = LocalContext.current
+    val mic = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) c.voice.wake()
+    }
 
     val dot = when {
         state.speaking -> Sky.logged
-        state.awake -> Sky.cyan
         state.listening -> Sky.mesh
         else -> Sky.textDim
     }
     val line = when {
+        state.speaking -> "speaking"
+        state.listening -> "listening"
         state.note.isNotBlank() -> state.note
         state.lastHeard.isNotBlank() -> state.lastHeard.take(26)
-        state.awake -> "awake"
-        state.listening -> "listening"
-        else -> "standby"
+        else -> "tap to talk"
     }
 
     Column(
@@ -56,7 +66,11 @@ fun WatcherBox(c: Container) {
             .clip(RoundedCornerShape(10.dp))
             .background(Sky.surface.copy(alpha = 0.95f))
             .border(1.dp, Sky.outline, RoundedCornerShape(10.dp))
-            .clickable { c.voice.wake() }
+            .clickable {
+                val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                    android.content.pm.PackageManager.PERMISSION_GRANTED
+                if (granted) c.voice.wake() else mic.launch(Manifest.permission.RECORD_AUDIO)
+            }
             .padding(horizontal = 8.dp, vertical = 5.dp),
         horizontalAlignment = Alignment.End,
     ) {

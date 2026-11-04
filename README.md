@@ -370,14 +370,17 @@ mount.
 
 ## Watcher
 
-Setup -> **Watcher** turns on hands-free voice. Say **"Watcher"** and the interface answers
-without a touch: *intel report*, *open map*, *drive*, *log*, *setup*, *open menu*, *close menu*,
+Setup -> **Watcher** turns on the voice. It listens **only between a tap on the status box and the
+end of the command that follows**: nothing holds the microphone on between taps, so there is no
+wake-word loop and no battery cost while driving. The box sits directly under the map's clock in
+the top-right corner and shows the state - *tap to talk*, *listening*, *speaking* - and the last
+phrase heard; the first tap also asks for the microphone if it has not been granted.
+
+Tap, then say *intel report*, *open map*, *drive*, *log*, *setup*, *open menu*, *close menu*,
 *start logging*, *stop logging*, *miles*, *kilometres*, *celsius*, *fahrenheit*, *mute*, *unmute*,
-*sleep*. The name is accepted in the forms a recogniser actually returns - "Watcher", "Wotcher",
-"Watcha", and the two words "watch her" - and a bare command works for twenty seconds after it,
-so "Watcher... open setup" does not need the name twice. A small status box sits directly under
-the map's clock in the top-right corner, showing whether it is listening, awake or speaking and
-the last phrase heard; tap it to wake it without saying anything.
+*sleep*. The name **"Watcher"** can be said first but is not needed; when it is said, the forms a
+recogniser actually returns are accepted - "Watcher", "Wotcher", "Watcha", and the two words
+"watch her".
 
 **"Watcher, intel report"** answers in two parts, in this order: the **connected devices** first -
 how many Flock cameras, Axon cameras, TASERs and trackers matched, and the nearest by name - and

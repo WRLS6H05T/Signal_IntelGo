@@ -331,8 +331,8 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                     !settings.voiceEnabled -> "off"
                     voice.note.isNotBlank() -> "unavailable"
                     voice.speaking -> "speaking"
-                    voice.awake -> "awake"
-                    else -> "listening"
+                    voice.listening -> "listening"
+                    else -> "tap to talk"
                 },
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -410,12 +410,14 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                 }
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "It listens while the app is open and the screen is on, and the whole interface " +
-                        "answers without a touch: 'intel report', 'open map', 'drive', 'log', 'setup', " +
+                    "It only listens between a tap on the status box under the map's clock and the " +
+                        "end of the command that follows - nothing holds the microphone on between " +
+                        "taps. Tap, then say: 'intel report', 'open map', 'drive', 'log', 'setup', " +
                         "'open menu', 'close menu', 'start logging', 'stop logging', 'miles', " +
-                        "'kilometres', 'celsius', 'fahrenheit', 'mute', 'unmute', 'sleep'. " +
-                        "The recogniser and the speaker are the phone's own - nothing is recorded " +
-                        "to a file and nothing is sent anywhere.",
+                        "'kilometres', 'celsius', 'fahrenheit', 'mute', 'unmute', 'sleep'. The " +
+                        "name 'Watcher' may be said first, but it is not needed. The recogniser " +
+                        "and the speaker are the phone's own - nothing is recorded to a file and " +
+                        "nothing is sent anywhere.",
                     color = Sky.textDim,
                     fontSize = 10.sp,
                 )

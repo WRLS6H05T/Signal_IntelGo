@@ -21,22 +21,22 @@ import java.util.Locale
 /**
  * The microphone and the speaker behind [Watcher].
  *
- * Android's recogniser is single-shot: it listens for one utterance, answers, and stops. A wake
- * word needs the opposite - a loop that is always listening and throws away everything that is
- * not the name. So this restarts the recogniser after every result and every idle timeout, and
- * gates the commands behind the wake word with a short window in which "Watcher" is still fresh.
+ * It is push-to-talk, not a wake-word listener: a recogniser session starts only when the status
+ * box under the clock is tapped, takes one utterance, does what was asked, says what it has to
+ * say, and goes quiet. Nothing holds the microphone between taps - a wardriving app has no
+ * business listening to a car all day, and a permanent listener is also a permanent battery cost
+ * and a permanent permission.
  *
- * While the speaker is talking the microphone is cancelled and left off: a recogniser that can
- * hear the phone speak will hear the wake word it just said and answer itself. Text-to-speech is
- * also allowed to be missing - on a phone with no engine the voice is silent but the interface
- * still answers, because every command path goes through the same handler either way.
+ * One command per tap, so a session is also one chance: if the recogniser hears nothing, the box
+ * says so and waits for the next tap. While the speaker is talking the microphone is cancelled and
+ * left off, because a recogniser that can hear the phone speak will answer itself. Text-to-speech
+ * is allowed to be missing - on a phone with no engine the voice is silent but the interface still
+ * answers, because every command path goes through the same handler either way.
  */
 class WatcherVoice(private val context: Context) {
 
     data class State(
         val enabled: Boolean = false,
-        /** The wake word was heard recently, so a bare command will be obeyed. */
-        val awake: Boolean = false,
         val listening: Boolean = false,
         val speaking: Boolean = false,
         val lastHeard: String = "",
@@ -51,7 +51,7 @@ class WatcherVoice(private val context: Context) {
     /** Where every parsed command goes. Set by the container, which owns the live state. */
     var onCommand: ((Watcher.Command) -> Unit)? = null
 
-    /** The settings switch owns this: off means it still listens, it just does not answer. */
+    /** The settings switch owns this: off means it will not answer at all. */
     @Volatile
     var audible: Boolean = true
 
@@ -63,22 +63,20 @@ class WatcherVoice(private val context: Context) {
     private var recognizer: SpeechRecognizer? = null
     private var speaker: TextToSpeech? = null
     private var speakerReady = false
-    private var running = false
-    private var awakeUntil = 0L
+    private var enabled = false
+    private var session = false
     private var utterance = 0
     private var lastSpokeAt = 0L
 
-    /** How long a bare command is accepted after the wake word. */
-    private val awakeWindowMs = 20_000L
-
+    /** Create the recogniser and the speaker. Nothing is listened to until [wake]. */
     fun start() {
-        if (running) return
+        if (enabled) return
         val available = runCatching { SpeechRecognizer.isRecognitionAvailable(context) }.getOrDefault(false)
         if (!available) {
             state.update { it.copy(enabled = true, note = "Speech recognition is not available on this phone") }
             return
         }
-        running = true
+        enabled = true
         state.update { it.copy(enabled = true, note = "") }
         main.post {
             runCatching {
@@ -89,15 +87,13 @@ class WatcherVoice(private val context: Context) {
                 state.update { s -> s.copy(note = "Speech recognition could not start") }
             }
             prepareSpeaker()
-            restart(150)
         }
     }
 
     fun stop() {
-        val was = running
-        running = false
-        awakeUntil = 0L
-        main.removeCallbacks(restartTask)
+        val was = enabled
+        enabled = false
+        session = false
         main.removeCallbacks(watchdog)
         if (was) {
             main.post {
@@ -113,26 +109,19 @@ class WatcherVoice(private val context: Context) {
         state.value = State()
     }
 
-    /** Wake without speaking: what a tap on the status box does. */
+    /** One listening session, started by a tap on the status box. */
     fun wake() {
-        if (!state.value.enabled) return
-        awakeUntil = SystemClock.elapsedRealtime() + awakeWindowMs
-        state.update { it.copy(awake = true, note = "") }
-        restart(0)
-    }
-
-    fun sleep() {
-        awakeUntil = 0L
-        state.update { it.copy(awake = false) }
+        if (!enabled || session) return
+        if (state.value.speaking) return
+        session = true
+        state.update { it.copy(listening = true, note = "", lastHeard = "") }
+        main.post { listen() }
     }
 
     fun speak(text: String, glitch: Boolean = false) {
         if (text.isBlank()) return
         val engine = speaker
-        if (!running || !audible || engine == null || !speakerReady) {
-            if (running) restart(400)
-            return
-        }
+        if (!enabled || !audible || engine == null || !speakerReady) return
         val now = SystemClock.elapsedRealtime()
         if (now - lastSpokeAt < 120) return
         lastSpokeAt = now
@@ -141,8 +130,6 @@ class WatcherVoice(private val context: Context) {
         val line = voice.render(text, glitch)
 
         state.update { it.copy(speaking = true) }
-        // Pause the microphone instead of letting it hear the reply.
-        main.removeCallbacks(restartTask)
         runCatching { recognizer?.cancel() }
 
         // Pitch and rate are the performance the engine actually offers; the glitched alert drags
@@ -157,10 +144,9 @@ class WatcherVoice(private val context: Context) {
         }.getOrDefault(TextToSpeech.ERROR)
         if (queued != TextToSpeech.SUCCESS) {
             state.update { it.copy(speaking = false) }
-            restart(500)
             return
         }
-        // Some engines never deliver the callback; this puts the listener back either way.
+        // Some engines never deliver the callback; this clears the speaking state either way.
         main.postDelayed(watchdog, (1_400 + line.length * 65L).coerceAtMost(14_000L))
     }
 
@@ -183,36 +169,42 @@ class WatcherVoice(private val context: Context) {
             state.update { it.copy(listening = false) }
             when (error) {
                 SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> {
+                    session = false
                     state.update { it.copy(note = "Microphone permission missing") }
                     return
                 }
                 // ERROR_CLIENT is what a cancel produces, which is us pausing for speech.
                 SpeechRecognizer.ERROR_CLIENT -> return
                 SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> {
-                    restart(1_200)
+                    session = false
+                    state.update { it.copy(note = "Recogniser busy - tap to try again") }
                     return
                 }
             }
-            // NO_MATCH and SPEECH_TIMEOUT are the idle state of a listener that never stops.
-            restart(500)
+            // NO_MATCH and SPEECH_TIMEOUT mean the tap produced nothing. The session is over:
+            // there is no always-on loop to restart, by design.
+            session = false
+            state.update {
+                it.copy(
+                    listening = false,
+                    note = if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                        "No command heard - tap to talk"
+                    } else {
+                        "Recogniser error - tap to try again"
+                    },
+                )
+            }
         }
 
         override fun onPartialResults(partialResults: Bundle?) {
             val heard = first(partialResults)
-            if (heard.isBlank()) return
-            // Only the wake word is acted on before the utterance is final, so the box can light
-            // up while the user is still speaking.
-            if (Watcher.hasWake(heard)) {
-                awakeUntil = SystemClock.elapsedRealtime() + awakeWindowMs
-                state.update { it.copy(awake = true, lastHeard = heard.trim()) }
-            }
+            if (heard.isNotBlank()) state.update { it.copy(lastHeard = heard.trim()) }
         }
 
         override fun onResults(results: Bundle?) {
             state.update { it.copy(listening = false) }
-            val heard = first(results)
-            if (handleFinal(heard)) return
-            restart(350)
+            session = false
+            handleFinal(first(results))
         }
 
         override fun onEvent(eventType: Int, params: Bundle?) = Unit
@@ -221,70 +213,46 @@ class WatcherVoice(private val context: Context) {
     private fun first(bundle: Bundle?): String =
         bundle?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
 
-    /**
-     * True when the utterance was worth acting on, in which case the caller does not restart the
-     * listener - speaking does, or the next idle restart will.
-     */
-    private fun handleFinal(spoken: String): Boolean {
-        if (spoken.isBlank()) return false
-        state.update { it.copy(lastHeard = spoken.trim()) }
-
-        val now = SystemClock.elapsedRealtime()
-        val woke = Watcher.hasWake(spoken)
-        if (!woke && now >= awakeUntil) return false
-
-        awakeUntil = now + awakeWindowMs
-        state.update { it.copy(awake = true) }
-
-        val rest = Watcher.wakeOnly(spoken)
-        if (rest.isBlank()) {
-            if (woke) speak("Online.")
-            return true
+    /** One utterance, one command. Anything that is answered speaks; everything else is silent. */
+    private fun handleFinal(spoken: String) {
+        if (spoken.isBlank()) {
+            state.update { it.copy(note = "No command heard - tap to talk") }
+            return
         }
+        state.update { it.copy(lastHeard = spoken.trim()) }
 
         val command = Watcher.parse(spoken)
         if (command == null) {
             speak("I did not catch a command.")
-            return true
+            return
         }
         if (command == Watcher.Command.SLEEP) {
-            sleep()
             speak("Standing down.")
-            return true
+            return
         }
         onCommand?.invoke(command)
-        return true
-    }
-
-    private val restartTask = Runnable {
-        if (!running) return@Runnable
-        if (state.value.speaking) return@Runnable
-        if (state.value.awake && SystemClock.elapsedRealtime() > awakeUntil) {
-            state.update { it.copy(awake = false) }
-        }
-        listen()
-    }
-
-    private fun restart(delayMs: Long) {
-        if (!running) return
-        main.removeCallbacks(restartTask)
-        main.postDelayed(restartTask, delayMs)
     }
 
     private fun listen() {
-        val engine = recognizer ?: return
+        val engine = recognizer ?: run {
+            session = false
+            state.update { it.copy(listening = false, note = "Speech recognition could not start") }
+            return
+        }
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
-            // A short silence ends the utterance: a wake word should not hold the microphone
-            // open for the recogniser's default two seconds before the command is read.
+            // A short silence ends the utterance: a tap is a command, not a dictation session.
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1_200L)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1_200L)
         }
-        runCatching { engine.startListening(intent) }.onFailure { restart(1_000) }
+        runCatching { engine.startListening(intent) }.onFailure {
+            session = false
+            state.update { it.copy(listening = false, note = "Could not open the microphone") }
+        }
     }
 
     // ---------------- speaker ----------------
@@ -335,6 +303,5 @@ class WatcherVoice(private val context: Context) {
         main.removeCallbacks(watchdog)
         if (!state.value.speaking) return
         state.update { it.copy(speaking = false) }
-        restart(300)
     }
 }

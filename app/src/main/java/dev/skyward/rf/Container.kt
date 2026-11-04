@@ -361,7 +361,9 @@ class Container(context: Context) {
                 voice.audible = true
                 voice.speak("Audio on.")
             }
-            Watcher.Command.SLEEP -> voice.sleep()
+            // The recogniser already treats "sleep" as the end of the session; this only
+            // matters if the command is ever routed from elsewhere.
+            Watcher.Command.SLEEP -> voice.speak("Standing down.")
         }
     }
 
