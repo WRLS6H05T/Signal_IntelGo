@@ -163,6 +163,10 @@ class BlePeer(private val context: Context) {
     @Volatile
     var onPeerRecording: ((Boolean, String) -> Unit)? = null
 
+    /** A Watcher command said to the other phone, by name. */
+    @Volatile
+    var onPeerVoice: ((String) -> Unit)? = null
+
     /** Whether this phone is recording, and the name of the drive it is recording. */
     @Volatile
     var recordingProvider: (() -> Pair<Boolean, String>)? = null
@@ -615,6 +619,7 @@ class BlePeer(private val context: Context) {
         // stretch of road. The state rides every snapshot, so the two settle rather than
         // taking turns telling each other to start.
         onPeerRecording?.invoke(decoded.recording, decoded.recordName)
+        if (decoded.voice.isNotBlank()) onPeerVoice?.invoke(decoded.voice)
         if (decoded.boardWifi.isNotEmpty() || decoded.boardBle.isNotEmpty()) {
             onPeerBoard?.invoke(decoded.boardWifi, decoded.boardBle)
         }
@@ -723,6 +728,28 @@ class BlePeer(private val context: Context) {
                 logs = logs,
             ),
         )
+    }
+
+    /**
+     * One Watcher command, said to this phone and obeyed by both.
+     *
+     * Only the intent travels. The phone that heard the words does the talking, so the pair
+     * never answers the same sentence twice. Putting the snapshot clock back a beat means the
+     * command is not overwritten by the next sweep before it leaves.
+     */
+    fun sendVoice(command: String) {
+        if (!_state.value.connected || command.isBlank()) return
+        val queued = queue(
+            PeerProtocol.Message(
+                kind = PeerProtocol.KIND_WATCHER,
+                id = id,
+                name = deviceName,
+                diagIn = diagonalInches(),
+                at = System.currentTimeMillis(),
+                voice = command,
+            ),
+        )
+        if (queued) lastQueuedAt = System.currentTimeMillis()
     }
 
     /** Asks the other phone to send its list again. */

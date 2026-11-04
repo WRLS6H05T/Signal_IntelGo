@@ -22,6 +22,9 @@ object PeerProtocol {
     /** Messages about recorded drives, as opposed to live sweeps. */
     const val KIND_LOGS = "logs"
 
+    /** A Watcher command, said to one phone and obeyed by both. */
+    const val KIND_WATCHER = "watcher"
+
     /** Globe device: the bigger screen, which shows the map and the sphere. */
     const val DISPLAY = "display"
 
@@ -124,6 +127,8 @@ object PeerProtocol {
         /** Whether this phone is recording a drive right now, and what it called that drive. */
         val recording: Boolean = false,
         val recordName: String = "",
+        /** A Watcher command forwarded from the other phone, by name. */
+        val voice: String = "",
         /**
          * Intel from this phone's own ESP32 boards, carried alongside its sweep so the other
          * phone holds it too. The record of it stays with the board that heard it.

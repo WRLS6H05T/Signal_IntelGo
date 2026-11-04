@@ -200,8 +200,13 @@ class Container(context: Context) {
             BlePeer.Snapshot(
                 fix = phoneFix ?: _observer.value,
                 sats = 0,
-                wifi = snap.wifi.map { PeerProtocol.Ap(it.id, it.name, it.rssi, it.channel) },
-                ble = snap.ble.map { PeerProtocol.Device(it.id, it.name, it.rssi) },
+                // Only what this phone heard itself. The table is shared, so sending the other
+                // phone's rows back would let stale findings bounce between the two for ever;
+                // the board on this cable travels in its own field below, once.
+                wifi = snap.wifi.filter { it.source == "local" }
+                    .map { PeerProtocol.Ap(it.id, it.name, it.rssi, it.channel) },
+                ble = snap.ble.filter { it.source == "local" }
+                    .map { PeerProtocol.Device(it.id, it.name, it.rssi) },
                 // Sent alongside the sample so both phones can show the same totals.
                 wifiTotal = totals.wifi,
                 bleTotal = totals.ble,
@@ -263,6 +268,13 @@ class Container(context: Context) {
                 ble = ble.map { RfScanner.RemoteObs(it.id, it.name, it.rssi) },
                 via = "peer",
             )
+        }
+
+        // The Watcher is one assistant across the pair: said to either phone, obeyed by both.
+        peer.onPeerVoice = { name ->
+            runCatching { Watcher.Command.valueOf(name) }.getOrNull()?.let { cmd ->
+                runCatching { handleVoice(cmd, fromPeer = true) }
+            }
         }
 
         // The hand-picked role, this phone's assigned sweep, and - on a host - the settings
@@ -394,7 +406,10 @@ class Container(context: Context) {
                 val now = System.currentTimeMillis()
                 if (now - lastAlert < alertGapMs) return@collect
                 val hit = sky.watch.firstOrNull { w ->
-                    now - (announced["${w.kind.name}:${w.id}"] ?: 0L) > alertRepeatMs
+                    now - (announced["${w.kind.name}:${w.id}"] ?: 0L) > alertRepeatMs &&
+                        // Both phones hold the one table, so both see the camera; only the
+                        // phone whose own radio heard it speaks.
+                        rf.heardHere(w.id)
                 } ?: return@collect
                 announced["${hit.kind.name}:${hit.id}"] = now
                 lastAlert = now
@@ -404,11 +419,37 @@ class Container(context: Context) {
     }
 
     /**
+     * Commands that describe what both phones should be doing, not what one should say.
+     *
+     * Reports and help are answered by the phone that was asked, sleep ends one session, and a
+     * drive already travels as shared recording state, so none of those are forwarded.
+     */
+    private val SHARED_COMMANDS = setOf(
+        Watcher.Command.MAP,
+        Watcher.Command.DRIVE,
+        Watcher.Command.LOG,
+        Watcher.Command.SETUP,
+        Watcher.Command.OPEN_MENU,
+        Watcher.Command.CLOSE_MENU,
+        Watcher.Command.MILES,
+        Watcher.Command.KILOMETRES,
+        Watcher.Command.CELSIUS,
+        Watcher.Command.FAHRENHEIT,
+        Watcher.Command.MUTE,
+        Watcher.Command.UNMUTE,
+    )
+
+    /**
      * What a spoken command does. Screens are not changed here - the request goes into
      * [WatcherVoice.nav] and the scaffold acts on it - but everything stateful is: logging,
      * units and the audio switch.
      */
-    private fun handleVoice(cmd: Watcher.Command) {
+    private fun handleVoice(cmd: Watcher.Command, fromPeer: Boolean = false) {
+        // A command that describes what both phones should be doing is passed on, so saying
+        // "miles" or "open menu" to one phone does it on the other. Answers and drives are
+        // not forwarded: a report is spoken by the phone that was asked, and a drive already
+        // travels as shared recording state.
+        if (!fromPeer && cmd in SHARED_COMMANDS && peer.isRunning()) peer.sendVoice(cmd.name)
         when (cmd) {
             Watcher.Command.REPORT -> voice.speak(voiceReport())
             Watcher.Command.HELP -> voice.speak(Watcher.help())
@@ -441,14 +482,16 @@ class Container(context: Context) {
                 voice.speak("Fahrenheit.")
             }
             Watcher.Command.MUTE -> {
-                // Said before the switch is thrown, or the confirmation is the first thing muted.
-                voice.speak("Muting.")
+                // Said before the switch is thrown, or the confirmation is the first thing
+                // muted. The other phone's copy of a forwarded mute stays silent: the phone
+                // that heard the words is the one that answers.
+                if (!fromPeer) voice.speak("Muting.")
                 settingsStore.update { it.copy(voiceAudio = false) }
             }
             Watcher.Command.UNMUTE -> {
                 settingsStore.update { it.copy(voiceAudio = true) }
                 voice.audible = true
-                voice.speak("Audio on.")
+                if (!fromPeer) voice.speak("Audio on.")
             }
             // The recogniser already treats "sleep" as the end of the session; this only
             // matters if the command is ever routed from elsewhere.

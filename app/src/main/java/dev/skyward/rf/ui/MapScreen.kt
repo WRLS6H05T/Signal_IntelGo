@@ -837,18 +837,19 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 // Cameras and TASERs were heard, not triangulated: the row is still a count of
                 // matched advertisers, not of confirmed installations.
                 IntelRow("WATCH", sky.watch.size, showWatch) { showWatch = !showWatch }
-                // One table for both phones: what this device heard plus what the other one
-                // reports. With no peer linked the second term is zero and the standalone
-                // handset's own sweeps fill the rows, which is the point of them.
-                val ownWifi = rf.wifi.count { it.source != "peer" }
-                val ownBle = rf.ble.count { it.source != "peer" }
-                IntelRow("WIFI", ownWifi + peer.peerWifiTotal, wifiOn) { c.rf.setWifiEnabled(!wifiOn) }
-                IntelRow("BLE", ownBle + peer.peerBleTotal, bleOn) { c.rf.setBleEnabled(!bleOn) }
+                // One table for both phones, keyed by device: a network heard by either is a
+                // single row, so the two devices print the same numbers. Adding the peer's
+                // total to this phone's own counted every shared network twice, which is why
+                // the two tables never matched.
+                val shared = c.rf.totals()
+                IntelRow("WIFI", shared.wifi, wifiOn) { c.rf.setWifiEnabled(!wifiOn) }
+                IntelRow("BLE", shared.ble, bleOn) { c.rf.setBleEnabled(!bleOn) }
                 IntelRow("PATH", path.size, showPath) { showPath = !showPath }
                 // Individual networks, drawn at the fix where each was heard.
                 IntelRow("SIG", signalDots.size, showSignals) { showSignals = !showSignals }
-                // What the other phone is hearing, so the table shows both devices' sweeps.
-                IntelRow("PEER", peer.peerWifiTotal + peer.peerBleTotal, peer.connected) { }
+                // What the other phone put *into* the shared table, not a second total that
+                // is already counted in WIFI and BLE above.
+                IntelRow("PEER", c.rf.peerCount(), peer.connected) { }
                 // The host's table carries the assignment too, so the whole picture is
                 // readable without opening the peer card.
                 Text(

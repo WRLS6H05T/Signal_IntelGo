@@ -103,6 +103,18 @@ class PeerProtocolTest {
     }
 
     @Test
+    fun `a watcher command is forwarded to the other phone`() {
+        val back = PeerProtocol.decode(
+            PeerProtocol.encode(
+                sample.copy(kind = PeerProtocol.KIND_WATCHER, voice = "OPEN_MENU"),
+            ),
+        )
+        assertNotNull(back)
+        assertEquals(PeerProtocol.KIND_WATCHER, back!!.kind)
+        assertEquals("OPEN_MENU", back.voice)
+    }
+
+    @Test
     fun `host settings carry their revision and the shared dashboard`() {
         val hs = PeerProtocol.HostSettings(
             rev = 3,

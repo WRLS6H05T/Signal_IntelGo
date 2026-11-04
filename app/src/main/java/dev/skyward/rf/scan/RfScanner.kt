@@ -113,6 +113,11 @@ class RfScanner(private val context: Context) {
     ) {
         for (ap in wifi) {
             if (ap.id.isBlank()) continue
+            // One row per network. This handset's own hearing is never overwritten by the other
+            // phone's, and a board on this cable is not overwritten by a peer's board either -
+            // which is what makes the two tables agree instead of arguing about an RSSI.
+            if (wifiTable.containsKey(ap.id)) continue
+            if (via != "board" && boardWifi[ap.id]?.source == "board") continue
             boardWifi[ap.id] = RfObservation(
                 kind = RfKind.WIFI,
                 id = ap.id,
@@ -127,6 +132,8 @@ class RfScanner(private val context: Context) {
         }
         for (d in ble) {
             if (d.id.isBlank()) continue
+            if (bleTable.containsKey(d.id)) continue
+            if (via != "board" && boardBle[d.id]?.source == "board") continue
             boardBle[d.id] = RfObservation(
                 kind = RfKind.BLE,
                 id = d.id,
@@ -143,6 +150,20 @@ class RfScanner(private val context: Context) {
 
     /** True while a board is contributing observations of its own. */
     fun hasBoardSweep(): Boolean = boardWifi.isNotEmpty() || boardBle.isNotEmpty()
+
+    /** Rows in the shared table that reached this phone from the other one. */
+    fun peerCount(): Int =
+        boardWifi.count { it.value.source == "peer" } + boardBle.count { it.value.source == "peer" }
+
+    /**
+     * Whether one of *this* phone's own radios heard this id.
+     *
+     * The table is shared, so both phones match the same camera. Only the phone that actually
+     * heard it announces it, which is what keeps the pair from saying the same thing twice.
+     */
+    fun heardHere(id: String): Boolean =
+        wifiTable.containsKey(id) || bleTable.containsKey(id) ||
+            boardWifi[id]?.source == "board" || boardBle[id]?.source == "board"
 
     /** The board's own intel, apart from the handset's sweeps: what the peer link carries. */
     data class BoardIntel(
@@ -182,9 +203,16 @@ class RfScanner(private val context: Context) {
      * side tables, so reporting them back would make each exchange echo the peer's own sweeps
      * and the shared count would grow on every message instead of settling.
      */
+    /**
+     * The size of the one shared table.
+     *
+     * Distinct ids across every radio that contributed: this handset's own sweeps, a board on
+     * the cable and the other phone's. Counting per source and adding the two devices' totals
+     * counted every network the pair both heard twice - the number that never matched.
+     */
     fun totals(): Totals = Totals(
-        wifi = wifiTable.size + boardWifi.count { it.value.source == "board" },
-        ble = bleTable.size + boardBle.count { it.value.source == "board" },
+        wifi = wifiTable.keys.union(boardWifi.keys).size,
+        ble = bleTable.keys.union(boardBle.keys).size,
     )
 
     private val main = Handler(Looper.getMainLooper())
@@ -498,9 +526,16 @@ class RfScanner(private val context: Context) {
 
         prune(boardWifi, now) { it.seenAt }
         prune(boardBle, now) { it.seenAt }
-        // A duplicate keeps the handset's copy: it carries a real channel and security string.
-        val wifi = clean(wifiTable + boardWifi)
-        val ble = clean(bleTable + boardBle)
+        // One table, not three. A shared id keeps the handset's copy - it carries a real
+        // channel and security string - then a board's, then the other phone's. `map + map`
+        // would have let the side tables overwrite the phone's own hearing, so a network seen
+        // by both phones would flip to "peer" and the two counts would never line up.
+        val mergedWifi = HashMap(wifiTable)
+        for ((k, v) in boardWifi) mergedWifi.putIfAbsent(k, v)
+        val mergedBle = HashMap(bleTable)
+        for ((k, v) in boardBle) mergedBle.putIfAbsent(k, v)
+        val wifi = clean(mergedWifi)
+        val ble = clean(mergedBle)
         return Snapshot(
             wifi = wifi,
             ble = ble,
