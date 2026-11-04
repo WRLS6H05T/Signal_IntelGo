@@ -36,6 +36,10 @@ data class Settings(
      * pin. Off, nothing is drawn and the weather feed is never asked.
      */
     val showLiveTime: Boolean = true,
+    /** "km" or "mi": what every distance on screen is written in. Stored data stays metric. */
+    val distanceUnit: String = "km",
+    /** "c" or "f": the weather drop-down's temperature. */
+    val tempUnit: String = "c",
     /** ESP32 sensor boards: BLE advertisements always, MQTT when a Wi-Fi board publishes. */
     val esp32Enabled: Boolean = true,
     /** GhostESP, ESP32 Marauder, Biscuit and anything else ESP32 plugged into the USB port. */

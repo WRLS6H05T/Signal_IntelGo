@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.sp
 import dev.skyward.rf.Container
 import dev.skyward.rf.core.Layer
 import dev.skyward.rf.core.SignalScale
+import dev.skyward.rf.core.Units
 import dev.skyward.rf.ui.theme.Sky
 import dev.skyward.rf.wardrive.SessionSummary
 import kotlinx.coroutines.launch
@@ -57,6 +58,8 @@ fun LogScreen(c: Container, modifier: Modifier = Modifier, onShowOnMap: () -> Un
             .background(Sky.bg)
             .padding(horizontal = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
+        // Room for the folded tab button in the corner, which floats over the list.
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 64.dp),
     ) {
         item { Spacer(Modifier.height(6.dp)) }
 
@@ -152,6 +155,7 @@ fun LogScreen(c: Container, modifier: Modifier = Modifier, onShowOnMap: () -> Un
             SessionRow(
                 s = s,
                 df = df,
+                distanceUnit = c.settings.distanceUnit,
                 onShow = {
                     c.wardrive.showSession(s.id)
                     onShowOnMap()
@@ -189,6 +193,8 @@ private fun SessionRow(
     onExportGeo: () -> Unit,
     onExportCsv: () -> Unit,
     onDelete: () -> Unit,
+    /** "km" or "mi": the drive's length as the user reads distances. */
+    distanceUnit: String,
 ) {
     Column(
         Modifier
@@ -223,7 +229,7 @@ private fun SessionRow(
         }
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            StatCell("Distance", String.format("%.2f km", s.km), Modifier.weight(1f))
+            StatCell("Distance", Units.distance(s.km, distanceUnit, 2), Modifier.weight(1f))
             StatCell("Fixes", s.points.toString(), Modifier.weight(1f))
             StatCell("Wi-Fi", s.wifiAps.toString(), Modifier.weight(1f))
             StatCell("BLE", s.bleDevices.toString(), Modifier.weight(1f))
@@ -275,7 +281,7 @@ private fun PeerLogsCard(c: Container, df: SimpleDateFormat) {
                     Text(info.name, color = Sky.text, fontSize = 12.sp)
                     Text(
                         "${df.format(Date(info.at))} · ${info.points} fixes · " +
-                            String.format(Locale.US, "%.2f", info.km) + " km",
+                            Units.distance(info.km, c.settings.distanceUnit, 2),
                         color = Sky.textDim,
                         fontSize = 9.sp,
                     )

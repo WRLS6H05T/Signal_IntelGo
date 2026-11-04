@@ -337,10 +337,11 @@ volunteer servers, which is why the save is a neighbourhood rather than a countr
 
 ## Getting around
 
-The tab bar is not a bar. Folded away it is a single square button in the bottom-left corner,
-the same size and border as the map's own buttons; tap it for Map, Drive, Log and Setup, and
-choosing a tab puts it back. The Scaffold still reserves that strip, so the INTEL box sits above
-the button rather than under it.
+The tab bar is not a bar. Folded away nothing is reserved at all: the screen gets its full
+height and the only thing left is one square button in the bottom-right corner, the same size
+and border as the map's own buttons. Tap it for Map, Drive, Log and Setup; choosing a tab folds
+it away again. The map's action stack and the scrolling screens leave that corner clear, so the
+button never lands on top of a control.
 
 ## Clock and weather
 
@@ -351,6 +352,15 @@ second opinion on the map's own elevation. It comes from Open-Meteo, which needs
 no key, and is read at most every ten minutes (and again after moving two kilometres), so the
 drop-down is current without being a fetch per tap. With the clock off, nothing is drawn and the
 feed is never asked.
+
+## Units
+
+Setup -> **Units** chooses kilometres or miles, and Celsius or Fahrenheit. Distances are still
+stored and computed in kilometres - the GPS, the satellite maths and the peer frames all speak
+metric - and converted only where a number is written on screen, so switching units never
+rewrites a saved drive or changes what the other phone receives. Wind and rain follow the
+distance unit (mph and inches with miles, km/h and millimetres with kilometres), the terrain
+height follows it too, and the temperature setting applies to the weather drop-down.
 
 ## Watch list
 

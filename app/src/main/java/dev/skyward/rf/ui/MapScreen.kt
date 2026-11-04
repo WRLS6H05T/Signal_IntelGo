@@ -81,6 +81,7 @@ import dev.skyward.rf.core.SatView
 import dev.skyward.rf.core.RfKind
 import dev.skyward.rf.core.ScanPlan
 import dev.skyward.rf.core.SignalScale
+import dev.skyward.rf.core.Units
 import dev.skyward.rf.core.WatchKind
 import dev.skyward.rf.core.WatchView
 import dev.skyward.rf.net.compassPoint
@@ -268,6 +269,8 @@ fun buildMarkers(
     showCells: Boolean,
     showEsp32: Boolean,
     showWatch: Boolean,
+    /** "km" or "mi": the marker card is the only place a distance is written down. */
+    distanceUnit: String,
     minScore: Int,
     /** A worldwide feed is tens of thousands of points; the map plots the nearest slice. */
     maxAircraft: Int = 900,
@@ -297,8 +300,8 @@ fun buildMarkers(
                     if (s.noradId in SatTracker.BIRDS3_IDS) "Deployed" to "ISS, 17 Jun 2019" else null,
                     "Elevation" to String.format("%.1f°", s.elevation),
                     "Azimuth" to String.format("%.1f°", s.azimuth),
-                    "Range" to String.format("%.0f km", s.rangeKm),
-                    "Altitude" to String.format("%.0f km", s.altKm),
+                    "Range" to Units.distance(s.rangeKm, distanceUnit, 0),
+                    "Altitude" to Units.distance(s.altKm, distanceUnit, 0),
                     "Predicted" to "${s.score}% link",
                 ),
             ),
@@ -324,7 +327,7 @@ fun buildMarkers(
                     "Altitude" to (a.altFt?.let { "$it ft" } ?: "—"),
                     "Ground speed" to String.format("%.0f kt", a.groundSpeedKt),
                     "Vertical" to String.format("%+d fpm", a.verticalRateFpm),
-                    "Distance" to String.format("%.1f km", a.distanceKm),
+                    "Distance" to Units.distance(a.distanceKm, distanceUnit, 1),
                     "Squawk" to a.squawk.ifBlank { "—" },
                     "ICAO" to a.hex.uppercase(),
                 ),
@@ -353,7 +356,7 @@ fun buildMarkers(
                     "Altitude" to (d.altM?.let { String.format("%.0f m", it) } ?: "—"),
                     "Height AGL" to (d.heightM?.let { String.format("%.0f m", it) } ?: "—"),
                     "Speed" to (d.speedMs?.let { String.format("%.1f m/s", it) } ?: "—"),
-                    "Distance" to (d.distanceKm?.let { String.format("%.2f km", it) } ?: "—"),
+                    "Distance" to (d.distanceKm?.let { Units.distance(it, distanceUnit, 2) } ?: "—"),
                     "Operator" to d.operatorId.ifBlank { "—" },
                 ),
             ),
@@ -380,7 +383,7 @@ fun buildMarkers(
                     "Hops" to n.hops.toString(),
                     "Battery" to if (n.batteryPct >= 0) "${n.batteryPct}%" else "—",
                     "Altitude" to "${n.altitudeM} m",
-                    "Distance" to (n.distanceKm?.let { String.format("%.1f km", it) } ?: "—"),
+                    "Distance" to (n.distanceKm?.let { Units.distance(it, distanceUnit, 1) } ?: "—"),
                     "Node id" to n.id,
                 ),
             ),
@@ -413,7 +416,7 @@ fun buildMarkers(
                     "Board" to b.board.ifBlank { "\u2014" },
                     "Firmware" to b.firmware.ifBlank { "\u2014" },
                     "RSSI" to (b.rssi?.let { "$it dBm" } ?: "\u2014"),
-                    "Distance" to (b.distanceKm?.let { String.format("%.2f km", it) } ?: "\u2014"),
+                    "Distance" to (b.distanceKm?.let { Units.distance(it, distanceUnit, 2) } ?: "\u2014"),
                 ),
             ),
         )
@@ -523,7 +526,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
 
     val markers = remember(
         sky, showSats, showAir, showDrones, showMesh, showCells, showEsp32, showWatch,
-        settings.aircraftEnabled, settings.dropWeakDots,
+        settings.aircraftEnabled, settings.dropWeakDots, settings.distanceUnit,
     ) {
         buildMarkers(
             sky = sky,
@@ -534,6 +537,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
             showCells = showCells,
             showEsp32 = showEsp32,
             showWatch = showWatch,
+            distanceUnit = settings.distanceUnit,
             minScore = if (settings.dropWeakDots) 20 else 0,
         )
     }
@@ -880,7 +884,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                     if (wd.active) {
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            String.format("%.2f km logged", wd.km),
+                            Units.distance(wd.km, settings.distanceUnit, 2) + " logged",
                             color = Sky.warn,
                             fontSize = 10.sp,
                         )
@@ -904,14 +908,16 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
 
         // ---- live clock: top right, and its drop-down is the weather at the pin ----
         if (settings.showLiveTime) {
-            LiveClock(c, observer, Modifier.align(Alignment.TopEnd).padding(10.dp))
+            LiveClock(c, observer, settings.distanceUnit, settings.tempUnit, Modifier.align(Alignment.TopEnd).padding(10.dp))
         }
 
         // ---- actions ----
+        // The bottom-right corner belongs to the folded tab button, so this stack stops above
+        // it rather than putting a control underneath it.
         Column(
             Modifier
                 .align(Alignment.BottomEnd)
-                .padding(10.dp),
+                .padding(start = 10.dp, end = 10.dp, top = 10.dp, bottom = 62.dp),
             horizontalAlignment = Alignment.End,
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -1594,7 +1600,13 @@ private fun CrashPill() {
  * minutes and one per two kilometres, so opening the drop-down costs nothing when it is current.
  */
 @Composable
-private fun LiveClock(c: Container, observer: LatLon?, modifier: Modifier = Modifier) {
+private fun LiveClock(
+    c: Container,
+    observer: LatLon?,
+    distanceUnit: String,
+    tempUnit: String,
+    modifier: Modifier = Modifier,
+) {
     val weather by c.weather.state.collectAsState()
     val scope = rememberCoroutineScope()
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
@@ -1665,20 +1677,22 @@ private fun LiveClock(c: Container, observer: LatLon?, modifier: Modifier = Modi
                     else -> {
                         Text(w.condition, color = Sky.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.height(4.dp))
-                        WeatherLine("Temperature", w.tempC?.let { String.format("%.1f \u00b0C", it) } ?: "\u2014")
-                        WeatherLine("Feels like", w.feelsC?.let { String.format("%.1f \u00b0C", it) } ?: "\u2014")
+                        WeatherLine("Temperature", Units.temperature(w.tempC, tempUnit))
+                        WeatherLine("Feels like", Units.temperature(w.feelsC, tempUnit))
                         WeatherLine("Humidity", w.humidity?.let { "$it%" } ?: "\u2014")
                         WeatherLine("Cloud", w.cloud?.let { "$it%" } ?: "\u2014")
                         WeatherLine(
                             "Wind",
                             w.windKmh?.let { v ->
-                                String.format("%.0f km/h %s", v, compassPoint(w.windDir))
+                                listOf(Units.wind(v, distanceUnit), compassPoint(w.windDir))
+                                    .filter { it.isNotBlank() }
+                                    .joinToString(" ")
                             } ?: "\u2014",
                         )
-                        WeatherLine("Gusts", w.gustsKmh?.let { String.format("%.0f km/h", it) } ?: "\u2014")
-                        WeatherLine("Rain now", w.precipMm?.let { String.format("%.1f mm", it) } ?: "\u2014")
+                        WeatherLine("Gusts", Units.wind(w.gustsKmh, distanceUnit))
+                        WeatherLine("Rain now", Units.rain(w.precipMm, distanceUnit))
                         WeatherLine("Pressure", w.pressureHpa?.let { String.format("%.0f hPa", it) } ?: "\u2014")
-                        WeatherLine("Terrain", w.elevationM?.let { String.format("%.0f m", it) } ?: "\u2014")
+                        WeatherLine("Terrain", Units.elevation(w.elevationM, distanceUnit))
                         Spacer(Modifier.height(6.dp))
                         Text(
                             w.error?.let { "offline: $it" }

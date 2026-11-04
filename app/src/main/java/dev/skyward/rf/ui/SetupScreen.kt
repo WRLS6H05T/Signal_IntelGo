@@ -37,7 +37,9 @@ import androidx.compose.ui.unit.sp
 import dev.skyward.rf.Container
 import dev.skyward.rf.core.LOG_RADIUS_KM
 import dev.skyward.rf.core.Settings
+import dev.skyward.rf.core.Units
 import dev.skyward.rf.peer.PeerProtocol
+import dev.skyward.rf.sky.AircraftSource
 import dev.skyward.rf.ui.theme.Sky
 
 @Composable
@@ -103,7 +105,9 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                 // Fixed, not a dial: a contact past 30 miles is not overhead traffic and its
                 // link estimate is noise, so it is neither plotted nor logged.
                 Text(
-                    "Only aircraft inside 30 miles are shown and logged",
+                    "Only aircraft inside " +
+                        Units.distance(AircraftSource.RANGE_KM, settings.distanceUnit, 0) +
+                        " are shown and logged",
                     color = Sky.textDim,
                     fontSize = 10.sp,
                 )
@@ -247,6 +251,45 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
         }
 
         item {
+            SectionCard(
+                title = "Units",
+                trailing = Units.distanceLabel(settings.distanceUnit) + " \u00b7 " +
+                    Units.temperatureLabel(settings.tempUnit),
+            ) {
+                Text("DISTANCE", style = SkywardThemeLabel(), color = Sky.textDim)
+                Spacer(Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    UnitChip("KM", settings.distanceUnit != Units.MILES) {
+                        c.settingsStore.update { it.copy(distanceUnit = Units.KM) }
+                    }
+                    UnitChip("MILES", settings.distanceUnit == Units.MILES) {
+                        c.settingsStore.update { it.copy(distanceUnit = Units.MILES) }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Text("TEMPERATURE", style = SkywardThemeLabel(), color = Sky.textDim)
+                Spacer(Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    UnitChip("\u00b0C", settings.tempUnit != Units.FAHRENHEIT) {
+                        c.settingsStore.update { it.copy(tempUnit = Units.CELSIUS) }
+                    }
+                    UnitChip("\u00b0F", settings.tempUnit == Units.FAHRENHEIT) {
+                        c.settingsStore.update { it.copy(tempUnit = Units.FAHRENHEIT) }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Distances are stored in kilometres and converted only where they are " +
+                        "written on screen, so switching units never changes a saved drive or " +
+                        "what the other phone receives. Wind and rain follow the distance " +
+                        "unit: mph and inches with miles, km/h and millimetres with kilometres.",
+                    color = Sky.textDim,
+                    fontSize = 10.sp,
+                )
+            }
+        }
+
+        item {
             SectionCard(title = "Watch list", trailing = "${sky.watch.size} heard") {
                 Text(
                     "Passive matches for surveillance hardware: Flock Safety ALPR cameras " +
@@ -273,12 +316,16 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
         }
 
         item {
-            SectionCard(title = "Logging", trailing = "${LOG_RADIUS_KM.toInt()} km") {
+            SectionCard(
+                title = "Logging",
+                trailing = Units.distance(LOG_RADIUS_KM, settings.distanceUnit, 0),
+            ) {
                 // Fixed, not a dial. A wider radius caught most of the catalogue on every
                 // tick, which is the map rather than anything overhead.
                 Text(
-                    "Satellites within ${LOG_RADIUS_KM.toInt()} km are captured during a drive. " +
-                        "Aircraft are the 30 mi set.",
+                    "Satellites within " + Units.distance(LOG_RADIUS_KM, settings.distanceUnit, 0) +
+                        " are captured during a drive. Aircraft are the " +
+                        Units.distance(AircraftSource.RANGE_KM, settings.distanceUnit, 0) + " set.",
                     color = Sky.textDim,
                     fontSize = 11.sp,
                 )
@@ -431,7 +478,8 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
             }
         }
 
-        item { Spacer(Modifier.height(18.dp)) }
+        // Room for the folded tab button in the corner, so it never covers the last row.
+        item { Spacer(Modifier.height(64.dp)) }
     }
 }
 
@@ -558,6 +606,22 @@ private fun GroupChip(label: String, settings: Settings, onChange: ((Settings) -
             labelColor = Sky.textDim,
             selectedContainerColor = Sky.satellite.copy(alpha = 0.22f),
             selectedLabelColor = Sky.satellite,
+        ),
+    )
+}
+
+@Composable
+private fun UnitChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label, fontSize = 10.sp, fontFamily = FontFamily.Monospace) },
+        shape = RoundedCornerShape(9.dp),
+        colors = FilterChipDefaults.filterChipColors(
+            containerColor = Sky.surfaceHigh,
+            labelColor = Sky.textDim,
+            selectedContainerColor = Sky.cyan.copy(alpha = 0.2f),
+            selectedLabelColor = Sky.cyan,
         ),
     )
 }

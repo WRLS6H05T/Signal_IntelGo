@@ -107,11 +107,10 @@ fun AppRoot(c: Container) {
         if (missing) runCatching { launcher.launch(requiredPermissions().toTypedArray()) }
     }
 
-    // The tab strip folds away into one square button in the bottom-left corner - the same
-    // size, corner and border as the map's own buttons, so it reads as part of that stack
-    // rather than a bar. It still occupies the strip the Scaffold reserves, which is what lets
-    // the INTEL box sit above it rather than under it. A tap opens the four choices; choosing
-    // one puts it back, so the bar does not sit over the map.
+    // Folded away, the bar is nothing at all: no strip, no reserved band, just one square
+    // button in the bottom-right corner built like the map's own buttons. The screen gets the
+    // whole height back and the map's action stack leaves room for the corner, so the button
+    // never sits on top of a control. A tap opens the four choices; picking one folds it again.
     var barOpen by remember { mutableStateOf(false) }
     val tabs = listOf(
         Triple("Map", Icons.Filled.Place, 0),
@@ -150,33 +149,6 @@ fun AppRoot(c: Container) {
                         Text("\u25BC", color = Sky.textDim, fontSize = 12.sp)
                     }
                 }
-            } else {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
-                    contentAlignment = Alignment.CenterStart,
-                ) {
-                    Column(
-                        Modifier
-                            .size(44.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Sky.surface.copy(alpha = 0.95f))
-                            .border(1.dp, Sky.outline, RoundedCornerShape(12.dp))
-                            .clickable { barOpen = true },
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                    ) {
-                        Icon(
-                            current.second,
-                            contentDescription = current.first,
-                            tint = Sky.cyan,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.height(1.dp))
-                        Text("\u25B2", color = Sky.textDim, fontSize = 6.sp)
-                    }
-                }
             }
         },
     ) { inner ->
@@ -190,6 +162,30 @@ fun AppRoot(c: Container) {
                 1 -> ScanScreen(c, Modifier.fillMaxSize(), onFixPermissions = request)
                 2 -> LogScreen(c, Modifier.fillMaxSize(), onShowOnMap = { tab = 0 })
                 else -> SetupScreen(c, Modifier.fillMaxSize(), onFixPermissions = request)
+            }
+
+            if (!barOpen) {
+                Column(
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 10.dp, bottom = 10.dp)
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Sky.surface.copy(alpha = 0.95f))
+                        .border(1.dp, Sky.outline, RoundedCornerShape(12.dp))
+                        .clickable { barOpen = true },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Icon(
+                        current.second,
+                        contentDescription = current.first,
+                        tint = Sky.cyan,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.height(1.dp))
+                    Text("\u25B2", color = Sky.textDim, fontSize = 6.sp)
+                }
             }
         }
     }

@@ -35,6 +35,7 @@ import dev.skyward.rf.core.Geo
 import dev.skyward.rf.core.RfKind
 import dev.skyward.rf.core.RfObservation
 import dev.skyward.rf.core.SignalScale
+import dev.skyward.rf.core.Units
 import dev.skyward.rf.peer.PeerProtocol
 import dev.skyward.rf.ui.theme.Sky
 import java.text.SimpleDateFormat
@@ -63,6 +64,8 @@ fun ScanScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: ()
             .background(Sky.bg)
             .padding(horizontal = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
+        // Room for the folded tab button in the corner, which floats over the list.
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 64.dp),
     ) {
         item { Spacer(Modifier.height(6.dp)) }
 
@@ -164,7 +167,7 @@ fun ScanScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: ()
             SectionCard(title = "Live", trailing = if (wd.active) "REC" else "READY") {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     StatCell("Points", wd.points.size.toString(), Modifier.weight(1f))
-                    StatCell("Distance", String.format("%.2f km", wd.km), Modifier.weight(1f))
+                    StatCell("Distance", Units.distance(wd.km, c.settings.distanceUnit, 2), Modifier.weight(1f))
                     StatCell(
                         "Best",
                         wd.bestScore.toString(),
