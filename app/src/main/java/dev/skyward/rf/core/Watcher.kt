@@ -3,17 +3,17 @@ package dev.skyward.rf.core
 import java.util.Locale
 
 /**
- * What Cortana hears and what she says back.
+ * What the Watcher hears and what it says back.
  *
- * The parsing is deliberately small and explicit: a grammar of a dozen intents that a driver
- * can say without looking at the screen, not a language model. Every phrase is matched against
- * the words after the wake word, so "Cortana, open setup" and "open setup" both work once she is
- * awake, and nothing here touches Android - the microphone and the speaker live in
- * `voice/CortanaVoice`, which makes every rule below testable without a phone.
+ * The parsing is deliberately small and explicit: a grammar of a dozen intents that a driver can
+ * say without looking at the screen, not a language model. Every phrase is matched against the
+ * words after the wake word, so "Watcher, open setup" and "open setup" both work once it is awake,
+ * and nothing here touches Android - the microphone and the speaker live in `voice/WatcherVoice`,
+ * which makes every rule below testable without a phone.
  */
-object Cortana {
+object Watcher {
 
-    const val WAKE = "cortana"
+    const val WAKE = "watcher"
 
     /** The four screens the voice can open, by the tab index the scaffold uses. */
     enum class Tab(val index: Int) { MAP(0), DRIVE(1), LOG(2), SETUP(3) }
@@ -49,11 +49,12 @@ object Cortana {
     )
 
     /**
-     * Recognisers return "Cortana", "cortana," or a plausible mishearing of it: a British voice
-     * often lands on "cortona". All of them wake her; a word has to be at least six letters and
-     * one edit away, so "carton" and "curtains" stay out.
+     * Recognisers return "Watcher", "watchers," or a plausible mishearing: "wotcher", "watcha",
+     * and - very often for a flat British "watcher" - the two words "watch her". All of them wake
+     * it; a word has to be at least six letters and one edit away, so "watchman" and "watching"
+     * stay out.
      */
-    private val WAKE_FORMS = setOf("cortana", "cortanna", "cortona", "kortana", "quartana", "cortada")
+    private val WAKE_FORMS = setOf("watcher", "watchers", "wotcher", "watcha", "wacher")
 
     fun normalise(raw: String): String = raw.lowercase(Locale.US)
         .replace(Regex("[^a-z0-9 ]"), " ")
@@ -63,15 +64,24 @@ object Cortana {
     fun isWakeWord(word: String): Boolean =
         word in WAKE_FORMS || (word.length >= 6 && edits(word, WAKE) <= 1)
 
-    fun hasWake(text: String): Boolean =
-        normalise(text).split(' ').any { it.isNotEmpty() && isWakeWord(it) }
+    /** "watch her" is how the recogniser hears a flat "watcher"; both count. */
+    private fun isWatchHer(a: String, b: String): Boolean =
+        a == "watch" && (b == "her" || b == "er")
+
+    fun hasWake(text: String): Boolean {
+        val words = normalise(text).split(' ').filter { it.isNotEmpty() }
+        if (words.any { isWakeWord(it) }) return true
+        return words.zipWithNext().any { (a, b) -> isWatchHer(a, b) }
+    }
 
     /** The words after the wake word: what is left is the command. */
     fun wakeOnly(text: String): String {
         val words = normalise(text).split(' ').filter { it.isNotEmpty() }
         val at = words.indexOfFirst { isWakeWord(it) }
-        if (at < 0) return words.joinToString(" ")
-        return words.drop(at + 1).joinToString(" ")
+        if (at >= 0) return words.drop(at + 1).joinToString(" ")
+        val pair = words.zipWithNext().indexOfFirst { (a, b) -> isWatchHer(a, b) }
+        if (pair >= 0) return words.drop(pair + 2).joinToString(" ")
+        return words.joinToString(" ")
     }
 
     /**
@@ -138,7 +148,7 @@ object Cortana {
         else -> "barely there"
     }
 
-    /** One line for a watch hit, spoken in the glitched voice rather than Cortana's own. */
+    /** One line for a watch hit, spoken in the glitched delivery rather than the plain one. */
     fun alert(hit: WatchView): String {
         val who = hit.kind.spoken
         val name = if (hit.kind == WatchKind.TRACKER && hit.name.isNotBlank()) ", ${hit.name}," else ""
@@ -150,8 +160,7 @@ object Cortana {
      * then the radio picture, then whether anything is being recorded.
      */
     fun intelReport(r: ReportInput): String {
-        // No name in the text: the chosen voice prefixes itself, so the report reads the same
-        // whether it is Cortana, the Watcher or Chappie delivering it.
+        // No name in the text: the voice pacing is the delivery, and the Watcher is the only one.
         val sb = StringBuilder("Intel report. ")
         val groups = WatchKind.values().mapNotNull { kind ->
             val n = r.watches.count { it.kind == kind }
@@ -182,7 +191,7 @@ object Cortana {
     }
 
     fun help(): String =
-        "Say Cortana, then: intel report, open map, drive, log, setup, open menu, close menu, " +
+        "Say Watcher, then: intel report, open map, drive, log, setup, open menu, close menu, " +
             "start logging, stop logging, miles, kilometres, celsius, fahrenheit, mute, unmute, sleep."
 
     /** Levenshtein distance, capped early: only used on single words. */

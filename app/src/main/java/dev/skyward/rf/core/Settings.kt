@@ -36,14 +36,19 @@ data class Settings(
      * pin. Off, nothing is drawn and the weather feed is never asked.
      */
     val showLiveTime: Boolean = true,
+    /**
+     * Seconds under the clock. Off, the hour and minute are drawn larger in the same corner -
+     * which is the size that reads at arm's length on a dash mount.
+     */
+    val clockSeconds: Boolean = true,
     /** "km" or "mi": what every distance on screen is written in. Stored data stays metric. */
     val distanceUnit: String = "km",
     /** "c" or "f": the weather drop-down's temperature. */
     val tempUnit: String = "c",
-    /** Hands-free Cortana: listen for the wake word and obey the spoken commands. */
+    /** Hands-free Watcher: listen for the wake word and obey the spoken commands. */
     val voiceEnabled: Boolean = false,
-    /** "cortana" (Halo 4), "watcher" (Watch Dogs) or "chappie": who answers. */
-    val voiceRole: String = "cortana",
+    /** "female" or "male": which machine voice answers. */
+    val voiceGender: String = "female",
     /** Speak the replies and the watch alerts out loud. */
     val voiceAudio: Boolean = true,
     /** ESP32 sensor boards: BLE advertisements always, MQTT when a Wi-Fi board publishes. */

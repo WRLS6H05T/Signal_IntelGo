@@ -908,8 +908,21 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
         }
 
         // ---- live clock: top right, and its drop-down is the weather at the pin ----
-        if (settings.showLiveTime) {
-            LiveClock(c, observer, settings.distanceUnit, settings.tempUnit, Modifier.align(Alignment.TopEnd).padding(10.dp))
+        // The Watcher's status box sits under the clock in the same column, so the corner answers
+        // both questions together and nothing floats over the map.
+        Column(
+            Modifier
+                .align(Alignment.TopEnd)
+                .padding(10.dp),
+            horizontalAlignment = Alignment.End,
+        ) {
+            if (settings.showLiveTime) {
+                LiveClock(c, observer, settings.distanceUnit, settings.tempUnit, settings.clockSeconds)
+            }
+            if (settings.voiceEnabled) {
+                if (settings.showLiveTime) Spacer(Modifier.height(6.dp))
+                WatcherBox(c)
+            }
         }
 
         // ---- actions ----
@@ -1606,13 +1619,18 @@ private fun LiveClock(
     observer: LatLon?,
     distanceUnit: String,
     tempUnit: String,
+    /** Seconds under the clock; off, the hour and minute take their space instead. */
+    showSeconds: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val weather by c.weather.state.collectAsState()
     val scope = rememberCoroutineScope()
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
     var open by remember { mutableStateOf(false) }
-    val timeFmt = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+    // With seconds off the hour and minute keep the corner but grow into the space they free.
+    val timeFmt = remember(showSeconds) {
+        SimpleDateFormat(if (showSeconds) "HH:mm:ss" else "HH:mm", Locale.getDefault())
+    }
     val dayFmt = remember { SimpleDateFormat("EEE d MMM", Locale.getDefault()) }
 
     LaunchedEffect(Unit) {
@@ -1641,7 +1659,7 @@ private fun LiveClock(
                 timeFmt.format(Date(now)),
                 color = Sky.cyan,
                 fontFamily = FontFamily.Monospace,
-                fontSize = 16.sp,
+                fontSize = if (showSeconds) 16.sp else 23.sp,
                 fontWeight = FontWeight.Bold,
             )
             Text(

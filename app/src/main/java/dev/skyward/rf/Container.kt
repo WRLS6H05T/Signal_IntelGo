@@ -5,11 +5,11 @@ import dev.skyward.rf.core.FileStore
 import dev.skyward.rf.core.LatLon
 import dev.skyward.rf.core.RfKind
 import dev.skyward.rf.core.RfObservation
-import dev.skyward.rf.core.Cortana
+import dev.skyward.rf.core.Watcher
 import dev.skyward.rf.core.SettingsStore
 import dev.skyward.rf.core.Units
 import dev.skyward.rf.core.VoiceStyles
-import dev.skyward.rf.voice.CortanaVoice
+import dev.skyward.rf.voice.WatcherVoice
 import dev.skyward.rf.location.LocationTracker
 import dev.skyward.rf.net.WeatherFeed
 import dev.skyward.rf.net.WigleApi
@@ -114,8 +114,8 @@ class Container(context: Context) {
     /** Current conditions at the fix, keyless via Open-Meteo; only asked while the clock is on. */
     val weather = WeatherFeed(http)
 
-    /** Hands-free Cortana: one wake word, the phone's own recogniser and speaker. */
-    val voice = CortanaVoice(appContext)
+    /** Hands-free Watcher: one wake word, the phone's own recogniser and speaker. */
+    val voice = WatcherVoice(appContext)
 
     /** A watch alert is worth hearing once, then not again for a while. */
     private val alertGapMs = 8_000L
@@ -288,7 +288,7 @@ class Container(context: Context) {
         scope.launch {
             settingsStore.state.collect { cfg ->
                 voice.audible = cfg.voiceAudio
-                voice.style = VoiceStyles.of(cfg.voiceRole)
+                voice.style = VoiceStyles.of(cfg.voiceGender)
                 if (cfg.voiceEnabled) voice.start() else voice.stop()
             }
         }
@@ -309,59 +309,59 @@ class Container(context: Context) {
                 } ?: return@collect
                 announced["${hit.kind.name}:${hit.id}"] = now
                 lastAlert = now
-                voice.speak(Cortana.alert(hit), glitch = true)
+                voice.speak(Watcher.alert(hit), glitch = true)
             }
         }
     }
 
     /**
      * What a spoken command does. Screens are not changed here - the request goes into
-     * [CortanaVoice.nav] and the scaffold acts on it - but everything stateful is: logging,
+     * [WatcherVoice.nav] and the scaffold acts on it - but everything stateful is: logging,
      * units and the audio switch.
      */
-    private fun handleVoice(cmd: Cortana.Command) {
+    private fun handleVoice(cmd: Watcher.Command) {
         when (cmd) {
-            Cortana.Command.REPORT -> voice.speak(voiceReport())
-            Cortana.Command.HELP -> voice.speak(Cortana.help())
-            Cortana.Command.MAP -> voice.nav.value = Cortana.Nav.Go(Cortana.Tab.MAP)
-            Cortana.Command.DRIVE -> voice.nav.value = Cortana.Nav.Go(Cortana.Tab.DRIVE)
-            Cortana.Command.LOG -> voice.nav.value = Cortana.Nav.Go(Cortana.Tab.LOG)
-            Cortana.Command.SETUP -> voice.nav.value = Cortana.Nav.Go(Cortana.Tab.SETUP)
-            Cortana.Command.OPEN_MENU -> voice.nav.value = Cortana.Nav.OpenMenu
-            Cortana.Command.CLOSE_MENU -> voice.nav.value = Cortana.Nav.CloseMenu
-            Cortana.Command.START ->
+            Watcher.Command.REPORT -> voice.speak(voiceReport())
+            Watcher.Command.HELP -> voice.speak(Watcher.help())
+            Watcher.Command.MAP -> voice.nav.value = Watcher.Nav.Go(Watcher.Tab.MAP)
+            Watcher.Command.DRIVE -> voice.nav.value = Watcher.Nav.Go(Watcher.Tab.DRIVE)
+            Watcher.Command.LOG -> voice.nav.value = Watcher.Nav.Go(Watcher.Tab.LOG)
+            Watcher.Command.SETUP -> voice.nav.value = Watcher.Nav.Go(Watcher.Tab.SETUP)
+            Watcher.Command.OPEN_MENU -> voice.nav.value = Watcher.Nav.OpenMenu
+            Watcher.Command.CLOSE_MENU -> voice.nav.value = Watcher.Nav.CloseMenu
+            Watcher.Command.START ->
                 voice.speak(if (wardrive.start()) "Recording." else "Already recording.")
-            Cortana.Command.STOP -> {
+            Watcher.Command.STOP -> {
                 val ended = wardrive.stop()
                 voice.speak(if (ended == null) "Not recording." else "Stopped.")
             }
-            Cortana.Command.MILES -> {
+            Watcher.Command.MILES -> {
                 settingsStore.update { it.copy(distanceUnit = Units.MILES) }
                 voice.speak("Miles.")
             }
-            Cortana.Command.KILOMETRES -> {
+            Watcher.Command.KILOMETRES -> {
                 settingsStore.update { it.copy(distanceUnit = Units.KM) }
                 voice.speak("Kilometres.")
             }
-            Cortana.Command.CELSIUS -> {
+            Watcher.Command.CELSIUS -> {
                 settingsStore.update { it.copy(tempUnit = Units.CELSIUS) }
                 voice.speak("Celsius.")
             }
-            Cortana.Command.FAHRENHEIT -> {
+            Watcher.Command.FAHRENHEIT -> {
                 settingsStore.update { it.copy(tempUnit = Units.FAHRENHEIT) }
                 voice.speak("Fahrenheit.")
             }
-            Cortana.Command.MUTE -> {
+            Watcher.Command.MUTE -> {
                 // Said before the switch is thrown, or the confirmation is the first thing muted.
                 voice.speak("Muting.")
                 settingsStore.update { it.copy(voiceAudio = false) }
             }
-            Cortana.Command.UNMUTE -> {
+            Watcher.Command.UNMUTE -> {
                 settingsStore.update { it.copy(voiceAudio = true) }
                 voice.audible = true
                 voice.speak("Audio on.")
             }
-            Cortana.Command.SLEEP -> voice.sleep()
+            Watcher.Command.SLEEP -> voice.sleep()
         }
     }
 
@@ -370,8 +370,8 @@ class Container(context: Context) {
         val sky = airspace.state.value
         val totals = rf.totals()
         val drive = wardrive.state.value
-        return Cortana.intelReport(
-            Cortana.ReportInput(
+        return Watcher.intelReport(
+            Watcher.ReportInput(
                 watches = sky.watch,
                 wifi = totals.wifi,
                 ble = totals.ble,

@@ -11,27 +11,27 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
-import dev.skyward.rf.core.Cortana
 import dev.skyward.rf.core.VoiceStyle
 import dev.skyward.rf.core.VoiceStyles
+import dev.skyward.rf.core.Watcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import java.util.Locale
 
 /**
- * The microphone and the speaker behind [Cortana].
+ * The microphone and the speaker behind [Watcher].
  *
  * Android's recogniser is single-shot: it listens for one utterance, answers, and stops. A wake
  * word needs the opposite - a loop that is always listening and throws away everything that is
  * not the name. So this restarts the recogniser after every result and every idle timeout, and
- * gates the commands behind the wake word with a short window in which "Cortana" is still fresh.
+ * gates the commands behind the wake word with a short window in which "Watcher" is still fresh.
  *
  * While the speaker is talking the microphone is cancelled and left off: a recogniser that can
  * hear the phone speak will hear the wake word it just said and answer itself. Text-to-speech is
  * also allowed to be missing - on a phone with no engine the voice is silent but the interface
  * still answers, because every command path goes through the same handler either way.
  */
-class CortanaVoice(private val context: Context) {
+class WatcherVoice(private val context: Context) {
 
     data class State(
         val enabled: Boolean = false,
@@ -46,18 +46,18 @@ class CortanaVoice(private val context: Context) {
     val state = MutableStateFlow(State())
 
     /** A screen change asked for by voice; the UI reads it and clears it. */
-    val nav = MutableStateFlow<Cortana.Nav?>(null)
+    val nav = MutableStateFlow<Watcher.Nav?>(null)
 
     /** Where every parsed command goes. Set by the container, which owns the live state. */
-    var onCommand: ((Cortana.Command) -> Unit)? = null
+    var onCommand: ((Watcher.Command) -> Unit)? = null
 
-    /** The settings switch owns this: off means she still listens, she just does not answer. */
+    /** The settings switch owns this: off means it still listens, it just does not answer. */
     @Volatile
     var audible: Boolean = true
 
-    /** Who is speaking; the settings picker owns this. */
+    /** Which machine voice speaks; the settings picker owns this. */
     @Volatile
-    var style: VoiceStyle = VoiceStyles.of("cortana")
+    var style: VoiceStyle = VoiceStyles.of("female")
 
     private val main = Handler(Looper.getMainLooper())
     private var recognizer: SpeechRecognizer? = null
@@ -113,7 +113,7 @@ class CortanaVoice(private val context: Context) {
         state.value = State()
     }
 
-    /** Wake without speaking: what a tap on the pill does, and what "Cortana" is worth. */
+    /** Wake without speaking: what a tap on the status box does. */
     fun wake() {
         if (!state.value.enabled) return
         awakeUntil = SystemClock.elapsedRealtime() + awakeWindowMs
@@ -145,13 +145,13 @@ class CortanaVoice(private val context: Context) {
         main.removeCallbacks(restartTask)
         runCatching { recognizer?.cancel() }
 
-        // Pitch and rate are the performance the engine actually offers, so each voice gets its
-        // own pair and the glitched alert drags below whichever one is chosen.
+        // Pitch and rate are the performance the engine actually offers; the glitched alert drags
+        // below whichever voice is chosen.
         runCatching { engine.setPitch(if (glitch) voice.alertPitch else voice.pitch) }
         runCatching { engine.setSpeechRate(if (glitch) voice.alertRate else voice.rate) }
         applyLocale(engine, voice)
 
-        val id = "cortana-${utterance++}"
+        val id = "watcher-${utterance++}"
         val queued = runCatching {
             engine.speak(line, TextToSpeech.QUEUE_FLUSH, null, id)
         }.getOrDefault(TextToSpeech.ERROR)
@@ -200,9 +200,9 @@ class CortanaVoice(private val context: Context) {
         override fun onPartialResults(partialResults: Bundle?) {
             val heard = first(partialResults)
             if (heard.isBlank()) return
-            // Only the wake word is acted on before the utterance is final, so the pill can light
+            // Only the wake word is acted on before the utterance is final, so the box can light
             // up while the user is still speaking.
-            if (Cortana.hasWake(heard)) {
+            if (Watcher.hasWake(heard)) {
                 awakeUntil = SystemClock.elapsedRealtime() + awakeWindowMs
                 state.update { it.copy(awake = true, lastHeard = heard.trim()) }
             }
@@ -230,26 +230,26 @@ class CortanaVoice(private val context: Context) {
         state.update { it.copy(lastHeard = spoken.trim()) }
 
         val now = SystemClock.elapsedRealtime()
-        val woke = Cortana.hasWake(spoken)
+        val woke = Watcher.hasWake(spoken)
         if (!woke && now >= awakeUntil) return false
 
         awakeUntil = now + awakeWindowMs
         state.update { it.copy(awake = true) }
 
-        val rest = Cortana.wakeOnly(spoken)
+        val rest = Watcher.wakeOnly(spoken)
         if (rest.isBlank()) {
-            if (woke) speak("Yes?")
+            if (woke) speak("Online.")
             return true
         }
 
-        val command = Cortana.parse(spoken)
+        val command = Watcher.parse(spoken)
         if (command == null) {
             speak("I did not catch a command.")
             return true
         }
-        if (command == Cortana.Command.SLEEP) {
+        if (command == Watcher.Command.SLEEP) {
             sleep()
-            speak("Going quiet.")
+            speak("Standing down.")
             return true
         }
         onCommand?.invoke(command)
@@ -290,8 +290,8 @@ class CortanaVoice(private val context: Context) {
     // ---------------- speaker ----------------
 
     /**
-     * The accent is the half of a voice that a pitch dial cannot fake. en-ZA is often not
-     * installed, so an unavailable language falls back rather than leaving the engine mute.
+     * The base language is the engine's own; the voice is pitched in [speak]. A missing language
+     * falls back to en-US rather than leaving the engine mute.
      */
     private fun applyLocale(engine: TextToSpeech, voice: VoiceStyle) {
         val wanted = runCatching { Locale.forLanguageTag(voice.locale) }.getOrDefault(Locale.US)

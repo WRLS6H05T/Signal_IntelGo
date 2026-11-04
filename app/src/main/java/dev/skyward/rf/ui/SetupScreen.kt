@@ -259,6 +259,21 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                     )
                 }
                 Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Seconds", color = Sky.text, fontSize = 13.sp)
+                        Text(
+                            "Off, the hour and minute are drawn larger in the same corner",
+                            color = Sky.textDim,
+                            fontSize = 10.sp,
+                        )
+                    }
+                    Switch(
+                        checked = settings.clockSeconds,
+                        onCheckedChange = { on -> c.settingsStore.update { it.copy(clockSeconds = on) } },
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
                 Text(
                     "Weather from Open-Meteo: no account and no key. It is read at most every " +
                         "ten minutes, and again after moving two kilometres. The drop-down also " +
@@ -311,7 +326,7 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
 
         item {
             SectionCard(
-                title = "Cortana",
+                title = "Watcher",
                 trailing = when {
                     !settings.voiceEnabled -> "off"
                     voice.note.isNotBlank() -> "unavailable"
@@ -323,7 +338,7 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Hands-free voice", color = Sky.text, fontSize = 13.sp)
-                        Text("Say 'Cortana', then a command", color = Sky.textDim, fontSize = 10.sp)
+                        Text("Say 'Watcher', then a command", color = Sky.textDim, fontSize = 10.sp)
                     }
                     Switch(
                         checked = settings.voiceEnabled,
@@ -342,15 +357,15 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                     )
                 }
                 Spacer(Modifier.height(8.dp))
-                Text("Voice", color = Sky.text, fontSize = 11.sp)
+                Text("Machine voice", color = Sky.text, fontSize = 11.sp)
                 Spacer(Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for (role in VoiceStyles.roles) {
+                    for (gender in VoiceStyles.genders) {
                         UnitChip(
-                            label = role.label,
-                            selected = settings.voiceRole.equals(role.name, ignoreCase = true),
+                            label = gender.label,
+                            selected = VoiceStyles.of(settings.voiceGender).gender == gender,
                             onClick = {
-                                c.settingsStore.update { it.copy(voiceRole = role.name.lowercase()) }
+                                c.settingsStore.update { it.copy(voiceGender = gender.name.lowercase()) }
                             },
                         )
                     }
@@ -358,7 +373,7 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                 Spacer(Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        VoiceStyles.of(settings.voiceRole).let { "${it.role.detail} - ${it.locale}" },
+                        "Flat and clipped, one idea per sentence; the pitch is the only difference.",
                         color = Sky.textDim,
                         fontSize = 10.sp,
                         modifier = Modifier.weight(1f),
@@ -367,7 +382,9 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                         FilterChip(
                             selected = false,
                             onClick = {
-                                c.voice.speak(VoiceStyles.sample(VoiceStyles.of(settings.voiceRole).role))
+                                c.voice.speak(
+                                    VoiceStyles.sample(VoiceStyles.of(settings.voiceGender).gender),
+                                )
                             },
                             label = {
                                 Text("hear it", fontSize = 10.sp, fontFamily = FontFamily.Monospace)
@@ -393,7 +410,7 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                 }
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "She listens while the app is open and the screen is on, and the whole interface " +
+                    "It listens while the app is open and the screen is on, and the whole interface " +
                         "answers without a touch: 'intel report', 'open map', 'drive', 'log', 'setup', " +
                         "'open menu', 'close menu', 'start logging', 'stop logging', 'miles', " +
                         "'kilometres', 'celsius', 'fahrenheit', 'mute', 'unmute', 'sleep'. " +
@@ -404,17 +421,17 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "A phone's engine has one voice per language and a pitch and rate dial, so each " +
-                        "voice is its cadence, accent and phrasing rather than a clone: Cortana calm " +
-                        "and close, the Watcher flat and clipped, Chappie young and chatty. " +
-                        "South African English is often not installed, in which case Chappie falls " +
-                        "back to a plain English voice.",
+                    "A phone's engine has one voice per language and a pitch and rate dial, so the " +
+                        "machine is made by pacing: commas and dashes become full stops, and the " +
+                        "gender is the pitch - the woman a little above the engine's natural voice, " +
+                        "the man well below it. That is the honest limit of text-to-speech, not a " +
+                        "clone of the Watch Dogs performance.",
                     color = Sky.textDim,
                     fontSize = 10.sp,
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "The glitched delivery is kept for the watch list in all three voices: Axon, " +
+                    "The glitched delivery is kept for the watch list in either voice: Axon, " +
                         "TASER, Flock and trackers, once per device per five minutes.",
                     color = Sky.textDim,
                     fontSize = 10.sp,
