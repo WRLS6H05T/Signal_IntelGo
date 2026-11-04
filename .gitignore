@@ -17,3 +17,6 @@ check.log
 threads/
 check2.log
 device-log.txt
+
+# Scratch space for local checks (downloaded APKs, logs)
+.tmp-check/
