@@ -142,9 +142,15 @@ class RfScanner(private val context: Context) {
     /** How full the tables are, beyond the per-snapshot limit the peer link can carry. */
     data class Totals(val wifi: Int, val ble: Int)
 
+    /**
+     * What this device contributes to the shared table: the handset's own radios plus any board
+     * on the cable. The other phone's findings are excluded on purpose - they sit in the same
+     * side tables, so reporting them back would make each exchange echo the peer's own sweeps
+     * and the shared count would grow on every message instead of settling.
+     */
     fun totals(): Totals = Totals(
-        wifi = wifiTable.size + boardWifi.size,
-        ble = bleTable.size + boardBle.size,
+        wifi = wifiTable.size + boardWifi.count { it.value.source == "board" },
+        ble = bleTable.size + boardBle.count { it.value.source == "board" },
     )
 
     private val main = Handler(Looper.getMainLooper())
