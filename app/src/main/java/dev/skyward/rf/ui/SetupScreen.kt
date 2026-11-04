@@ -631,9 +631,19 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                     Spacer(Modifier.height(6.dp))
                     Text(
                         "A drive is shared: start one here and the other phone starts its own " +
-                            "for the same stretch of road. A board on the host's cable is cast to " +
-                            "the other phone, while the record of what it heard stays on the host.",
+                            "for the same stretch of road. The host holds the intel and controls " +
+                            "the Watcher: its INTEL tab carries what the peer posts, and a command " +
+                            "said to the host is obeyed by both phones.",
                         color = Sky.textDim,
+                        fontSize = 10.sp,
+                    )
+                    Text(
+                        if (c.isHostPhone()) {
+                            "This phone is the host: the peer's findings are posted in the INTEL tab"
+                        } else {
+                            "This phone posts its findings to the host's INTEL tab"
+                        },
+                        color = Sky.cyan,
                         fontSize = 10.sp,
                     )
                     Spacer(Modifier.height(4.dp))

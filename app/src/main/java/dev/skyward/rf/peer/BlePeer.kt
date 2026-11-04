@@ -64,7 +64,14 @@ class BlePeer(private val context: Context) {
 
         private const val SEND_MS = 5_000L
         private const val TICK_MS = 40L
-        private const val MAX_ITEMS = 32
+        /**
+         * Items per radio in one snapshot, and per board.
+         *
+         * Sized against [MAX_MESSAGE] rather than against the tables: a host sends its whole
+         * merged table, and a follower sends its own sweep plus its board's, and both have to
+         * fit one message or the sweep is dropped whole. The totals carry the full size.
+         */
+        private const val MAX_ITEMS = 20
         private const val NAME_CHARS = 20
         private const val MAX_MESSAGE = 4_800
 
@@ -75,7 +82,7 @@ class BlePeer(private val context: Context) {
         private const val MAX_OFFERS = 12
 
         /** Board intel is the smaller half of a snapshot: the cable holds one board, not a city. */
-        private const val BOARD_ITEMS = 16
+        private const val BOARD_ITEMS = 10
     }
 
     /** What this device offers the other one. */

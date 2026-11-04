@@ -850,6 +850,18 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 // What the other phone put *into* the shared table, not a second total that
                 // is already counted in WIFI and BLE above.
                 IntelRow("PEER", c.rf.peerCount(), peer.connected) { }
+                // The peer's own findings, posted into this table by name rather than merely
+                // counted, so the host shows what the other radio is hearing right now.
+                if (peer.connected) {
+                    c.rf.peerRows(limit = 3).forEach { o ->
+                        Text(
+                            "\u203a " + (o.name.ifBlank { o.id }).take(17) + " \u00b7 " + o.rssi + " dB",
+                            color = Sky.textDim,
+                            fontSize = 8.sp,
+                            maxLines = 1,
+                        )
+                    }
+                }
                 // The host's table carries the assignment too, so the whole picture is
                 // readable without opening the peer card.
                 Text(

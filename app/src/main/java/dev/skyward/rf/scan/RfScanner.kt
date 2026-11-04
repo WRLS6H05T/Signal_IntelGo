@@ -156,14 +156,16 @@ class RfScanner(private val context: Context) {
         boardWifi.count { it.value.source == "peer" } + boardBle.count { it.value.source == "peer" }
 
     /**
-     * Whether one of *this* phone's own radios heard this id.
+     * The rows that reached this phone from the other one, strongest first.
      *
-     * The table is shared, so both phones match the same camera. Only the phone that actually
-     * heard it announces it, which is what keeps the pair from saying the same thing twice.
+     * The host's INTEL tab lists these by name: what the peer posted sits in the same table as
+     * the host's own findings, so it is obvious which radio on which phone heard it.
      */
-    fun heardHere(id: String): Boolean =
-        wifiTable.containsKey(id) || bleTable.containsKey(id) ||
-            boardWifi[id]?.source == "board" || boardBle[id]?.source == "board"
+    fun peerRows(limit: Int = 3, now: Long = System.currentTimeMillis()): List<RfObservation> =
+        (boardWifi.values + boardBle.values)
+            .filter { it.source == "peer" && now - it.seenAt <= STALE_MS }
+            .sortedByDescending { it.rssi }
+            .take(limit)
 
     /** The board's own intel, apart from the handset's sweeps: what the peer link carries. */
     data class BoardIntel(

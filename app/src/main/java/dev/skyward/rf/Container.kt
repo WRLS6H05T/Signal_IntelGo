@@ -197,16 +197,18 @@ class Container(context: Context) {
             val snap = rf.snapshot(limit = 80)
             val totals = rf.totals()
             val boards = rf.boardIntel()
+            // The host holds the one table and sends back everything it has, including what
+            // the peer posted, so the follower sees the same road. A follower sends only what
+            // its own radios heard: echoing the host's rows back would bounce the same devices
+            // around the link for ever.
+            val host = isHostPhone()
+            val wifiRows = if (host) snap.wifi else snap.wifi.filter { it.source == "local" }
+            val bleRows = if (host) snap.ble else snap.ble.filter { it.source == "local" }
             BlePeer.Snapshot(
                 fix = phoneFix ?: _observer.value,
                 sats = 0,
-                // Only what this phone heard itself. The table is shared, so sending the other
-                // phone's rows back would let stale findings bounce between the two for ever;
-                // the board on this cable travels in its own field below, once.
-                wifi = snap.wifi.filter { it.source == "local" }
-                    .map { PeerProtocol.Ap(it.id, it.name, it.rssi, it.channel) },
-                ble = snap.ble.filter { it.source == "local" }
-                    .map { PeerProtocol.Device(it.id, it.name, it.rssi) },
+                wifi = wifiRows.map { PeerProtocol.Ap(it.id, it.name, it.rssi, it.channel) },
+                ble = bleRows.map { PeerProtocol.Device(it.id, it.name, it.rssi) },
                 // Sent alongside the sample so both phones can show the same totals.
                 wifiTotal = totals.wifi,
                 bleTotal = totals.ble,
@@ -214,9 +216,13 @@ class Container(context: Context) {
                 gpsUsed = (phoneFix ?: _observer.value) != null,
                 // Cellular counts as in use once towers are actually being heard.
                 cellUsed = cell.count() > 0,
-                // The cable's intel, which the other phone has no way of hearing for itself.
-                boardWifi = boards.wifi.map { PeerProtocol.Ap(it.id, it.name, it.rssi, it.channel) },
-                boardBle = boards.ble.map { PeerProtocol.Device(it.id, it.name, it.rssi) },
+                // A follower's cable intel, which the host has no way of hearing for itself.
+                // The host's own board rows already travel in the merged table above, so they
+                // are sent once and only their totals are repeated here.
+                boardWifi = if (host) emptyList()
+                else boards.wifi.map { PeerProtocol.Ap(it.id, it.name, it.rssi, it.channel) },
+                boardBle = if (host) emptyList()
+                else boards.ble.map { PeerProtocol.Device(it.id, it.name, it.rssi) },
                 boardWifiTotal = boards.wifiTotal,
                 boardBleTotal = boards.bleTotal,
             )
@@ -403,19 +409,32 @@ class Container(context: Context) {
             airspace.state.collect { sky ->
                 val cfg = settingsStore.current
                 if (!cfg.voiceEnabled || !cfg.voiceAudio) return@collect
+                // The host owns the Watcher. Its table already carries what the peer posted,
+                // so its alerts cover both radios and the pair speaks once, not twice.
+                if (!isHostPhone()) return@collect
                 val now = System.currentTimeMillis()
                 if (now - lastAlert < alertGapMs) return@collect
                 val hit = sky.watch.firstOrNull { w ->
-                    now - (announced["${w.kind.name}:${w.id}"] ?: 0L) > alertRepeatMs &&
-                        // Both phones hold the one table, so both see the camera; only the
-                        // phone whose own radio heard it speaks.
-                        rf.heardHere(w.id)
+                    now - (announced["${w.kind.name}:${w.id}"] ?: 0L) > alertRepeatMs
                 } ?: return@collect
                 announced["${hit.kind.name}:${hit.id}"] = now
                 lastAlert = now
                 voice.speak(Watcher.alert(hit), glitch = true)
             }
         }
+    }
+
+    /**
+     * Whether this phone is the host of the pair.
+     *
+     * The host holds the intel and drives the Watcher. It is the phone set to host, or - in the
+     * automatic split - the larger screen, which is the device the roles already give the globe.
+     * A phone set to globe view is the follower; an unlinked phone hosts itself.
+     */
+    fun isHostPhone(): Boolean = when (settingsStore.current.peerRoleMode) {
+        PeerProtocol.MODE_HOST -> true
+        PeerProtocol.MODE_GLOBE -> false
+        else -> !peer.isRunning() || peer.role() == PeerProtocol.DISPLAY
     }
 
     /**
@@ -449,7 +468,9 @@ class Container(context: Context) {
         // "miles" or "open menu" to one phone does it on the other. Answers and drives are
         // not forwarded: a report is spoken by the phone that was asked, and a drive already
         // travels as shared recording state.
-        if (!fromPeer && cmd in SHARED_COMMANDS && peer.isRunning()) peer.sendVoice(cmd.name)
+        if (!fromPeer && isHostPhone() && cmd in SHARED_COMMANDS && peer.isRunning()) {
+            peer.sendVoice(cmd.name)
+        }
         when (cmd) {
             Watcher.Command.REPORT -> voice.speak(voiceReport())
             Watcher.Command.HELP -> voice.speak(Watcher.help())
