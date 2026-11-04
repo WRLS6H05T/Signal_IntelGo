@@ -162,9 +162,12 @@ fun AppRoot(c: Container) {
             // target, so tapping the icon or the word selects it.
             if (barOpen) {
                 Row(
+                    // Anchored at the corner the folded button sits in, so the bar opens out
+                    // from there and stays only as wide as its own words - centring it made
+                    // the whole strip jump to the middle of the screen for four short labels.
                     Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 10.dp)
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 10.dp, bottom = 10.dp)
                         .clip(RoundedCornerShape(16.dp))
                         .background(Sky.surface.copy(alpha = 0.97f))
                         .border(1.dp, Sky.outline, RoundedCornerShape(16.dp))
@@ -226,7 +229,7 @@ private fun BottomTab(label: String, icon: ImageVector, selected: Boolean, onCli
             .clip(RoundedCornerShape(11.dp))
             .background(if (selected) Sky.cyan.copy(alpha = 0.10f) else Sky.surface)
             .clickable(onClick = onClick)
-            .padding(horizontal = 9.dp, vertical = 7.dp),
+            .padding(horizontal = 7.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, contentDescription = label, tint = color, modifier = Modifier.size(16.dp))
