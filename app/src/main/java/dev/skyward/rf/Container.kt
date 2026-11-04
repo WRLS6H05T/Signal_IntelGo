@@ -7,7 +7,7 @@ import dev.skyward.rf.core.RfKind
 import dev.skyward.rf.core.RfObservation
 import dev.skyward.rf.core.SettingsStore
 import dev.skyward.rf.location.LocationTracker
-import dev.skyward.rf.net.WigleUpload
+import dev.skyward.rf.net.WigleApi
 import dev.skyward.rf.peer.BlePeer
 import dev.skyward.rf.peer.PeerProtocol
 import dev.skyward.rf.scan.CellScanner
@@ -103,8 +103,11 @@ class Container(context: Context) {
     /** The drives the other phone says it has, as last offered over the link. */
     val peerLogs = MutableStateFlow<List<PeerProtocol.LogInfo>>(emptyList())
 
-    /** Uploads the logged signals to the user's own WiGLE account. */
-    val wigle = WigleUpload(http)
+    /** Uploads, lists and searches the user's own WiGLE account. */
+    val wigle = WigleApi(http)
+
+    /** KML pulled back from WiGLE, kept beside the rest of the data so a PC can copy it too. */
+    val wigleDir = File(rootData, "wigle").apply { mkdirs() }
 
 
     init {
@@ -286,6 +289,14 @@ class Container(context: Context) {
                 signalLog.save()
             }
         }
+    }
+
+    /** Writes a downloaded WiGLE file into the data folder and reports where it landed. */
+    fun saveWigleFile(fileName: String, text: String): String {
+        val safe = fileName.replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "wigle.kml" }
+        val file = File(wigleDir, safe)
+        runCatching { file.writeText(text) }
+        return file.absolutePath
     }
 
     fun stopScanning() {

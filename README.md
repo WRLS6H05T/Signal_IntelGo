@@ -306,6 +306,24 @@ repository can sign an APK that Android will accept as this app.
 
 The workflow runs the unit tests before it builds, so a red build never becomes a download.
 
+## WiGLE
+
+The WiGLE panel on the Log tab uses the API in full, with the API name and token from
+<https://wigle.net/account>:
+
+| Button | WiGLE endpoint | What it does |
+| --- | --- | --- |
+| UPLOAD CSV | `POST /api/v2/file/upload` | sends the logged signals as WiGLE's own CSV |
+| VERIFY KEY | `GET /api/v2/profile/user` | confirms the key belongs to an account |
+| LIST UPLOADS | `GET /api/v2/file/transactions` | every file this account has uploaded, newest first |
+| KML / SAVE ALL KML | `GET /api/v2/file/kml/{transid}` | pulls the KML of one upload, or of all of them, into `data/wigle/` |
+| SEARCH MINE | `GET /api/v2/network/search`, `/bluetooth/search`, `/cell/search` with `onlymine` | searches the observations this account contributed, paged with `searchAfter` |
+
+The KML files are written into the same folder as the rest of the data, so they are copied off the
+phone with it. WiGLE grants each account a daily query allowance; the panel makes one request per
+button press, and pagination is a press of its own, so the allowance is never spent on pages
+nobody asked for.
+
 ## Moving the intel to another phone
 
 Everything the app records is plain files in one folder:
