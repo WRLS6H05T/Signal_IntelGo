@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.List
@@ -40,12 +42,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import dev.skyward.rf.Container
+import dev.skyward.rf.core.Cortana
 import dev.skyward.rf.peer.PeerProtocol
 import dev.skyward.rf.ui.theme.Sky
+import dev.skyward.rf.voice.CortanaVoice
 
 private fun requiredPermissions(): List<String> {
     val list = mutableListOf(
@@ -72,6 +77,7 @@ fun AppRoot(c: Container) {
     // every message, so after that it leaves the user's own tab choice alone.
     val peer by c.peer.state.collectAsState()
     val settings by c.settingsStore.state.collectAsState()
+    val voiceState by c.voice.state.collectAsState()
     LaunchedEffect(peer.connected, peer.role, settings.peerRoleMode) {
         // A hand-picked globe view or host always shows the map; "auto" keeps the screen-size
         // split, and an unlinked phone is left on whichever tab the user chose.
@@ -112,6 +118,24 @@ fun AppRoot(c: Container) {
     // whole height back and the map's action stack leaves room for the corner, so the button
     // never sits on top of a control. A tap opens the four choices; picking one folds it again.
     var barOpen by remember { mutableStateOf(false) }
+
+    // Anything Cortana asks the interface to do arrives here: a tab, or the folded bar opening
+    // and closing. The request is cleared as soon as it is obeyed so it cannot fire twice.
+    LaunchedEffect(Unit) {
+        c.voice.nav.collect { request ->
+            when (request) {
+                is Cortana.Nav.Go -> {
+                    if (request.tab == Cortana.Tab.LOG) c.wardrive.refreshSessions()
+                    tab = request.tab.index
+                    barOpen = false
+                }
+                Cortana.Nav.OpenMenu -> barOpen = true
+                Cortana.Nav.CloseMenu -> barOpen = false
+                null -> Unit
+            }
+            c.voice.nav.value = null
+        }
+    }
     val tabs = listOf(
         Triple("Map", Icons.Filled.Place, 0),
         Triple("Drive", Icons.Filled.PlayArrow, 1),
@@ -164,6 +188,16 @@ fun AppRoot(c: Container) {
                 else -> SetupScreen(c, Modifier.fillMaxSize(), onFixPermissions = request)
             }
 
+            if (settings.voiceEnabled) {
+                CortanaPill(
+                    state = voiceState,
+                    onTap = { c.voice.wake() },
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(start = 10.dp, bottom = 10.dp),
+                )
+            }
+
             if (!barOpen) {
                 Column(
                     Modifier
@@ -187,6 +221,53 @@ fun AppRoot(c: Container) {
                     Text("\u25B2", color = Sky.textDim, fontSize = 6.sp)
                 }
             }
+        }
+    }
+}
+
+/**
+ * The visible part of Cortana: a small pill in the opposite corner from the tab button, so the
+ * user can see whether she is listening, awake or speaking - and tap to wake her without saying
+ * the name. It is the only chrome the voice adds.
+ */
+@Composable
+private fun CortanaPill(
+    state: CortanaVoice.State,
+    onTap: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val dot = when {
+        state.speaking -> Sky.logged
+        state.awake -> Sky.cyan
+        state.listening -> Sky.mesh
+        else -> Sky.textDim
+    }
+    val line = when {
+        state.note.isNotBlank() -> state.note
+        state.lastHeard.isNotBlank() -> state.lastHeard.take(26)
+        state.awake -> "awake"
+        state.listening -> "listening"
+        else -> "standby"
+    }
+    Row(
+        modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Sky.surface.copy(alpha = 0.95f))
+            .border(1.dp, Sky.outline, RoundedCornerShape(12.dp))
+            .clickable(onClick = onTap)
+            .padding(horizontal = 9.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(dot),
+        )
+        Spacer(Modifier.width(6.dp))
+        Column {
+            Text("CORTANA", color = Sky.cyan, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+            Text(line, color = Sky.textDim, fontSize = 8.sp, maxLines = 1)
         }
     }
 }

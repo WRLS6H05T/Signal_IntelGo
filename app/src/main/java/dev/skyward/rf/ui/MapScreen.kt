@@ -255,6 +255,7 @@ private fun markerColor(m: MapMarker): Color = when {
         WatchKind.FLOCK -> Sky.watchFlock
         WatchKind.AXON -> Sky.watchAxon
         WatchKind.TASER -> Sky.watchTaser
+        WatchKind.TRACKER -> Sky.watchTracker
         null -> Sky.watchFlock
     }
     else -> Sky.mesh

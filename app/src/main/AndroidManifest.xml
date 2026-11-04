@@ -30,6 +30,9 @@
         android:name="android.permission.BLUETOOTH_CONNECT"
         tools:targetApi="31" />
 
+    <!-- Cortana: the phone's own speech recogniser, once the Setup switch is turned on. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
     <!-- Peer link: both phones advertise the service and connect to each other. -->
     <uses-permission
         android:name="android.permission.BLUETOOTH_ADVERTISE"
@@ -49,6 +52,22 @@
     <uses-feature
         android:name="android.hardware.usb.host"
         android:required="false" />
+    <uses-feature
+        android:name="android.hardware.microphone"
+        android:required="false" />
+
+    <!--
+        Android 11 hides other apps unless they are declared: without these two queries the
+        speech recogniser and a text-to-speech engine look absent on a phone that has both.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
 
     <application
         android:name=".SkywardApp"

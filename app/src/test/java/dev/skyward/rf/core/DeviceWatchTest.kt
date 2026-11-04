@@ -52,6 +52,28 @@ class DeviceWatchTest {
     }
 
     @Test
+    fun `a tracker is a tracker, and its maker's id only corroborates it`() {
+        // Apple and Samsung ids are on every phone in the street, so a name has to match first.
+        val airtag = DeviceWatch.assess(RfKind.BLE, "AirTag", "AA:BB:CC:DD:EE:10", DeviceWatch.APPLE_COMPANY_ID)
+        assertEquals(WatchKind.TRACKER, airtag?.kind)
+        assertEquals("name + manufacturer id", airtag?.confidence)
+        assertTrue(airtag!!.strong)
+
+        assertEquals(
+            WatchKind.TRACKER,
+            DeviceWatch.assess(RfKind.BLE, "Tile", "AA:BB:CC:DD:EE:11", 0)?.kind,
+        )
+        assertEquals(
+            "name + manufacturer id",
+            DeviceWatch.assess(RfKind.BLE, "Galaxy SmartTag2", "AA:BB:CC:DD:EE:12", DeviceWatch.SAMSUNG_COMPANY_ID)?.confidence,
+        )
+        // No name, so an iPhone's company id alone is not a tracker hit.
+        assertNull(DeviceWatch.assess(RfKind.BLE, "", "AA:BB:CC:DD:EE:13", DeviceWatch.APPLE_COMPANY_ID))
+        // "tile" only counts as the bare product name, not inside a cafe's SSID.
+        assertNull(DeviceWatch.assess(RfKind.WIFI, "Blue Tile Coffee", "AA:BB:CC:DD:EE:14", 0))
+    }
+
+    @Test
     fun `ordinary traffic is left alone`() {
         assertNull(DeviceWatch.assess(RfKind.WIFI, "HomeNet", "AA:BB:CC:DD:EE:07", 0))
         assertNull(DeviceWatch.assess(RfKind.BLE, "", "AA:BB:CC:DD:EE:08", 0x004C))

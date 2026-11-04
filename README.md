@@ -362,7 +362,37 @@ rewrites a saved drive or changes what the other phone receives. Wind and rain f
 distance unit (mph and inches with miles, km/h and millimetres with kilometres), the terrain
 height follows it too, and the temperature setting applies to the weather drop-down.
 
+## Cortana
+
+Setup -> **Cortana** turns on hands-free voice. Say **"Cortana"** and the interface answers
+without a touch: *intel report*, *open map*, *drive*, *log*, *setup*, *open menu*, *close menu*,
+*start logging*, *stop logging*, *miles*, *kilometres*, *celsius*, *fahrenheit*, *mute*, *unmute*,
+*sleep*. The name is accepted in the forms a recogniser actually returns - "Cortana", "Cortona",
+"Kortana" - and a bare command works for twenty seconds after it, so "Cortana... open setup"
+does not need the name twice. A small pill in the bottom-left corner shows whether she is
+listening, awake or speaking; tap it to wake her without saying anything.
+
+**"Cortana, intel report"** answers in two parts, in this order: the **connected devices** first -
+how many Flock cameras, Axon cameras, TASERs and trackers matched, and the nearest by name - and
+then the **signal intel**: Wi-Fi networks, Bluetooth devices, cell towers, mesh nodes, satellites
+and aircraft in range, whether a GPS fix is held, and whether a drive is being recorded and how
+far it has gone.
+
+Her own answers are spoken high and quick. The **glitched voice** is kept for the watch list:
+a Flock camera, an Axon body camera, a TASER or a tracker is announced in the broken, slowed-down
+voice - once per device per five minutes, so a drive does not become a monologue. Everything uses
+the phone's own recogniser and text-to-speech engine: no audio is written to a file and nothing is
+sent anywhere. She listens while the app is open and the screen is on; a background listener would
+need a microphone foreground service and its permanent notification, which this does not add.
+
+The microphone is requested only when the switch is turned on, not at launch.
+
 ## Watch list
+
+Bluetooth trackers - AirTag, Tile, SmartTag, Chipolo and the like - are matched by the name they
+broadcast and drawn in violet alongside the cameras. A tracker's name is the only evidence, because
+the strong ones rotate their address and encrypt their payload; the Apple and Samsung manufacturer
+ids raise confidence but never match on their own, or every phone in the street would be a hit.
 
 The radios also look for surveillance hardware and pin a match where it was heard: **FLOCK**
 (Flock Safety ALPR cameras, including their `FS Ext Battery` packs and `Flock-XXXX` names),

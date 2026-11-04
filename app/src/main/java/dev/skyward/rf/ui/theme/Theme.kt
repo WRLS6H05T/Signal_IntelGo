@@ -32,6 +32,7 @@ object Sky {
     val watchFlock = Color(0xFFFB7185)
     val watchAxon = Color(0xFF60A5FA)
     val watchTaser = Color(0xFFFBBF24)
+    val watchTracker = Color(0xFFA78BFA)
 }
 
 private val scheme = darkColorScheme(

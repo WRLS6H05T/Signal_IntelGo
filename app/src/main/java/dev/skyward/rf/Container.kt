@@ -5,7 +5,10 @@ import dev.skyward.rf.core.FileStore
 import dev.skyward.rf.core.LatLon
 import dev.skyward.rf.core.RfKind
 import dev.skyward.rf.core.RfObservation
+import dev.skyward.rf.core.Cortana
 import dev.skyward.rf.core.SettingsStore
+import dev.skyward.rf.core.Units
+import dev.skyward.rf.voice.CortanaVoice
 import dev.skyward.rf.location.LocationTracker
 import dev.skyward.rf.net.WeatherFeed
 import dev.skyward.rf.net.WigleApi
@@ -109,6 +112,13 @@ class Container(context: Context) {
 
     /** Current conditions at the fix, keyless via Open-Meteo; only asked while the clock is on. */
     val weather = WeatherFeed(http)
+
+    /** Hands-free Cortana: one wake word, the phone's own recogniser and speaker. */
+    val voice = CortanaVoice(appContext)
+
+    /** A watch alert is worth hearing once, then not again for a while. */
+    private val alertGapMs = 8_000L
+    private val alertRepeatMs = 5 * 60_000L
 
     /** KML pulled back from WiGLE, kept beside the rest of the data so a PC can copy it too. */
     val wigleDir = File(rootData, "wigle").apply { mkdirs() }
@@ -269,6 +279,112 @@ class Container(context: Context) {
         }
     }
 
+    init {
+        voice.onCommand = { cmd -> runCatching { handleVoice(cmd) } }
+
+        // The two switches are the whole lifecycle: voice on opens the microphone, voice off
+        // closes it, and the audio switch only silences the replies.
+        scope.launch {
+            settingsStore.state.collect { cfg ->
+                voice.audible = cfg.voiceAudio
+                if (cfg.voiceEnabled) voice.start() else voice.stop()
+            }
+        }
+
+        // Watch alerts in the glitched voice: Flock, Axon, TASER and trackers alike, one per
+        // device per five minutes and never two inside eight seconds, so a busy street does not
+        // turn the drive into a monologue.
+        scope.launch {
+            val announced = HashMap<String, Long>()
+            var lastAlert = 0L
+            airspace.state.collect { sky ->
+                val cfg = settingsStore.current
+                if (!cfg.voiceEnabled || !cfg.voiceAudio) return@collect
+                val now = System.currentTimeMillis()
+                if (now - lastAlert < alertGapMs) return@collect
+                val hit = sky.watch.firstOrNull { w ->
+                    now - (announced["${w.kind.name}:${w.id}"] ?: 0L) > alertRepeatMs
+                } ?: return@collect
+                announced["${hit.kind.name}:${hit.id}"] = now
+                lastAlert = now
+                voice.speak(Cortana.alert(hit), glitch = true)
+            }
+        }
+    }
+
+    /**
+     * What a spoken command does. Screens are not changed here - the request goes into
+     * [CortanaVoice.nav] and the scaffold acts on it - but everything stateful is: logging,
+     * units and the audio switch.
+     */
+    private fun handleVoice(cmd: Cortana.Command) {
+        when (cmd) {
+            Cortana.Command.REPORT -> voice.speak(voiceReport())
+            Cortana.Command.HELP -> voice.speak(Cortana.help())
+            Cortana.Command.MAP -> voice.nav.value = Cortana.Nav.Go(Cortana.Tab.MAP)
+            Cortana.Command.DRIVE -> voice.nav.value = Cortana.Nav.Go(Cortana.Tab.DRIVE)
+            Cortana.Command.LOG -> voice.nav.value = Cortana.Nav.Go(Cortana.Tab.LOG)
+            Cortana.Command.SETUP -> voice.nav.value = Cortana.Nav.Go(Cortana.Tab.SETUP)
+            Cortana.Command.OPEN_MENU -> voice.nav.value = Cortana.Nav.OpenMenu
+            Cortana.Command.CLOSE_MENU -> voice.nav.value = Cortana.Nav.CloseMenu
+            Cortana.Command.START ->
+                voice.speak(if (wardrive.start()) "Recording." else "Already recording.")
+            Cortana.Command.STOP -> {
+                val ended = wardrive.stop()
+                voice.speak(if (ended == null) "Not recording." else "Stopped.")
+            }
+            Cortana.Command.MILES -> {
+                settingsStore.update { it.copy(distanceUnit = Units.MILES) }
+                voice.speak("Miles.")
+            }
+            Cortana.Command.KILOMETRES -> {
+                settingsStore.update { it.copy(distanceUnit = Units.KM) }
+                voice.speak("Kilometres.")
+            }
+            Cortana.Command.CELSIUS -> {
+                settingsStore.update { it.copy(tempUnit = Units.CELSIUS) }
+                voice.speak("Celsius.")
+            }
+            Cortana.Command.FAHRENHEIT -> {
+                settingsStore.update { it.copy(tempUnit = Units.FAHRENHEIT) }
+                voice.speak("Fahrenheit.")
+            }
+            Cortana.Command.MUTE -> {
+                // Said before the switch is thrown, or the confirmation is the first thing muted.
+                voice.speak("Muting.")
+                settingsStore.update { it.copy(voiceAudio = false) }
+            }
+            Cortana.Command.UNMUTE -> {
+                settingsStore.update { it.copy(voiceAudio = true) }
+                voice.audible = true
+                voice.speak("Audio on.")
+            }
+            Cortana.Command.SLEEP -> voice.sleep()
+        }
+    }
+
+    /** The intel report, read from the live picture at the moment it is asked for. */
+    fun voiceReport(): String {
+        val sky = airspace.state.value
+        val totals = rf.totals()
+        val drive = wardrive.state.value
+        return Cortana.intelReport(
+            Cortana.ReportInput(
+                watches = sky.watch,
+                wifi = totals.wifi,
+                ble = totals.ble,
+                cells = sky.cells.size,
+                mesh = sky.mesh.size,
+                sats = sky.sats.size,
+                aircraft = sky.aircraft.size,
+                gps = observer.value != null,
+                logging = drive.active,
+                km = drive.km,
+                unit = settingsStore.current.distanceUnit,
+            ),
+        )
+    }
+
     fun start() {
         if (running) return
         running = true
@@ -367,6 +483,7 @@ class Container(context: Context) {
         mesh.stop()
         esp32.stop()
         peer.stop()
+        voice.stop()
         rf.stopAll()
         location.stop()
         running = false

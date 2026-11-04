@@ -40,6 +40,10 @@ data class Settings(
     val distanceUnit: String = "km",
     /** "c" or "f": the weather drop-down's temperature. */
     val tempUnit: String = "c",
+    /** Hands-free Cortana: listen for the wake word and obey the spoken commands. */
+    val voiceEnabled: Boolean = false,
+    /** Speak the replies and the watch alerts out loud. */
+    val voiceAudio: Boolean = true,
     /** ESP32 sensor boards: BLE advertisements always, MQTT when a Wi-Fi board publishes. */
     val esp32Enabled: Boolean = true,
     /** GhostESP, ESP32 Marauder, Biscuit and anything else ESP32 plugged into the USB port. */

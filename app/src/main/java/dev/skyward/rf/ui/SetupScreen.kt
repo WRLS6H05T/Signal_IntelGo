@@ -1,5 +1,8 @@
 package dev.skyward.rf.ui
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -34,6 +37,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import dev.skyward.rf.Container
 import dev.skyward.rf.core.LOG_RADIUS_KM
 import dev.skyward.rf.core.Settings
@@ -47,8 +51,23 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
     val settings by c.settingsStore.state.collectAsState()
     val peer by c.peer.state.collectAsState()
     val sky by c.airspace.state.collectAsState()
+    val voice by c.voice.state.collectAsState()
     val context = LocalContext.current
     val tileStore = remember { TileStore(context, c.http) }
+
+    // The microphone is asked for at the moment the switch is turned on, never at launch: an
+    // app that opens a wardriving map should not be asking to record before it has drawn a map.
+    var micNote by remember { mutableStateOf<String?>(null) }
+    val micLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            micNote = null
+            c.settingsStore.update { it.copy(voiceEnabled = true) }
+        } else {
+            micNote = "Microphone permission is needed for voice."
+        }
+    }
 
     LazyColumn(
         modifier
@@ -290,11 +309,81 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
         }
 
         item {
+            SectionCard(
+                title = "Cortana",
+                trailing = when {
+                    !settings.voiceEnabled -> "off"
+                    voice.note.isNotBlank() -> "unavailable"
+                    voice.speaking -> "speaking"
+                    voice.awake -> "awake"
+                    else -> "listening"
+                },
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Hands-free voice", color = Sky.text, fontSize = 13.sp)
+                        Text("Say 'Cortana', then a command", color = Sky.textDim, fontSize = 10.sp)
+                    }
+                    Switch(
+                        checked = settings.voiceEnabled,
+                        onCheckedChange = { on ->
+                            if (!on) {
+                                c.settingsStore.update { it.copy(voiceEnabled = false) }
+                            } else {
+                                val granted = ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.RECORD_AUDIO,
+                                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                                if (granted) c.settingsStore.update { it.copy(voiceEnabled = true) }
+                                else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            }
+                        },
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Spoken replies", color = Sky.text, fontSize = 13.sp)
+                        Text("Watch alerts use the glitched voice", color = Sky.textDim, fontSize = 10.sp)
+                    }
+                    Switch(
+                        checked = settings.voiceAudio,
+                        onCheckedChange = { on -> c.settingsStore.update { it.copy(voiceAudio = on) } },
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "She listens while the app is open and the screen is on, and the whole interface " +
+                        "answers without a touch: 'intel report', 'open map', 'drive', 'log', 'setup', " +
+                        "'open menu', 'close menu', 'start logging', 'stop logging', 'miles', " +
+                        "'kilometres', 'celsius', 'fahrenheit', 'mute', 'unmute', 'sleep'. " +
+                        "The recogniser and the speaker are the phone's own - nothing is recorded " +
+                        "to a file and nothing is sent anywhere.",
+                    color = Sky.textDim,
+                    fontSize = 10.sp,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "The glitched voice is kept for the watch list: Axon, TASER, Flock and " +
+                        "trackers are announced in it, once per device per five minutes.",
+                    color = Sky.textDim,
+                    fontSize = 10.sp,
+                )
+                val note = micNote ?: voice.note
+                if (note.isNotBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(note, color = Sky.warn, fontSize = 10.sp)
+                }
+            }
+        }
+
+        item {
             SectionCard(title = "Watch list", trailing = "${sky.watch.size} heard") {
                 Text(
                     "Passive matches for surveillance hardware: Flock Safety ALPR cameras " +
                         "(including the 'FS Ext Battery' packs and Flock-XXXX names), Axon " +
-                        "body cameras, and Axon TASERs.",
+                        "body cameras, Axon TASERs, and Bluetooth item trackers - AirTag, Tile, " +
+                        "SmartTag and Chipolo - which follow a person or a car rather than scan it.",
                     color = Sky.textDim,
                     fontSize = 11.sp,
                 )
@@ -304,7 +393,9 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                         "manufacturer id Flock's hardware uses (XUNTONG, 0x09C8). A camera that " +
                         "keeps its name hidden, or any phone whose address rotates, cannot be " +
                         "told apart from an anonymous MAC - so a hit is a lead, not proof. " +
-                        "A marker reading 'name + manufacturer id' is the one to trust.",
+                        "A marker reading 'name + manufacturer id' is the one to trust. Trackers " +
+                        "are the opposite case: the name is the only evidence, because the good " +
+                        "ones randomise their address and encrypt what they advertise.",
                     color = Sky.textDim,
                     fontSize = 10.sp,
                 )
@@ -312,6 +403,7 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                 SwatchRow(color = Sky.watchFlock, label = "FLOCK", detail = "ALPR camera")
                 SwatchRow(color = Sky.watchAxon, label = "AXON", detail = "body camera")
                 SwatchRow(color = Sky.watchTaser, label = "TASER", detail = "Axon CED")
+                SwatchRow(color = Sky.watchTracker, label = "TRACKER", detail = "AirTag, Tile, SmartTag")
             }
         }
 
