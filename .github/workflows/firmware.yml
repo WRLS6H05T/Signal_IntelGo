@@ -1,0 +1,45 @@
+name: firmware
+
+# Builds the two sensor images the app flashes. The APK carries prebuilt images in
+# app/src/main/assets/firmware, so this workflow exists to produce them on a machine that has no
+# Arduino toolchain: download the artifacts, drop the .bin files and firmware.json into that
+# directory, and the next APK build ships them.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "firmware/**"
+      - ".github/workflows/firmware.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: arduino/setup-arduino-cli@v2
+
+      - name: Install the esp32 core
+        run: |
+          arduino-cli config init --overwrite
+          arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install esp32:esp32 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+
+      - name: Install esptool
+        run: pip install "esptool>=5,<6"
+
+      - name: Compile both images
+        run: bash firmware/build.sh
+
+      - name: Show what was built
+        run: ls -l app/src/main/assets/firmware
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sensor-firmware
+          path: |
+            app/src/main/assets/firmware/esp32c3.bin
+            app/src/main/assets/firmware/esp32c5.bin
+            app/src/main/assets/firmware/firmware.json
+          if-no-files-found: error

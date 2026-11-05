@@ -1,0 +1,16 @@
+{
+  "version": "1.0.0",
+  "built": "2026-11-04T23:59:59+00:00",
+  "images": {
+    "c3": {
+      "file": "esp32c3.bin",
+      "size": 1303344,
+      "sha256": "04d41065421dba018439ecccedd7e4e71314663abb3e2f98c1d3a9cb111a2d51"
+    },
+    "c5": {
+      "file": "esp32c5.bin",
+      "size": 1504304,
+      "sha256": "387ef2377aa1428ec9776ee1aab439eb7bb0aeada7933c258b25e2af517a9aa8"
+    }
+  }
+}

@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.ReentrantLock
 
 /** Which firmware family a board turned out to be. */
@@ -245,6 +247,15 @@ class UsbBoards(private val context: Context) {
     /** Boards with a telemetry poll running; cleared when the cable comes out. */
     private val polling = ConcurrentHashMap.newKeySet<Int>()
 
+    /**
+     * Boards a terminal or the flasher has taken off the poller.
+     *
+     * The poller reopens the port every few seconds and writes commands into it; a human typing
+     * a firmware command, or a flash download in progress, cannot share that. While an id is in
+     * here no probe starts and no poll runs, and the port belongs to the session alone.
+     */
+    private val manual = ConcurrentHashMap.newKeySet<Int>()
+
     private val poller = Executors.newCachedThreadPool { r ->
         Thread(r, "usb-telemetry").apply { isDaemon = true }
     }
@@ -306,6 +317,7 @@ class UsbBoards(private val context: Context) {
         registered = false
         polling.clear()
         probing.clear()
+        manual.clear()
         devices.clear()
         attached.clear()
         publish()
@@ -341,6 +353,7 @@ class UsbBoards(private val context: Context) {
         polling.remove(deviceId)
         devices.remove(deviceId)
         probing.remove(deviceId)
+        manual.remove(deviceId)
         attached.remove(deviceId)
         publish()
         // The unplugged board's poller calls pump() from its own finally block as well; doing it
@@ -354,7 +367,7 @@ class UsbBoards(private val context: Context) {
         val id = device.deviceId
         // A board that is already polled is left alone: sounding it again would send help and
         // version commands into the middle of its sweep for no reason.
-        if (id in polling) return
+        if (id in polling || id in manual) return
         if (!probing.add(id)) return
         worker.execute { runProbe(device) }
     }
@@ -422,7 +435,8 @@ class UsbBoards(private val context: Context) {
     /** Starts the first board that is waiting, and only when no other board holds the link. */
     private fun pump() {
         if (polling.isNotEmpty()) return
-        val next = devices.values.sortedBy { it.attachedAt }.firstOrNull { it.deviceId !in polling } ?: return
+        val next = devices.values.sortedBy { it.attachedAt }
+            .firstOrNull { it.deviceId !in polling && it.deviceId !in manual } ?: return
         val device = attached[next.deviceId] ?: return
         startPolling(device, next.family)
     }
@@ -479,6 +493,7 @@ class UsbBoards(private val context: Context) {
         var iface: UsbInterface? = null
         try {
             if (device.deviceId !in polling || device.deviceId in probing) return ""
+            if (device.deviceId in manual) return ""
             val mgr = manager ?: return ""
             if (!mgr.hasPermission(device)) return ""
             val port = findPort(device) ?: return ""
@@ -570,16 +585,17 @@ class UsbBoards(private val context: Context) {
         transport: Transport,
         ifaceId: Int,
         altBaud: Boolean = false,
+        rate: Int = baud,
     ) {
         runCatching {
             when (transport) {
                 Transport.NATIVE_USB, Transport.CDC_ACM -> {
-                    // SET_LINE_CODING at the configured rate, one stop bit, no parity, 8 data.
+                    // SET_LINE_CODING at the requested rate, one stop bit, no parity, 8 data.
                     val line = byteArrayOf(
-                        (baud and 0xFF).toByte(),
-                        ((baud ushr 8) and 0xFF).toByte(),
-                        ((baud ushr 16) and 0xFF).toByte(),
-                        ((baud ushr 24) and 0xFF).toByte(),
+                        (rate and 0xFF).toByte(),
+                        ((rate ushr 8) and 0xFF).toByte(),
+                        ((rate ushr 16) and 0xFF).toByte(),
+                        ((rate ushr 24) and 0xFF).toByte(),
                         0x00, // bCharFormat = 1 stop
                         0x00, // bParityType = none
                         0x08, // bDataBits = 8
@@ -591,7 +607,7 @@ class UsbBoards(private val context: Context) {
                 Transport.CP210X -> {
                     conn.controlTransfer(0x41, 0x00, 0x0001, ifaceId, null, 0, 200) // IFC_ENABLE
                     conn.controlTransfer(0x41, 0x03, 0x0800, ifaceId, null, 0, 200) // 8N1
-                    conn.controlTransfer(0x41, 0x1E, baud and 0xFFFF, baud ushr 16, null, 0, 200)
+                    conn.controlTransfer(0x41, 0x1E, rate and 0xFFFF, rate ushr 16, null, 0, 200)
                 }
 
                 Transport.CH34X -> {
@@ -600,18 +616,117 @@ class UsbBoards(private val context: Context) {
                     // Two divisor conventions are in circulation for the CH34x family; a second pass
                     // with the other one is how a board that read as noise gets identified.
                     val clock = if (altBaud) 12_000_000 else 6_000_000
-                    val divisor = (clock / baud) and 0xFFFF
+                    val divisor = (clock / rate) and 0xFFFF
                     conn.controlTransfer(0x40, 0x9A, divisor, ifaceId, null, 0, 200)
                     conn.controlTransfer(0x40, 0xA4, 0x00FF, ifaceId, null, 0, 200) // no handshake
                 }
 
                 Transport.FTDI -> {
                     conn.controlTransfer(0x40, 0x00, 0x0000, 0, null, 0, 200) // reset
-                    conn.controlTransfer(0x40, 0x03, 3_000_000 / baud, ifaceId, null, 0, 200)
+                    conn.controlTransfer(0x40, 0x03, 3_000_000 / rate, ifaceId, null, 0, 200)
                     conn.controlTransfer(0x40, 0x04, 0x0008, ifaceId, null, 0, 200) // 8N1
                 }
 
                 Transport.OTHER -> Unit
+            }
+        }
+    }
+
+    // ---------------- raw sessions ----------------
+
+    /**
+     * A raw, exclusive session on one board's port.
+     *
+     * The terminal and the flasher both need the port as a byte pipe, not as a source of
+     * telemetry: one wants a human's commands to arrive intact, the other needs the ROM
+     * bootloader's framing to survive untouched. Closing is the only way the board goes back to
+     * the poller, which is why every failure path closes as well.
+     */
+    class SerialSession internal constructor(
+        val deviceId: Int,
+        private val connection: UsbDeviceConnection,
+        private val iface: UsbInterface,
+        private val inEndpoint: UsbEndpoint,
+        private val outEndpoint: UsbEndpoint?,
+        private val onRelease: (Int) -> Unit,
+    ) {
+        private val closed = AtomicBoolean(false)
+
+        val isOpen: Boolean get() = !closed.get()
+
+        fun write(bytes: ByteArray): Boolean {
+            if (closed.get()) return false
+            val endpoint = outEndpoint ?: return false
+            return runCatching { connection.bulkTransfer(endpoint, bytes, bytes.size, 500) >= 0 }
+                .getOrDefault(false)
+        }
+
+        /** Reads whatever has arrived within [timeoutMs]; null when nothing did. */
+        fun read(max: Int = 512, timeoutMs: Int = 200): ByteArray? {
+            if (closed.get()) return null
+            val buf = ByteArray(max)
+            val n = runCatching { connection.bulkTransfer(inEndpoint, buf, max, timeoutMs) }.getOrDefault(-1)
+            return if (n > 0) buf.copyOf(n) else null
+        }
+
+        /** SET_CONTROL_LINE_STATE: bit 0 is DTR, bit 1 is RTS. */
+        fun setLines(dtr: Boolean, rts: Boolean) {
+            if (closed.get()) return
+            var value = 0
+            if (dtr) value = value or 0x01
+            if (rts) value = value or 0x02
+            runCatching { connection.controlTransfer(0x21, 0x22, value, iface.id, null, 0, 200) }
+        }
+
+        fun close() {
+            if (!closed.compareAndSet(false, true)) return
+            runCatching { connection.releaseInterface(iface) }
+            runCatching { connection.close() }
+            onRelease(deviceId)
+        }
+    }
+
+    /**
+     * Takes a board off the poller and opens its port for a terminal or a flash.
+     *
+     * Returns null when the board is gone, the interface is busy, or a poll is still inside its
+     * read window - a poll can hold the port for six seconds, so the wait has to outlast that.
+     */
+    fun openSession(deviceId: Int, baudRate: Int = baud): SerialSession? {
+        val device = attached[deviceId] ?: return null
+        val mgr = manager ?: return null
+        if (!mgr.hasPermission(device)) return null
+        manual.add(deviceId)
+        polling.remove(deviceId)
+        if (!portLock.tryLock(9, TimeUnit.SECONDS)) {
+            manual.remove(deviceId)
+            pump()
+            return null
+        }
+        var session: SerialSession? = null
+        try {
+            val port = findPort(device) ?: return null
+            val conn = runCatching { mgr.openDevice(device) }.getOrNull() ?: return null
+            if (!conn.claimInterface(port.first, true)) {
+                runCatching { conn.close() }
+                return null
+            }
+            configure(conn, transportOf(device), port.first.id, rate = baudRate)
+            session = SerialSession(deviceId, conn, port.first, port.second, port.third) { id ->
+                manual.remove(id)
+                devices[id]?.let { devices[id] = it.copy(active = false) }
+                publish()
+                pump()
+            }
+            return session
+        } catch (t: Throwable) {
+            CrashLog.recordQuiet(context, "usb-session", t)
+            return null
+        } finally {
+            portLock.unlock()
+            if (session == null) {
+                manual.remove(deviceId)
+                pump()
             }
         }
     }

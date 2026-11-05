@@ -26,6 +26,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -282,6 +286,21 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                     color = Sky.textDim,
                     fontSize = 10.sp,
                 )
+                Spacer(Modifier.height(10.dp))
+                // The cable is the only way to a board that is not already running something
+                // the app understands: a console to talk to it, and a flash to put this build's
+                // firmware on it. Both sit behind the same session, so only one at a time.
+                var serialOpen by remember { mutableStateOf(false) }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Chip("SERIAL + FLASH", serialOpen, Sky.esp32) { serialOpen = true }
+                    Chip("RESCAN", false, Sky.esp32) { c.esp32Usb.rescan() }
+                }
+                Text(
+                    "Console, GPS pin and baud, and the bundled C3/C5 firmware, all over USB.",
+                    color = Sky.textDim,
+                    fontSize = 10.sp,
+                )
+                if (serialOpen) EspSerialDialog(c, settings) { serialOpen = false }
                 Spacer(Modifier.height(8.dp))
                 Esp32Config(c, settings)
             }

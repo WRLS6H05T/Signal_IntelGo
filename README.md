@@ -480,3 +480,64 @@ On the new phone, install the app, open it once and close it (that creates the f
 
 Uninstalling deletes that folder along with the app, so copy it off before uninstalling. Setup ->
 **Data folder** shows the exact path on the phone in front of you.
+
+---
+
+## Sensor firmware and the in-app flasher
+
+`firmware/SignalSensor` is the sensor firmware for the two mini boards this project targets,
+**ESP32-C3 Mini** and **ESP32-C5 Mini**. One sketch, both chips, compiled per target:
+
+```
+firmware/build.sh          # both images
+firmware/build.sh c3       # one of them
+```
+
+It needs `arduino-cli` with the `esp32` core (3.3.x) and `esptool` on `PATH`; the script compiles
+each board with the **Huge APP** partition scheme (Wi-Fi, BLE and GPS do not fit the default
+1.2 MB OTA slot), merges bootloader at `0x0`, partition table at `0x8000` and application at
+`0x10000`, and writes `app/src/main/assets/firmware/esp32c3.bin`, `esp32c5.bin` and a
+`firmware.json` manifest. `.github/workflows/firmware.yml` does the same in CI and uploads the
+two images, so a build without a local toolchain can still get them.
+
+What the firmware does, on the same wire format the app already decodes:
+
+- advertises the telemetry as manufacturer data (company id `0xFFFF`, magic `SG`), refreshed
+  every two seconds, with the fix flag only set once the GPS has one;
+- sweeps Wi-Fi every fifteen seconds and BLE every twenty, printing the lines the app's console
+  parser reads (address, RSSI, channel, SSID) so a board's networks join the same tables;
+- reads NMEA on the GPS pin and prints `APs found:`, `BLE devices:`, `GPS: fix 3D, Sats:`,
+  `HDOP:`, `Lat:`, `Lon:` and `Alt:` in the shapes `Esp32Console` parses.
+
+**GPS pin and baud are set from the app.** On the board's console:
+
+```
+gpspin 4
+gpsbaud 9600
+```
+
+Both are written to NVS, so a board keeps its wiring across a reflash of the cable, and both are
+also reachable as fields in the terminal panel. The firmware rejects pins that would break the
+console on a mini board (the native USB pads) rather than accepting a typo silently.
+
+### Setup -> ESP32 sensors -> SERIAL + FLASH
+
+One panel, over the USB connection the app already uses to identify boards:
+
+- **CONNECT** takes the port away from the telemetry poller and opens it as a raw console -
+  `help`, `status`, `scan`, `gpspin <n>`, `gpsbaud <n>`, `save`, `reboot`, plus anything else the
+  firmware might understand. The poller resumes when the session closes.
+- **FLASH FIRMWARE** opens a confirmation dialog showing the port, USB id, transport, target
+  chip, the bundled image's size and version, and what the flash will destroy. Nothing is
+  written until **CONFIRM FLASH**.
+
+Flashing is done on the phone, with no PC: the app speaks the ROM bootloader's own protocol
+(SLIP framing, `SYNC`, `FLASH_BEGIN`, 1 KiB `FLASH_DATA` blocks, `FLASH_END`) rather than
+shelling out to esptool, and resets the board into download mode itself with the USB-Serial-JTAG
+pulse train or the classic D0/R1 sequence, whichever answers. The image is written at offset `0`,
+so a bare board comes up running it.
+
+**Not verified:** there is no C3/C5 on this machine, so the reset sequences, the flash itself and
+the firmware's radio behaviour have not been exercised on hardware. What is checked is the byte
+layer - SLIP framing, command headers and checksums, block splitting and the erase size all have
+JVM tests - and both firmware images compile.

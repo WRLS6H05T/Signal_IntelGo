@@ -20,3 +20,8 @@ device-log.txt
 
 # Scratch space for local checks (downloaded APKs, logs)
 .tmp-check/
+
+# Arduino build output and the local firmware toolchain
+firmware/build/
+.tools/fw/
+firmware/SignalSensor/build/

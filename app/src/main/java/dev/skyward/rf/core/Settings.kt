@@ -70,6 +70,10 @@ data class Settings(
      * answers a 115200 probe with noise, which reads exactly like a board that will not scan.
      */
     val esp32Baud: Int = 115200,
+    /** Which GPIO the board's GPS module transmits on, set from the in-app serial terminal. */
+    val espGpsPin: Int = 4,
+    /** The GPS module's own rate, which is not the console's: 9600 is the usual NMEA default. */
+    val espGpsBaud: Int = 9600,
     /** Share scans and GPS with a second phone on the same Wi-Fi or hotspot. */
     val peerEnabled: Boolean = false,
     /** Peer address to dial when broadcast discovery is blocked; blank means find it. */

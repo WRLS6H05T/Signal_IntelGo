@@ -20,6 +20,8 @@ import dev.skyward.rf.scan.RfScanner
 import dev.skyward.rf.scan.UsbBoards
 import dev.skyward.rf.sky.AircraftSource
 import dev.skyward.rf.sky.AirspaceEngine
+import dev.skyward.rf.scan.EspFlasher
+import dev.skyward.rf.scan.EspTerminal
 import dev.skyward.rf.sky.Esp32Source
 import dev.skyward.rf.sky.MeshSource
 import dev.skyward.rf.sky.SatTracker
@@ -98,6 +100,12 @@ class Container(context: Context) {
     val mesh = MeshSource { settingsStore.current }
     val esp32Usb = UsbBoards(appContext)
     val esp32 = Esp32Source({ settingsStore.current }, esp32Usb)
+
+    /** The board's console, with a keyboard: same port, human on the other end. */
+    val espTerminal = EspTerminal(esp32Usb)
+
+    /** Writes the bundled sensor firmware over that port, so a flash needs no PC. */
+    val espFlasher = EspFlasher(appContext, esp32Usb)
 
     /**
      * The second phone on the same network. It stays off until asked for: it opens a TCP port
