@@ -13,6 +13,8 @@ dependencies {
     implementation(compose.material3)
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.8.1")
+    // The satellite catalogue is the phone's tracker, which takes an OkHttp client.
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     testImplementation("junit:junit:4.13.2")
 }
@@ -20,6 +22,18 @@ dependencies {
 java {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
+}
+
+/**
+ * Ships the phone's coastline asset with the desktop app.
+ *
+ * The asset is not copied into the repository a second time: the build points at the phone's
+ * own copy, so the globe and the map cannot drift apart about where a coastline is.
+ */
+tasks.named<ProcessResources>("processResources") {
+    from(rootProject.file("app/src/main/assets")) {
+        include("world_land.txt")
+    }
 }
 
 tasks.withType<KotlinCompile>().configureEach {
@@ -54,11 +68,6 @@ compose.desktop {
         // The BLE bridge is a script the app starts; it travels beside the app in the install
         // image so an installed build does not depend on the source tree being present.
         nativeDistributions {
-            // Compose's default jlink image leaves out modules the app actually calls: the token
-            // exchange uses java.net.http and the sign-in redirect listener uses the JDK's
-            // com.sun.net.httpserver. Without them the packaged app dies on the first
-            // NoClassDefFoundError, which is exactly what happened when it was first run.
-            modules("java.net.http", "jdk.httpserver", "java.naming", "jdk.unsupported")
             targetFormats(TargetFormat.Msi, TargetFormat.Exe)
             packageName = "Signal_IntelGo"
             packageVersion = "1.0.0"

@@ -1,0 +1,103 @@
+> Task :shared:checkKotlinGradlePluginConfigurationErrors
+> Task :desktop:checkKotlinGradlePluginConfigurationErrors
+> Task :desktop:generateComposeResClass UP-TO-DATE
+> Task :desktop:convertXmlValueResourcesForMain NO-SOURCE
+> Task :desktop:copyNonXmlValueResourcesForMain NO-SOURCE
+> Task :desktop:prepareComposeResourcesTaskForMain NO-SOURCE
+> Task :desktop:generateResourceAccessorsForMain NO-SOURCE
+> Task :desktop:processResources UP-TO-DATE
+> Task :desktop:convertXmlValueResourcesForTest NO-SOURCE
+> Task :desktop:copyNonXmlValueResourcesForTest NO-SOURCE
+> Task :desktop:prepareComposeResourcesTaskForTest NO-SOURCE
+> Task :desktop:generateResourceAccessorsForTest NO-SOURCE
+> Task :desktop:processTestResources NO-SOURCE
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:checkKotlinGradlePluginConfigurationErrors
+> Task :shared:processResources NO-SOURCE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:generateDebugResValues UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:mergeDebugShaders UP-TO-DATE
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets UP-TO-DATE
+> Task :app:compressDebugAssets UP-TO-DATE
+> Task :app:l8DexDesugarLibDebug UP-TO-DATE
+> Task :app:desugarDebugFileDependencies UP-TO-DATE
+> Task :app:mergeDebugJniLibFolders UP-TO-DATE
+> Task :app:validateSigningDebug UP-TO-DATE
+> Task :app:writeDebugAppMetadata UP-TO-DATE
+> Task :app:writeDebugSigningConfigVersions UP-TO-DATE
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :app:checkDebugDuplicateClasses
+
+> Task :shared:compileKotlin
+w: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/shared/src/main/java/dev/skyward/rf/sky/OrbitMath.kt:65:17 Variable 'n' initializer is redundant
+
+> Task :shared:compileJava NO-SOURCE
+> Task :shared:classes UP-TO-DATE
+> Task :shared:jar
+> Task :app:mergeDebugNativeLibs NO-SOURCE
+> Task :app:stripDebugDebugSymbols NO-SOURCE
+> Task :app:mergeLibDexDebug
+
+> Task :desktop:compileKotlin
+w: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/desktop/src/main/kotlin/dev/skyward/rf/desktop/ui/GlobeScreen.kt:260:29 Parameter 'sphere' is never used
+
+> Task :desktop:compileJava NO-SOURCE
+> Task :desktop:classes UP-TO-DATE
+> Task :desktop:jar
+> Task :desktop:assemble
+> Task :desktop:compileTestKotlin
+> Task :desktop:compileTestJava NO-SOURCE
+> Task :desktop:testClasses UP-TO-DATE
+> Task :desktop:test
+> Task :desktop:check
+> Task :desktop:build
+> Task :app:mergeExtDexDebug
+
+> Task :app:compileDebugKotlin
+w: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/app/src/main/java/dev/skyward/rf/scan/RfScanner.kt:324:26 'startScan(): Boolean' is deprecated. Deprecated in Java
+w: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/app/src/main/java/dev/skyward/rf/scan/RfScanner.kt:335:30 'SSID: String!' is deprecated. Deprecated in Java
+w: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/app/src/main/java/dev/skyward/rf/scan/RfScanner.kt:335:70 'SSID: String!' is deprecated. Deprecated in Java
+w: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/app/src/main/java/dev/skyward/rf/ui/AppRoot.kt:138:36 'List: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.List
+w: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/app/src/main/java/dev/skyward/rf/ui/MapScreen.kt:522:9 Variable 'rf' is never used
+w: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/app/src/main/java/dev/skyward/rf/ui/MapScreen.kt:1249:5 Parameter 'accuracyM' is never used
+w: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/app/src/main/java/dev/skyward/rf/ui/MapScreen.kt:1385:13 The expression is unused
+w: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/app/src/main/java/dev/skyward/rf/ui/Tiles.kt:31:13 Parameter 'source' is never used
+w: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/app/src/main/java/dev/skyward/rf/ui/Tiles.kt:34:21 Parameter 'source' is never used
+w: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/app/src/main/java/dev/skyward/rf/ui/Tiles.kt:126:9 Parameter 'source' is never used
+w: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/app/src/main/java/dev/skyward/rf/ui/WigleCard.kt:151:29 The value 'true' assigned to 'var stopped: Boolean defined in dev.skyward.rf.ui.WigleCard.`<anonymous>`.`<anonymous>`.`<anonymous>`.`<anonymous>`' is never used
+
+> Task :app:compileDebugJavaWithJavac NO-SOURCE
+> Task :app:dexBuilderDebug
+> Task :app:mergeDebugGlobalSynthetics UP-TO-DATE
+> Task :app:processDebugJavaRes UP-TO-DATE
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:mergeProjectDexDebug
+> Task :app:mergeDebugJavaResource
+> Task :app:compileDebugUnitTestKotlin
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes UP-TO-DATE
+> Task :app:testDebugUnitTest
+> Task :app:packageDebug
+> Task :app:createDebugApkListingFileRedirect
+> Task :app:assembleDebug
+
+BUILD SUCCESSFUL in 45s
+51 actionable tasks: 22 executed, 29 up-to-date

@@ -1,6 +1,5 @@
 package dev.skyward.rf.desktop
 
-import dev.skyward.rf.desktop.auth.GoogleAuth
 import dev.skyward.rf.desktop.ble.BleEvent
 import dev.skyward.rf.desktop.ble.BleEventCodec
 import dev.skyward.rf.desktop.host.DeviceHost
@@ -131,14 +130,5 @@ class HostCodecTest {
     fun `a broken line is not an event`() {
         assertNull(BleEventCodec.decode("BLE is on"))
         assertNull(BleEventCodec.decode("{"))
-    }
-
-    @Test
-    fun `pkce matches the RFC 7636 example`() {
-        // Appendix B of RFC 7636: the verifier and the challenge Google must also compute.
-        assertEquals(
-            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
-            GoogleAuth.challengeFor("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
-        )
     }
 }

@@ -9,15 +9,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import dev.skyward.rf.desktop.auth.GoogleAuth
 import dev.skyward.rf.desktop.ble.BleBridge
 import dev.skyward.rf.desktop.host.DeviceHost
 import dev.skyward.rf.desktop.host.HostSettings
+import dev.skyward.rf.desktop.sky.DesktopSky
 import dev.skyward.rf.desktop.ui.DesktopApp
 import dev.skyward.rf.desktop.ui.Ink
 import dev.skyward.rf.desktop.ui.Panel
 import dev.skyward.rf.desktop.ui.Sky
 import dev.skyward.rf.desktop.ui.TextMain
+import dev.skyward.rf.desktop.ui.WorldLand
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -28,8 +29,9 @@ import kotlinx.coroutines.runBlocking
 import kotlin.system.exitProcess
 
 /**
- * Everything the window needs, in the same shape the phone uses: one long-lived container with
- * the host link, the adapter and the account on it.
+ * The app's wiring point on the desktop, in the shape the phone uses: one long-lived container
+ * holding the host link and the sky. There is no account and no sign-in: the globe is the
+ * screen, and hosting is a tab.
  */
 class DesktopContainer {
 
@@ -42,10 +44,16 @@ class DesktopContainer {
 
     val host = DeviceHost(bridge, scope, settings)
 
-    val auth = GoogleAuth(scope)
+    val sky = DesktopSky(scope)
+
+    /** The bundled coastlines, read once by the build's copy of the phone's asset. */
+    val land: Array<FloatArray> by lazy { WorldLand.load() }
 
     fun start() {
         host.start()
+        // A device on the link with a fix is the observer, exactly as a board stands in for a
+        // handset with no lock of its own.
+        sky.start { host.state.value.devices.firstNotNullOfOrNull { it.fix } }
     }
 
     fun close() {
@@ -56,35 +64,35 @@ class DesktopContainer {
     /** Changes one of the shared settings and bumps the revision the phones apply once. */
     fun update(change: (HostSettings) -> HostSettings) {
         val current = settings.value
-        val next = change(current).copy(rev = current.rev + 1)
-        settings.value = next
+        settings.value = change(current).copy(rev = current.rev + 1)
     }
 }
 
 /**
- * Checks that the app can reach its own bridge and that the adapter answers, without opening a
- * window. This is what a machine with no radio in it can still prove.
+ * Proves the parts a windowless machine can prove: the BLE bridge reached an adapter, the
+ * coastline asset parsed, and the catalogue produced positions.
  */
 object SelfTest {
 
     fun run(): Int = runBlocking {
         val container = DesktopContainer()
         container.start()
-        delay(7_000)
-        val state = container.host.state.value
-        val script = BleBridge.defaultScript()
-        val clientId = container.auth.clientId()
-        println("bridge=${script.absolutePath}")
-        println("bridge_exists=${script.exists()}")
-        println("adapter_ok=${state.adapterOk}")
-        println("detail=${state.adapterDetail}")
-        println("devices=${state.devices.size}")
-        println("peers=${state.devices.count { it.kind == DeviceHost.Kind.PEER }}")
-        println("boards=${state.devices.count { it.kind == DeviceHost.Kind.BOARD }}")
-        println("google_client_id=${if (clientId.isBlank()) "missing" else "configured"}")
-        println("auth=${container.auth.state.value::class.simpleName}")
+        // Element sets are a network fetch; give it a few seconds before judging it.
+        repeat(24) {
+            if (container.sky.state.value.sats.isNotEmpty()) return@repeat
+            delay(1_000)
+        }
+        val host = container.host.state.value
+        val sky = container.sky.state.value
+        println("bridge=${BleBridge.defaultScript().absolutePath}")
+        println("adapter_ok=${host.adapterOk}")
+        println("detail=${host.adapterDetail}")
+        println("devices=${host.devices.size}")
+        println("land_rings=${container.land.size}")
+        println("sats=${sky.sats.size}")
+        println("tle=${sky.detail}")
         container.close()
-        if (state.adapterOk) 0 else 1
+        if (host.adapterOk && sky.sats.isNotEmpty() && container.land.isNotEmpty()) 0 else 1
     }
 }
 
@@ -101,7 +109,7 @@ fun main(args: Array<String>) {
                 container.close()
                 exitApplication()
             },
-            title = "Signal_IntelGo - desktop host",
+            title = "Signal_IntelGo",
             state = windowState,
         ) {
             MaterialTheme(

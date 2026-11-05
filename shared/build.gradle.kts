@@ -15,6 +15,10 @@ plugins {
 
 dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+    // Live satellite positions: TLE fetch over HTTP, propagation with SGP4/SDP4.
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("org.orekit:orekit:12.2.1")
     testImplementation("junit:junit:4.13.2")
 }
 

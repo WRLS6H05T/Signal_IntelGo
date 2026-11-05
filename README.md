@@ -4,7 +4,7 @@
 
 **Install or update:** [download the latest APK](https://github.com/WRLS6H05T/Signal_IntelGo/releases/latest/download/Signal_IntelGo-debug.apk) - that one link always serves the newest build. It is signed with the same key as every earlier build, so Android installs it over the old one instead of demanding an uninstall.
 
-**Desktop host (Windows):** [download the latest build](https://github.com/WRLS6H05T/Signal_IntelGo/releases/latest/download/Signal_IntelGo-desktop.zip) - unzip it anywhere and run `Signal_IntelGo.exe`. There is nothing to install and no administrator rights: the folder carries its own Java runtime. Python with `bleak` is the one prerequisite (`python -m pip install bleak`), and Google sign-in needs a client id of your own - see [Desktop host](#desktop-host).
+**Desktop host (Windows):** [download the latest build](https://github.com/WRLS6H05T/Signal_IntelGo/releases/latest/download/Signal_IntelGo-desktop.zip) - unzip it anywhere and run `Signal_IntelGo.exe`. There is nothing to install and no administrator rights: the folder carries its own Java runtime. Python with `bleak` is the one prerequisite (`python -m pip install bleak`).
 
 The APK lives under [Releases](https://github.com/WRLS6H05T/Signal_IntelGo/releases) as the *Assets* of the **Latest build**, not in the file tree: it is rebuilt by CI on every push. Setup -> About shows the installed build (for example `Signal_IntelGo 1.1.11`), and the release notes name the commit it was built from, so the two can be compared.
 
@@ -543,24 +543,28 @@ so a bare board comes up running it.**Not verified:** there is no C3/C5 on this 
 
 ## Desktop host
 
-`:desktop` is the same product on a PC, in the seat the phone calls **HOST**. It scans BLE,
-links to every phone advertising the two-device service, picks up every ESP32 sensor board from
-their advertisements, and merges what they hear into one table. It also pushes one settings blob
-to all of them, so the basemap, weak-dot filter, aircraft switch, spin speed and units are decided
-in one place instead of on each device.
+`:desktop` is the same product on a PC, in the seat the phone calls **HOST**. It opens on the
+globe - the sphere, its graticule, the bundled coastlines and the live satellite shell, drag to
+spin - and the folded menu in the bottom-right corner, the same one the phone has, carries the
+tabs. **Host** is one of them.
+
+Host is the link. It scans BLE, connects to every phone advertising the two-device service as the
+GATT central, picks up every sensor board from its advertisement, and pushes one settings blob to
+all of them - basemap, weak-dot filter, aircraft switch, spin speed and units decided in one place
+instead of on each device.
 
 Download it from [Releases](https://github.com/WRLS6H05T/Signal_IntelGo/releases/latest/download/Signal_IntelGo-desktop.zip),
 or build it yourself:
 
 ```bash
 ./gradlew :desktop:run                        # the window, from the source tree
-./gradlew :desktop:run --args="--selftest"    # no window: proves the bridge and adapter answer
+./gradlew :desktop:run --args="--selftest"    # no window: adapter, coastlines and catalogue
 ./gradlew :desktop:createDistributable        # the downloadable folder, in desktop/build/compose
 ```
 
-The published zip is a `jpackage` image, not an installer: unzip and run `Signal_IntelGo.exe`.
-It needs no administrator rights and carries its own Java runtime, so nothing has to be installed
-first except Python with `bleak`.
+The published zip is a `jpackage` image, not an installer: unzip it anywhere and run
+`Signal_IntelGo.exe`. It needs no administrator rights and carries its own Java runtime, so
+nothing has to be installed first except Python with `bleak`.
 
 ### Bluetooth on Windows
 
@@ -574,43 +578,24 @@ python -m pip install bleak
 ```
 
 `SIGNALGO_PYTHON` picks the interpreter if `python` is not the right one, and
-`-Dsignalg.ble.bridge=<path>` points at the script by hand. If the bridge cannot start, the
-window says why (missing module, no adapter, Bluetooth off) instead of showing an idle roster.
+`-Dsignalg.ble.bridge=<path>` points at the script by hand. If the bridge cannot start, the Host
+tab says why - missing module, no adapter, Bluetooth off - instead of showing an idle roster.
 
 Phones are connected as a GATT **central**: the desktop subscribes to `7a1f5e11-...` and writes
-`7a1f5e12-...`, the same service and characteristics the phone's own peer link uses. Sensor
-boards need no connection - their telemetry is in the advertisement - so they appear as soon as
-they are in range.
+`7a1f5e12-...`, the same service and characteristics the phone's own peer link uses. Sensor boards
+need no connection - their telemetry is in the advertisement - so they appear as soon as they are
+in range.
 
 ### One protocol, not two
 
 `:shared` holds the peer wire format (`PeerProtocol`), its chunking (`PeerFrames`), drive
-packaging (`PeerLogs`), the ESP32 advertisement codec and the core value types. The phone and the
-desktop compile those same files, so a field cannot drift between the two ends: there is one
-definition of what a snapshot byte means.
+packaging (`PeerLogs`), the ESP32 advertisement codec, the TLE catalogue with SGP4 propagation
+(`SatTracker`, `OrbitMath`) and the core value types. The phone and the desktop compile those same
+files, so the globe on the desk puts a satellite in the same place as the globe in the hand, and
+the coastline is one bundled asset read by both.
 
-### Google sign-in
-
-The desktop uses the flow Google requires for installed apps: a loopback listener on
-`127.0.0.1`, the system browser, and **PKCE** (`S256`) with a verifier that never leaves the
-machine. No embedded web view, and the app never sees a password. The refresh token is kept in
-`~/.signintelgo/auth.json` and refreshed on launch when it has aged out.
-
-The client id belongs to whoever runs the app, so it is not in the repository. Create an OAuth
-**Desktop app** client in the Google Cloud Console, then either:
-
-```bash
-# environment
-export SIGNAL_GOOGLE_CLIENT_ID="...apps.googleusercontent.com"
-
-# or ~/.signintelgo/google.json
-{"client_id": "...apps.googleusercontent.com", "client_secret": "..."}
-```
-
-Without a client id the window says so and the host still runs: the link, the roster and the
-settings push do not depend on an account.
-
-**Not verified:** there is no BLE hardware and no Google client id on this machine, so the
-advertisement decode, the chunking and the PKCE transform are covered by JVM tests, while the
-radio link itself, the GATT connection to a phone and a completed Google consent round-trip have
-not been exercised. `--selftest` reports which of those the machine is missing.
+**Not verified:** there is no BLE hardware on this machine, so the radio link, the GATT connection
+to a phone and a real board's advertisement have not been exercised against a device. The
+advertisement decode, the chunking and the framing are covered by JVM tests, and `--selftest`
+reports whether the adapter answered, whether the coastlines parsed and whether the catalogue
+produced positions.
