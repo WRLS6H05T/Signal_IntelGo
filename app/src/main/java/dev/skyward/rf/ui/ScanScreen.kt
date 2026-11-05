@@ -295,7 +295,16 @@ fun ScanScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: ()
                         rf.all.take(10).forEach { o -> ObservationRow(o) }
                     }
                 }
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(6.dp))
+                // The same table carries three radios now, so it says which one heard the row:
+                // a network in this list may have come from this phone, the peer or a board.
+                Text(
+                    "heard here ${rf.all.count { it.source == "local" }} \u00b7 by peer " +
+                        "${c.rf.peerCount()} \u00b7 by board ${c.rf.boardCount()}",
+                    color = Sky.textDim,
+                    fontSize = 9.sp,
+                )
+                Spacer(Modifier.height(4.dp))
                 if (c.rf.lastWifiError != null) Text("Wi-Fi: ${c.rf.lastWifiError}", color = Sky.warn, fontSize = 10.sp)
                 if (c.rf.lastBleError != null) Text("BLE: ${c.rf.lastBleError}", color = Sky.warn, fontSize = 10.sp)
             }
@@ -344,7 +353,12 @@ private fun ObservationRow(o: RfObservation) {
                 maxLines = 1,
             )
             Text(
-                "${o.id}${if (o.channel > 0) " · ch ${o.channel}" else ""}${if (o.security.isNotBlank()) " · ${o.security}" else ""}",
+                o.id +
+                    (if (o.channel > 0) " · ch ${o.channel}" else "") +
+                    (if (o.security.isNotBlank()) " · ${o.security}" else "") +
+                    // Which radio heard it: this handset, the other phone, or a board on the
+                    // cable. Without the tag a peer's find looked like the phone's own.
+                    (if (o.source.isNotBlank() && o.source != "local") " · ${o.source}" else ""),
                 color = Sky.textDim,
                 fontSize = 9.sp,
                 maxLines = 1,

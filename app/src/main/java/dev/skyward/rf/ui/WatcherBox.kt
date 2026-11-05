@@ -61,29 +61,31 @@ fun WatcherBox(c: Container) {
         else -> "tap to talk"
     }
 
+    // Deliberately smaller than the clock above it: the time is read at a glance, the Watcher
+    // is tapped, so it grows enough to be a comfortable target without competing for the corner.
     Column(
         Modifier
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(11.dp))
             .background(Sky.surface.copy(alpha = 0.95f))
-            .border(1.dp, Sky.outline, RoundedCornerShape(10.dp))
+            .border(1.dp, Sky.outline, RoundedCornerShape(11.dp))
             .clickable {
                 val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
                     android.content.pm.PackageManager.PERMISSION_GRANTED
                 if (granted) c.voice.wake() else mic.launch(Manifest.permission.RECORD_AUDIO)
             }
-            .padding(horizontal = 10.dp, vertical = 7.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.End,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier
-                    .size(6.dp)
+                    .size(7.dp)
                     .clip(CircleShape)
                     .background(dot),
             )
             Spacer(Modifier.width(6.dp))
-            Text("WATCHER", color = Sky.cyan, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+            Text("WATCHER", color = Sky.cyan, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
         }
-        Text(line, color = Sky.textDim, fontSize = 10.sp, maxLines = 1)
+        Text(line, color = Sky.textDim, fontSize = 11.sp, maxLines = 1)
     }
 }

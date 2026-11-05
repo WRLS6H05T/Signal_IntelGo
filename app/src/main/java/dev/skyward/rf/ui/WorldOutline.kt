@@ -42,6 +42,23 @@ private const val COAST = 0xFF86BCDF
 private const val GRID_WATER = 0xFF24405A
 private const val RIM = 0xFF5AC8FF
 
+/**
+ * The sphere's Paths and buffers, kept between frames.
+ *
+ * The globe is drawn every frame while it spins, and each of those frames needs four paths that
+ * are discarded a moment later. Holding them here means the draw loop resets instead of
+ * allocating, which is the difference between smooth and a stutter on a mid-range phone.
+ */
+class GlobeInk {
+    internal val disc: Path = Path()
+    internal val grid: Path = Path()
+    internal val land: Path = Path()
+    internal val coast: Path = Path()
+    internal var x: FloatArray = FloatArray(512)
+    internal var y: FloatArray = FloatArray(512)
+    internal var front: BooleanArray = BooleanArray(512)
+}
+
 object WorldOutline {
 
     const val ASSET = "world_land.txt"
@@ -104,6 +121,8 @@ fun DrawScope.drawGlobeWorld(
     radius: Float,
     /** Same tilt the markers use: the disc and the icons have to rotate together. */
     tiltDeg: Double = 0.0,
+    /** Reused geometry; a fresh one is only created by callers outside the draw loop. */
+    ink: GlobeInk = GlobeInk(),
 ) {
     if (alpha <= 0.02f || radius <= 2f) return
 
@@ -133,9 +152,9 @@ fun DrawScope.drawGlobeWorld(
     // smaller ball inside the globe, so the ocean is one flat tone now.
     drawCircle(color = Color(OCEAN_MID), radius = radius, center = center, alpha = alpha)
 
-    val disc = Path().apply {
-        addOval(Rect(center.x - radius, center.y - radius, center.x + radius, center.y + radius))
-    }
+    val disc = ink.disc
+    disc.reset()
+    disc.addOval(Rect(center.x - radius, center.y - radius, center.x + radius, center.y + radius))
 
     clipPath(disc) {
         val coast = Color(COAST).copy(alpha = 0.8f * alpha)
@@ -146,7 +165,8 @@ fun DrawScope.drawGlobeWorld(
         // ---- water grid ----
         // Drawn before the land, so it reads as a graticule over open water only: the solid
         // landmass is painted straight over it.
-        val gridPath = Path()
+        val gridPath = ink.grid
+        gridPath.reset()
         val gridTone = Color(GRID_WATER).copy(alpha = 0.5f * alpha)
         val gridWidth = 0.5.dp.toPx()
 
@@ -198,11 +218,13 @@ fun DrawScope.drawGlobeWorld(
         // a hard edge that flickers into a different shape every frame as the globe rotates.
         // Closing outside the disc removes the guess: the only thing that can appear inside the
         // circle is the genuine near-side outline.
-        val landPath = Path()
-        val coastPath = Path()
-        var rx = FloatArray(512)
-        var ry = FloatArray(512)
-        var rf = BooleanArray(512)
+        val landPath = ink.land
+        val coastPath = ink.coast
+        landPath.reset()
+        coastPath.reset()
+        var rx = ink.x
+        var ry = ink.y
+        var rf = ink.front
         // Far enough past the rim that every closing edge is clipped, close enough that the
         // edge from a crossing point stays within a pixel of the limb.
         val outside = radius * 1.02f
@@ -214,6 +236,9 @@ fun DrawScope.drawGlobeWorld(
                 rx = FloatArray(n)
                 ry = FloatArray(n)
                 rf = BooleanArray(n)
+                ink.x = rx
+                ink.y = ry
+                ink.front = rf
             }
             var front = 0
             var lastAngle = 0.0

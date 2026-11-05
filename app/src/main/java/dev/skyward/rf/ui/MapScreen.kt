@@ -519,7 +519,6 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
     val overlay by c.wardrive.overlay.collectAsState()
     val observer by c.observer.collectAsState()
     val settings by c.settingsStore.state.collectAsState()
-    val rf by c.airspace.rfSnapshot.collectAsState()
     val wifiOn by c.rf.wifiEnabled.collectAsState()
     val bleOn by c.rf.bleEnabled.collectAsState()
     val context = LocalContext.current
@@ -889,9 +888,12 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 // The peer's own findings, posted into this table by name rather than merely
                 // counted, so the host shows what the other radio is hearing right now.
                 if (peer.connected) {
-                    c.rf.peerRows(limit = 3).forEach { o ->
+                    // What the other phone's radios heard, by name and with its own RSSI, so the
+                    // host reads the link's findings rather than just a count of them.
+                    c.rf.peerRows(limit = 4).forEach { o ->
                         Text(
-                            "\u203a " + (o.name.ifBlank { o.id }).take(17) + " \u00b7 " + o.rssi + " dB",
+                            "\u203a " + (if (o.kind == RfKind.WIFI) "wifi " else "ble  ") +
+                                (o.name.ifBlank { o.id }).take(15) + " \u00b7 " + o.rssi + " dB",
                             color = Sky.textDim,
                             fontSize = 8.sp,
                             maxLines = 1,
@@ -912,6 +914,17 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 val espWifi = espNodes.sumOf { it.wifiCount }
                 val espBle = espNodes.sumOf { it.bleCount }
                 IntelRow("ESP", espWifi + espBle, espNodes.isNotEmpty()) { }
+                // The board's own sweep, named like the peer's: a cable is a radio on this
+                // table, so what it heard belongs on the table and not only in a total.
+                c.rf.boardRows(limit = 3).forEach { o ->
+                    Text(
+                        "\u203a " + (if (o.kind == RfKind.WIFI) "wifi " else "ble  ") +
+                            (o.name.ifBlank { o.id }).take(15) + " \u00b7 " + o.rssi + " dB \u00b7 board",
+                        color = Sky.esp32.copy(alpha = 0.85f),
+                        fontSize = 8.sp,
+                        maxLines = 1,
+                    )
+                }
                 if (!wd.active) {
                     Spacer(Modifier.height(8.dp))
                     // The primary action lives in the box now, not in a floating button.
@@ -1261,6 +1274,9 @@ private fun TacticalMap(
     // restarting the pointer handler mid-gesture is what breaks a pinch half way out.
     val latestMarkers by rememberUpdatedState(markers)
     var tileVersion by remember { mutableStateOf(0) }
+    // Paths and scratch buffers for the sphere, allocated once: rebuilding four Paths per
+    // frame put a few hundred kilobytes an hour through the collector for no reason.
+    val globeInk = remember { GlobeInk() }
 
     BoxWithConstraints(modifier) {
         val w = constraints.maxWidth.toFloat()
@@ -1298,7 +1314,14 @@ private fun TacticalMap(
         val globeModeNow by rememberUpdatedState(globeMode)
         // Device-map mode: no tile requests at all, the phone's map app draws the streets.
         val showTiles = !globeMode && !useDeviceMap
-        val visible = remember(tileSource, camera.zoom, camera.lat, camera.lon, w, h, showTiles) {
+        // The tile list is the only thing that needs the camera's position, and on the ball
+        // there are no tiles at all. Reading lat/lon unconditionally made every frame of the
+        // globe's spin invalidate this whole screen - the ball turned at the rate of a full
+        // recomposition, which is why it crawled. Behind the branch below the spin only touches
+        // the draw phase, where it belongs.
+        val tileLat = if (showTiles) camera.lat else 0.0
+        val tileLon = if (showTiles) camera.lon else 0.0
+        val visible = remember(tileSource, camera.zoom, tileLat, tileLon, w, h, showTiles) {
             if (showTiles) {
                 tileStore.visible(tileSource, camera.lat, camera.lon, camera.zoom, w, h, viewShiftX(w))
             } else {
@@ -1443,6 +1466,7 @@ private fun TacticalMap(
                     // Same radius the markers are projected with, or icons drift off the coast.
                     // From the canvas itself, so the disc and the markers cannot disagree.
                     radius = globeRadius(camera.zoom, size.width, size.height),
+                    ink = globeInk,
                 )
             }
 
@@ -1732,22 +1756,22 @@ private fun LiveClock(
                     // decides whether it has anything to fetch.
                     observer?.let { pin -> scope.launch { runCatching { c.weather.refresh(pin.lat, pin.lon) } } }
                 }
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(horizontal = 15.dp, vertical = 10.dp),
             horizontalAlignment = Alignment.End,
         ) {
             Text(
                 timeFmt.format(Date(now)),
                 color = Sky.cyan,
                 fontFamily = FontFamily.Monospace,
-                // A step up from the first cut: read at a glance off a dash mount rather
-                // than leaned in for, which is how it was being used.
-                fontSize = if (showSeconds) 19.sp else 26.sp,
+                // Sized for a glance from a dash mount: the time is the one thing on this
+                // screen that is read at arm's length, so it gets the room.
+                fontSize = if (showSeconds) 25.sp else 34.sp,
                 fontWeight = FontWeight.Bold,
             )
             Text(
                 dayFmt.format(Date(now)) + " \u25BE",
                 color = Sky.textDim,
-                fontSize = 9.sp,
+                fontSize = 10.sp,
             )
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {

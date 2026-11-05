@@ -16,7 +16,7 @@ class EspProtocolTest {
     @Test
     fun `flash begin erases the whole flash before the image when asked`() {
         val p = EspBootloader.flashBeginPayload(imageSize = 1_303_456, blocks = 1273, eraseBytes = 4 * 1024 * 1024)
-        assertEquals(20, p.size)
+        assertEquals(16, p.size)
         // 0x00400000, little endian: the whole 4 MiB chip, not just the image's sectors.
         assertEquals(0x00, p[0].toInt())
         assertEquals(0x00, p[1].toInt())
@@ -106,15 +106,27 @@ class EspProtocolTest {
     }
 
     @Test
-    fun `flash begin payload is five little endian words with the erase size first`() {
+    fun `flash begin payload is four little endian words with the erase size first`() {
         val p = EspBootloader.flashBeginPayload(imageSize = 4096, blocks = 4)
-        assertEquals(20, p.size)
+        // Four words, exactly as the ROM loader expects; the stub's fifth word is not needed
+        // without an encrypted image, and an extra word is one more thing the ROM can misread.
+        assertEquals(16, p.size)
         assertEquals(0x00, p[0].toInt())
         assertEquals(0x10, p[1].toInt())
         assertEquals(4, p[4].toInt())
         assertEquals(0x00, p[8].toInt())
         assertEquals(0x04, p[9].toInt())
-        assertEquals(0, p[16].toInt())
+    }
+
+    @Test
+    fun `flash begin erases the image's own span by default`() {
+        val p = EspBootloader.flashBeginPayload(imageSize = 1_303_456, blocks = 1273)
+        // 1 303 456 rounds up to 1 306 624: 319 whole 4 KiB sectors, not the 4 MiB chip.
+        assertEquals(0x00, p[0].toInt() and 0xFF)
+        assertEquals(0xF0, p[1].toInt() and 0xFF)
+        assertEquals(0x13, p[2].toInt() and 0xFF)
+        assertEquals(0x00, p[3].toInt() and 0xFF)
+        assertEquals(1_306_624, EspBootloader.eraseSize(1_303_456))
     }
 
     @Test

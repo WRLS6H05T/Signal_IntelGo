@@ -167,6 +167,23 @@ class RfScanner(private val context: Context) {
             .sortedByDescending { it.rssi }
             .take(limit)
 
+    /**
+     * The rows a board on the cable swept, strongest first.
+     *
+     * Named rather than only counted: a board is a second radio with its own antenna, and the
+     * host's INTEL table is where what it heard has to appear - a total alone cannot be told
+     * apart from a network the phone itself heard.
+     */
+    fun boardRows(limit: Int = 3, now: Long = System.currentTimeMillis()): List<RfObservation> =
+        (boardWifi.values + boardBle.values)
+            .filter { it.source == "board" && now - it.seenAt <= STALE_MS }
+            .sortedByDescending { it.rssi }
+            .take(limit)
+
+    /** Rows in the shared table that a wired board swept. */
+    fun boardCount(): Int =
+        boardWifi.count { it.value.source == "board" } + boardBle.count { it.value.source == "board" }
+
     /** The board's own intel, apart from the handset's sweeps: what the peer link carries. */
     data class BoardIntel(
         val wifi: List<RfObservation>,

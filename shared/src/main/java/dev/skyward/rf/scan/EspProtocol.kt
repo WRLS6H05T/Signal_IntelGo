@@ -227,7 +227,7 @@ object EspBootloader {
         blocks: Int,
         offset: Int = 0,
         eraseBytes: Int = eraseSize(imageSize),
-    ): ByteArray = ints(eraseBytes, blocks, BLOCK_SIZE, offset, 0)
+    ): ByteArray = ints(eraseBytes, blocks, BLOCK_SIZE, offset)
 
     fun flashDataPayload(dataSize: Int, seq: Int, data: ByteArray): ByteArray {
         val head = ints(dataSize, seq, 0, 0)
