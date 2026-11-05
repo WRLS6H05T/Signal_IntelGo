@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Builds the two sensor images the app flashes and drops them in the app's assets.
+# Builds the two sensor images for a bare C3/C5 board. The app does not flash them - a board
+# arrives running Marauder or GhostESP - so the output stays out of the app.
 #
 #   firmware/build.sh            both chips
 #   firmware/build.sh c3         one chip
@@ -11,7 +12,7 @@
 #   pip install esptool
 #
 # Each image is merged: bootloader at 0x0, partition table at 0x8000 and the application at
-# 0x10000, so the app can write it in one pass at offset 0 and a bare board comes up running it. The partition scheme is Huge APP (3 MB, no OTA) because the sketch with
+# 0x10000, so one `esptool write-flash 0x0` brings a bare board up. The partition scheme is Huge APP (3 MB, no OTA) because the sketch with
 # Wi-Fi, BLE and GPS does not fit the default 1.2 MB OTA slot, and updates arrive over the cable
 # from the phone rather than over the air.
 set -euo pipefail
@@ -20,7 +21,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/.." && pwd)"
 cli="${ARDUINO_CLI:-arduino-cli}"
 esptool_bin="${ESPTOOL:-esptool}"
-out="$root/app/src/main/assets/firmware"
+out="$here/out"
 build="$here/build"
 mkdir -p "$out" "$build"
 
@@ -56,7 +57,7 @@ for chip in "${targets[@]}"; do
   echo "wrote $out/$merged ($(wc -c < "$out/$merged") bytes)"
 done
 
-# A manifest, so the app can show what it is about to write without parsing the image.
+# A manifest of sizes and hashes, so an image can be checked before it is written.
 python - "$out" "$here" <<'PY'
 import hashlib, json, os, sys, datetime
 out, here = sys.argv[1], sys.argv[2]

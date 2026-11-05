@@ -248,10 +248,10 @@ class UsbBoards(private val context: Context) {
     private val polling = ConcurrentHashMap.newKeySet<Int>()
 
     /**
-     * Boards a terminal or the flasher has taken off the poller.
+     * Boards a terminal has taken off the poller.
      *
      * The poller reopens the port every few seconds and writes commands into it; a human typing
-     * a firmware command, or a flash download in progress, cannot share that. While an id is in
+     * a firmware command cannot share that. While an id is in
      * here no probe starts and no poll runs, and the port belongs to the session alone.
      */
     private val manual = ConcurrentHashMap.newKeySet<Int>()
@@ -603,8 +603,8 @@ class UsbBoards(private val context: Context) {
                     conn.controlTransfer(0x21, 0x20, 0, ifaceId, line, line.size, 200)
                     // Both lines released, deliberately. Asserting DTR or RTS pulls the board's
                     // EN or IO0 line through the bridge's inverter, which holds the chip in
-                    // reset: a console that never prints its boot log and a flash that never
-                    // starts. The flasher pulses the lines itself; everyone else wants them idle.
+                    // reset: a console that never prints its boot log. Nothing asserts the
+                    // lines on open; only the terminal's RESET does, on request.
                     conn.controlTransfer(0x21, 0x22, 0x0000, ifaceId, null, 0, 200)
                 }
 
@@ -641,7 +641,7 @@ class UsbBoards(private val context: Context) {
     /**
      * A raw, exclusive session on one board's port.
      *
-     * The terminal and the flasher both need the port as a byte pipe, not as a source of
+     * The terminal needs the port as a byte pipe, not as a source of
      * telemetry: one wants a human's commands to arrive intact, the other needs the ROM
      * bootloader's framing to survive untouched. Closing is the only way the board goes back to
      * the poller, which is why every failure path closes as well.
@@ -705,7 +705,7 @@ class UsbBoards(private val context: Context) {
     }
 
     /**
-     * Takes a board off the poller and opens its port for a terminal or a flash.
+     * Takes a board off the poller and opens its port for the terminal.
      *
      * Returns null when the board is gone, the interface is busy, or a poll is still inside its
      * read window - a poll can hold the port for six seconds, so the wait has to outlast that.
@@ -787,7 +787,7 @@ class UsbBoards(private val context: Context) {
     private fun findPort(device: UsbDevice): Triple<UsbInterface, UsbEndpoint, UsbEndpoint?>? =
         findPorts(device).firstOrNull()
 
-    /** How many interfaces the terminal or the flasher could try on this board. */
+    /** How many interfaces the terminal could try on this board. */
     fun portCount(deviceId: Int): Int {
         val device = attached[deviceId] ?: return 1
         return findPorts(device).size.coerceAtLeast(1)

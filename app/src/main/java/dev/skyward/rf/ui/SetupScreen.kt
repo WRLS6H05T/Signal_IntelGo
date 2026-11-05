@@ -315,15 +315,14 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                 )
                 Spacer(Modifier.height(10.dp))
                 // The cable is the only way to a board that is not already running something
-                // the app understands: a console to talk to it, and a flash to put this build's
-                // firmware on it. Both sit behind the same session, so only one at a time.
+                // the app understands: one console, one session at a time, poller waiting.
                 var serialOpen by remember { mutableStateOf(false) }
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Chip("SERIAL + FLASH", serialOpen, Sky.esp32) { serialOpen = true }
+                    Chip("SERIAL", serialOpen, Sky.esp32) { serialOpen = true }
                     Chip("RESCAN", false, Sky.esp32) { c.esp32Usb.rescan() }
                 }
                 Text(
-                    "Console, GPS pin and baud, and the bundled C3/C5 firmware, all over USB.",
+                    "Console and the board's GPS pin and baud, over USB.",
                     color = Sky.textDim,
                     fontSize = 10.sp,
                 )

@@ -483,7 +483,7 @@ Uninstalling deletes that folder along with the app, so copy it off before unins
 
 ---
 
-## Sensor firmware and the in-app flasher
+## Sensor firmware
 
 `firmware/SignalSensor` is the sensor firmware for the two mini boards this project targets,
 **ESP32-C3 Mini** and **ESP32-C5 Mini**. One sketch, both chips, compiled per target:
@@ -496,9 +496,16 @@ firmware/build.sh c3       # one of them
 It needs `arduino-cli` with the `esp32` core (3.3.x) and `esptool` on `PATH`; the script compiles
 each board with the **Huge APP** partition scheme (Wi-Fi, BLE and GPS do not fit the default
 1.2 MB OTA slot), merges bootloader at `0x0`, partition table at `0x8000` and application at
-`0x10000`, and writes `app/src/main/assets/firmware/esp32c3.bin`, `esp32c5.bin` and a
-`firmware.json` manifest. `.github/workflows/firmware.yml` does the same in CI and uploads the
-two images, so a build without a local toolchain can still get them.
+`0x10000`, and writes `firmware/out/esp32c3.bin`, `esp32c5.bin` and a `firmware.json` manifest.
+`.github/workflows/firmware.yml` does the same in CI and uploads the two images.
+
+The app neither bundles nor writes these images: a board arrives already running **Marauder** or
+**GhostESP**, and that is what the app talks to. These are for a bare board that has neither, and
+one command puts one on it from a PC:
+
+```
+esptool --chip esp32c5 -p /dev/ttyACM0 write-flash 0x0 firmware/out/esp32c5.bin
+```
 
 What the firmware does, on the same wire format the app already decodes:
 
@@ -520,21 +527,18 @@ Both are written to NVS, so a board keeps its wiring across a reflash of the cab
 also reachable as fields in the terminal panel. The firmware rejects pins that would break the
 console on a mini board (the native USB pads) rather than accepting a typo silently.
 
-### Setup -> ESP32 sensors -> SERIAL + FLASH
+### Setup -> ESP32 sensors -> SERIAL
 
 One panel, over the USB connection the app already uses to identify boards:
 
 - **CONNECT** takes the port away from the telemetry poller and opens it as a raw console -
   `help`, `status`, `scan`, `gpspin <n>`, `gpsbaud <n>`, `save`, `reboot`, plus anything else the
   firmware might understand. The poller resumes when the session closes.
-- **FLASH FIRMWARE** opens a confirmation dialog showing the port, USB id, transport, target
-  chip, the bundled image's size and version, and what the flash will destroy. Nothing is
-  written until **CONFIRM FLASH**.
+- **RESET** pulses EN so a board that was already running reprints its boot log; a board on
+  its own USB peripheral drops off the bus and is reopened automatically.
 
-Flashing is done on the phone, with no PC: the app speaks the ROM bootloader's own protocol
-(SLIP framing, `SYNC`, `FLASH_BEGIN`, 1 KiB `FLASH_DATA` blocks, `FLASH_END`) rather than
-shelling out to esptool, and resets the board into download mode itself with the USB-Serial-JTAG
-pulse train or the classic D0/R1 sequence, whichever answers. The image is written at offset `0`,
-so a bare board comes up running it.**Not verified:** there is no C3/C5 on this machine, so the reset sequences, the flash itself and the firmware's radio behaviour have not been exercised on hardware. What is checked is the byte layer - SLIP framing, command headers and checksums, block splitting and the erase size all have JVM tests - and both firmware images compile.
+Firmware is not written from the app. A board arrives already running **Marauder** or
+**GhostESP**, and the panel speaks that firmware's own commands; nothing is erased, flashed
+or replaced over the cable.
 
 ---

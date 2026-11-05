@@ -32,3 +32,6 @@ firmware/SignalSensor/build/
 
 # local build and selftest output
 /*.log
+
+# Built sensor images are artifacts, not sources.
+firmware/out/

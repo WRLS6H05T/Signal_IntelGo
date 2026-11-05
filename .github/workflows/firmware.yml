@@ -1,9 +1,8 @@
 name: firmware
 
-# Builds the two sensor images the app flashes. The APK carries prebuilt images in
-# app/src/main/assets/firmware, so this workflow exists to produce them on a machine that has no
-# Arduino toolchain: download the artifacts, drop the .bin files and firmware.json into that
-# directory, and the next APK build ships them.
+# Builds the two sensor images for a bare C3/C5 board. The app does not bundle or write them, so
+# this workflow exists to produce them on a machine with no Arduino toolchain: download the
+# artifacts and flash one from a PC with `esptool write-flash 0x0`.
 
 on:
   workflow_dispatch:
@@ -33,13 +32,13 @@ jobs:
         run: bash firmware/build.sh
 
       - name: Show what was built
-        run: ls -l app/src/main/assets/firmware
+        run: ls -l firmware/out
 
       - uses: actions/upload-artifact@v4
         with:
           name: sensor-firmware
           path: |
-            app/src/main/assets/firmware/esp32c3.bin
-            app/src/main/assets/firmware/esp32c5.bin
-            app/src/main/assets/firmware/firmware.json
+            firmware/out/esp32c3.bin
+            firmware/out/esp32c5.bin
+            firmware/out/firmware.json
           if-no-files-found: error
