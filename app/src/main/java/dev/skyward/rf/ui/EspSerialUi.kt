@@ -98,19 +98,26 @@ fun EspSerialDialog(c: Container, settings: Settings, onDismiss: () -> Unit) {
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    if (boards.isEmpty()) "No board on the cable" else "One board at a time; the poller waits",
+                    if (board == null) {
+                        "No board on the cable"
+                    } else {
+                        "${board.label} \u00b7 ${board.transport.label} \u00b7 " +
+                            String.format("%04x:%04x", board.vendorId, board.productId)
+                    },
                     color = Sky.textDim,
                     fontSize = 10.sp,
                 )
                 Spacer(Modifier.height(8.dp))
 
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for (b in boards) {
-                        Chip(
-                            text = b.label.take(18),
-                            selected = b.deviceId == board?.deviceId,
-                            accent = Sky.esp32,
-                        ) { selectedId = b.deviceId }
+                if (boards.size > 1) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for (b in boards) {
+                            Chip(
+                                text = b.label.take(18),
+                                selected = b.deviceId == board?.deviceId,
+                                accent = Sky.esp32,
+                            ) { selectedId = b.deviceId }
+                        }
                     }
                 }
                 if (boards.isEmpty()) {

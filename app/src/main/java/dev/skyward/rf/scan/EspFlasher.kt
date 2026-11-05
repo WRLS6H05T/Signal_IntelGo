@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.io.ByteArrayOutputStream
 
 /**
  * The firmware image a board gets.
@@ -47,11 +48,11 @@ data class FlashDetails(
  * image's own span as its erase size, a FLASH_DATA per 1 KiB block, FLASH_END. No stub is uploaded, so a board with nothing but its
  * ROM - a fresh C3 or C5 mini - is enough.
  *
- * The one thing this cannot do naively is reset a chip that owns its USB peripheral: such a chip
- * leaves the bus when EN pulses and returns as a *different* device id. Every read on the old
- * port then returns nothing for ever, which looks exactly like a board that never answers. So a
- * lost device is treated as a re-enumeration, reopened on the new id, and retried, and a port
- * that never sends a single byte is abandoned in favour of the next candidate interface.
+ * Two things about the hardware are handled here and nothing else can be. A chip that owns its
+ * USB peripheral leaves the bus when EN pulses and returns as a *different* device id, so a lost
+ * device is reopened rather than mistaken for a silent one. And the ROM's own console is read
+ * before anything is sent: a chip that prints "waiting for download" is already in the mode the
+ * flash needs, and a reset at that point can only lose it.
  *
  * What happens on the wire is recorded in [wire], so a board that misbehaves leaves something to
  * read rather than another report of a hang.
@@ -65,8 +66,8 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
      *
      * Three attempts at this ended in "it stops at erasing flash", which is the one sentence the
      * wire can never be asked about after the fact. This keeps the exchange - every frame sent,
-     * every byte read, every line state and every timeout - so the dialog can show it and a
-     * failed flash can put it in the crash report.
+     * every byte read, the ROM's own console text, every line state and every timeout - so the
+     * dialog can show it and a failed flash can put it in the crash report.
      */
     private val _wire = MutableStateFlow<List<String>>(emptyList())
     val wire: StateFlow<List<String>> = _wire
@@ -79,6 +80,9 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
      * old port is a dead end, whatever the writes say.
      */
     private var received = 0
+
+    /** Printable text the chip printed on its own, before or between commands. */
+    private val console = StringBuilder()
 
     private fun note(line: String) {
         _wire.value = (_wire.value + line).takeLast(WIRE_LINES)
@@ -207,8 +211,10 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
         onStep: (String, Float) -> Unit,
     ): String {
         received = 0
+        console.setLength(0)
         onStep("Entering the bootloader", 0.02f)
         if (!enterBootloader(session, board)) {
+            val said = consoleText()
             if (received == 0) {
                 throw PortSilent(
                     "Nothing was received from the board at all, on any interface. Its USB device is on " +
@@ -216,8 +222,14 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
                 )
             }
             throw IllegalStateException(
-                "The board answered nothing after a reset on every line shape. Hold BOOT, tap RESET, " +
-                    "release BOOT, then flash again.",
+                if (said.isNotBlank()) {
+                    "The board's console says \"${said.take(140)}\", so it is in download mode, but it does " +
+                        "not answer a SYNC on this interface. Try the PORT button in the serial panel, or " +
+                        "flash with the board unplugged and reconnected while BOOT is held."
+                } else {
+                    "The board answered nothing after a reset on every line shape. Hold BOOT, tap RESET, " +
+                        "release BOOT, then flash again."
+                },
             )
         }
 
@@ -433,35 +445,45 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
     /**
      * Gets a board into its bootloader and talking.
      *
-     * Four things are tried, cheapest first. A board already sitting in the download mode - left
-     * there by a failed flash, or because BOOT was held at power-up - answers a SYNC untouched,
-     * and pulsing its lines is the one way to lose a session that was already good. After that
-     * the resets run in the order the transport makes likely, and each ends with both lines
-     * released so the chip is actually running when the SYNC is sent.
+     * The chip's own console is read first, and that is the part that matters most here: a ROM
+     * that printed "waiting for download" is already exactly where the flash wants it, so the
+     * only reset worth trying is a bare EN pulse - and even that is a risk, because a chip that
+     * owns its USB peripheral disappears when it is reset. Everything else is tried in the order
+     * the transport makes likely, each ending with both lines released so the chip is running
+     * when the SYNC goes out.
      *
      * A reset on a chip with its own USB peripheral takes the device off the bus, and that is
      * reported as [BoardLost] rather than as silence: the caller reopens the new device, and the
      * retry's untouched SYNC finds the chip already in the download mode its reset put it in.
      */
     private fun enterBootloader(session: UsbBoards.SerialSession, board: UsbBoards.Board): Boolean {
-        drain(session, 80)
-        if (sync(session, "before touching the lines")) return true
+        drain(session, 350, capture = true)
+        val said = consoleText()
+        if (said.isNotBlank()) note("console: $said")
+        if (sync(session, "as it is")) return true
 
+        // The ROM's own words are the best evidence available: "waiting for download" means the
+        // chip is in the mode the flash needs and is waiting for exactly the SYNC just sent.
+        // Resetting it there restarts the same ROM at best, and drops the USB device at worst.
+        val waiting = said.contains("waiting for download", ignoreCase = true) ||
+            said.contains("DOWNLOAD", ignoreCase = true)
         val native = board.transport == UsbBoards.Transport.NATIVE_USB ||
             board.transport == UsbBoards.Transport.CDC_ACM
-        val shapes = if (native) {
-            listOf(
+        val shapes = when {
+            waiting -> listOf("EN pulse" to enPulseLines)
+            native -> listOf(
                 "usb-jtag reset" to usbJtagResetLines,
                 "DTR/RTS reset" to classicResetLines,
                 "EN pulse" to enPulseLines,
             )
-        } else {
-            listOf(
+
+            else -> listOf(
                 "DTR/RTS reset" to classicResetLines,
                 "EN pulse" to enPulseLines,
                 "usb-jtag reset" to usbJtagResetLines,
             )
         }
+        if (waiting) note("the ROM says it is waiting for download; only EN is pulsed, and only once")
         for ((name, shape) in shapes) {
             note("reset: $name")
             applyLines(session, shape)
@@ -469,7 +491,7 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
                 note("the board left the bus on the $name; it comes back as a new device")
                 throw BoardLost()
             }
-            drain(session, 250)
+            drain(session, 250, capture = true)
             if (sync(session, "after a $name")) return true
         }
         return false
@@ -489,20 +511,52 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
         note("lines dtr=${if (dtr) 1 else 0} rts=${if (rts) 1 else 0}")
     }
 
-    private fun drain(session: UsbBoards.SerialSession, forMs: Long) {
+    /** Reads and discards whatever the chip is printing, keeping the text when asked. */
+    private fun drain(session: UsbBoards.SerialSession, forMs: Long, capture: Boolean = false) {
         val until = SystemClock.elapsedRealtime() + forMs
         while (SystemClock.elapsedRealtime() < until) {
-            session.read(256, 60) ?: continue
+            val bytes = session.read(256, 60) ?: continue
+            if (capture) collectText(bytes)
         }
     }
 
+    private fun collectText(bytes: ByteArray) {
+        for (b in bytes) {
+            val c = b.toInt() and 0xFF
+            when {
+                c == 0x0A || c == 0x0D -> if (console.isNotEmpty() && console.last() != ' ') console.append(' ')
+                c in 0x20..0x7E -> console.append(c.toChar())
+            }
+        }
+        if (console.length > CONSOLE_CHARS) console.delete(0, console.length - CONSOLE_CHARS)
+    }
+
+    private fun consoleText(): String = console.toString().replace(Regex(" {2,}"), " ").trim()
+
+    /**
+     * Sends the sync payload the way esptool does: eight frames back to back, then one wait.
+     *
+     * A ROM that is still drawing its banner can drop the first frames it is handed, and the
+     * cost of a burst is a few hundred bytes. [SYNC_ROUNDS] of those is two seconds of asking,
+     * which is all a chip in the download mode ever needs - if it is going to answer at all.
+     */
     private fun sync(session: UsbBoards.SerialSession, why: String = ""): Boolean {
-        repeat(7) { attempt ->
-            if (command(session, EspBootloader.OP_SYNC, EspBootloader.syncPayload(), SYNC_TIMEOUT_MS) != null) {
-                note("synced on attempt ${attempt + 1} ${if (why.isEmpty()) "" else "($why)"}".trim())
+        repeat(SYNC_ROUNDS) { round ->
+            val burst = ByteArrayOutputStream(SYNC_FRAMES * 48)
+            repeat(SYNC_FRAMES) {
+                burst.write(EspSlip.encode(EspBootloader.command(EspBootloader.OP_SYNC, EspBootloader.syncPayload())))
+            }
+            if (!usb.isAttached(session.deviceId)) throw BoardLost()
+            if (!session.write(burst.toByteArray())) {
+                note("the sync burst could not be written")
+                return false
+            }
+            if (round == 0) note("tx $SYNC_FRAMES sync frames", )
+            val reply = await(session, EspBootloader.OP_SYNC, SYNC_LISTEN_MS)
+            if (reply != null) {
+                note("synced on round ${round + 1} ${if (why.isEmpty()) "" else "($why)"}".trim())
                 return true
             }
-            Thread.sleep(60)
         }
         note("no sync ${if (why.isEmpty()) "" else "($why)"}".trim())
         return false
@@ -523,6 +577,11 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
             return null
         }
         note("tx 0x%02x %d B %s".format(op, payload.size, hex(payload).take(64)))
+        return await(session, op, timeoutMs)
+    }
+
+    /** Reads until the reply for [op] arrives, the caller loses patience, or the board vanishes. */
+    private fun await(session: UsbBoards.SerialSession, op: Int, timeoutMs: Long): EspBootloader.Response? {
         val reader = EspSlip.Reader()
         val until = SystemClock.elapsedRealtime() + timeoutMs
         var empty = 0
@@ -559,7 +618,6 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
     private companion object {
         const val MANIFEST = "firmware/firmware.json"
         const val BAUD = 115_200
-        const val SYNC_TIMEOUT_MS = 400L
 
         /**
          * Never wait less than this for an erase, however small the image is. A 4 MiB module
@@ -577,7 +635,15 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
         /** FLASH_END is not answered in ROM mode; the pause is for the chip to close the session. */
         const val CHUNK_GAP_MS = 60L
         const val BLOCK_TIMEOUT_MS = 8_000L
-        const val WIRE_LINES = 160
+        const val WIRE_LINES = 200
+        const val CONSOLE_CHARS = 400
+
+        /** esptool's own habit: the sync payload goes out eight times per round. */
+        const val SYNC_FRAMES = 8
+        const val SYNC_ROUNDS = 4
+
+        /** How long one sync burst is given to be answered. */
+        const val SYNC_LISTEN_MS = 500L
 
         /** How long a chip that reset has to re-appear on the bus before it is called gone. */
         const val REATTACH_MS = 6_000L
