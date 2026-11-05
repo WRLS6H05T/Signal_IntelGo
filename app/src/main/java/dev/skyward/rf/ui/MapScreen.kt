@@ -1523,7 +1523,11 @@ private fun TacticalMap(
                 val p = Offset(pr.x, pr.y)
 
                 // tether down to the ground point: the height cue that makes it airborne
-                if (pr.lift > 0.004f && m.layer != Layer.AIRCRAFT) {
+                // A tether is an altitude cue for things that belong to the ground: crewed
+                // traffic, a drone, a node on a mast. It is not one for a satellite catalogue -
+                // once the whole shell is plotted, hundreds of lines from sub-point to icon read
+                // as scratches across the ball rather than as height.
+                if (pr.lift > 0.004f && m.layer != Layer.AIRCRAFT && m.layer != Layer.SATELLITE) {
                     val g = vp.surface(m.lat, m.lon)
                     drawLine(
                         color = base.copy(alpha = 0.28f * a),
