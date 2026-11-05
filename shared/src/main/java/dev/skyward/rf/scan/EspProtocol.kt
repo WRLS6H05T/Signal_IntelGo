@@ -271,6 +271,29 @@ object EspBootloader {
         }
     }
 
+
+    /** One piece of the fallback erase; a ROM answers this in well under a second. */
+    const val ERASE_CHUNK: Int = 128 * 1024
+
+    /**
+     * The erase split into sector-aligned pieces that add up to [eraseBytes].
+     *
+     * Only used when a ROM will not answer a single FLASH_BEGIN for the whole span: the same
+     * request in pieces is small enough to be answered quickly, and a piece that is ignored is a
+     * failure that can be pointed at instead of one silence with no end.
+     */
+    fun erasePlan(eraseBytes: Int, chunk: Int = ERASE_CHUNK): List<Int> {
+        if (eraseBytes <= 0) return emptyList()
+        val pieces = ArrayList<Int>(eraseBytes / chunk + 1)
+        var left = eraseBytes
+        while (left > 0) {
+            val take = minOf(left, chunk)
+            pieces.add(take)
+            left -= take
+        }
+        return pieces
+    }
+
     /** How much the ROM will erase: the image rounded up to whole 4 KiB sectors. */
     fun eraseSize(imageSize: Int): Int {
         val sectors = (imageSize + ERASE_ALIGN - 1) / ERASE_ALIGN

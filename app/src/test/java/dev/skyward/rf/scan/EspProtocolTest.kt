@@ -146,6 +146,18 @@ class EspProtocolTest {
     }
 
     @Test
+    fun `erase plan splits the span into aligned pieces that add up`() {
+        val span = EspBootloader.eraseSize(1_303_456)
+        val plan = EspBootloader.erasePlan(span)
+        assertEquals(span, plan.sum())
+        assertTrue(plan.all { it % EspBootloader.ERASE_ALIGN == 0 })
+        assertTrue(plan.all { it <= EspBootloader.ERASE_CHUNK })
+        // A span smaller than a chunk stays one piece, and nothing is planned for nothing.
+        assertEquals(listOf(4096), EspBootloader.erasePlan(4096))
+        assertTrue(EspBootloader.erasePlan(0).isEmpty())
+    }
+
+    @Test
     fun `known chip magics are named and an unknown one is not`() {
         assertEquals("ESP32-C3", EspBootloader.chipName(0x1B31506FL))
         assertEquals("ESP32-S3", EspBootloader.chipName(0x00000009L))
