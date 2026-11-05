@@ -31,3 +31,6 @@ device-log.txt
 firmware/build/
 .tools/fw/
 firmware/SignalSensor/build/
+
+# local build and selftest output
+/*.log
