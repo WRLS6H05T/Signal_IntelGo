@@ -14,13 +14,17 @@ import org.junit.Test
 class EspProtocolTest {
 
     @Test
-    fun `erase flash is the rom whole-chip erase and carries no payload`() {
-        assertEquals(0xD0, EspBootloader.OP_ERASE_FLASH)
-        val packet = EspBootloader.command(EspBootloader.OP_ERASE_FLASH, EspBootloader.eraseFlashPayload())
-        assertEquals(8, packet.size)
-        assertEquals(EspBootloader.OP_ERASE_FLASH, packet[1].toInt() and 0xFF)
-        assertEquals(0, packet[2].toInt())
-        assertEquals(0xEF, packet[4].toInt() and 0xFF)
+    fun `flash begin erases the whole flash before the image when asked`() {
+        val p = EspBootloader.flashBeginPayload(imageSize = 1_303_456, blocks = 1273, eraseBytes = 4 * 1024 * 1024)
+        assertEquals(20, p.size)
+        // 0x00400000, little endian: the whole 4 MiB chip, not just the image's sectors.
+        assertEquals(0x00, p[0].toInt())
+        assertEquals(0x00, p[1].toInt())
+        assertEquals(0x40, p[2].toInt())
+        assertEquals(0x00, p[3].toInt())
+        // 1273 blocks follow unchanged, so only the erase size moved.
+        assertEquals(0xF9, p[4].toInt() and 0xFF)
+        assertEquals(0x04, p[5].toInt() and 0xFF)
     }
 
     @Test

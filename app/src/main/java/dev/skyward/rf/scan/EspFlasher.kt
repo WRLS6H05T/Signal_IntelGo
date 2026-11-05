@@ -41,8 +41,8 @@ data class FlashDetails(
  * Writes the bundled sensor firmware over the cable, from the phone, with no PC involved.
  *
  * This speaks the ROM bootloader's own protocol (see [EspBootloader]) rather than shelling out
- * to esptool, which cannot exist on a phone: reset into download mode, SYNC, ERASE_FLASH,
- * FLASH_BEGIN, a FLASH_DATA per 1 KiB block, FLASH_END. No stub is uploaded, so a board with nothing but its
+ * to esptool, which cannot exist on a phone: reset into download mode, SYNC, FLASH_BEGIN with
+ * the whole chip as its erase size, a FLASH_DATA per 1 KiB block, FLASH_END. No stub is uploaded, so a board with nothing but its
  * ROM - a fresh C3 or C5 mini - is enough.
  *
  * The path is unverified without hardware. What is checked here is the part that can be: the
@@ -99,30 +99,23 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
                 return Result.failure(IllegalStateException("No answer from the bootloader. Hold BOOT and tap RESET, then try again"))
             }
 
-            // Whole-chip erase before anything is written. The merged image only covers the
-            // sectors it declares, so without this the old partition table, the old NVS - which
-            // is where a previous firmware kept its own settings - and any tail past the end of
-            // the new image all survive the flash. esptool calls this ERASE_FLASH; the ROM takes
-            // no payload and answers with a status word once every sector is gone.
-            onStep("Erasing the whole flash", 0.04f)
-            val erased = command(
-                session,
-                EspBootloader.OP_ERASE_FLASH,
-                EspBootloader.eraseFlashPayload(),
-                ERASE_TIMEOUT_MS,
-            ) ?: return Result.failure(IllegalStateException("The board stopped answering while erasing"))
-            if (erased.status != 0) {
-                return Result.failure(IllegalStateException("The board refused the erase (status ${erased.status})"))
-            }
-
+            // Whole-chip erase, as part of FLASH_BEGIN. Its first word is the number of bytes
+            // the ROM erases before it accepts a block, so asking for the whole 4 MiB chip here
+            // wipes the old partition table, the old NVS - where a previous firmware kept its
+            // settings - and any tail past the end of the new image.
+            //
+            // A separate ERASE_FLASH (0xD0) command is the obvious way to do this and is why
+            // the flasher used to hang on "erasing": the C3 and C5 ROMs do not implement it.
+            // esptool only sends 0xD0 after uploading its stub; without one the board stays
+            // silent and the caller waits out a timeout.
             val blocks = EspBootloader.blocks(bytes)
-            onStep("Erasing ${EspBootloader.eraseSize(bytes.size) / 1024} KiB for the image", 0.08f)
+            onStep("Erasing the whole 4 MiB flash", 0.04f)
             val begin = command(
                 session,
                 EspBootloader.OP_FLASH_BEGIN,
-                EspBootloader.flashBeginPayload(bytes.size, blocks.size),
+                EspBootloader.flashBeginPayload(bytes.size, blocks.size, eraseBytes = WHOLE_FLASH_BYTES),
                 FLASH_BEGIN_TIMEOUT_MS,
-            ) ?: return Result.failure(IllegalStateException("The board stopped answering at FLASH_BEGIN"))
+            ) ?: return Result.failure(IllegalStateException("The board stopped answering while erasing"))
             if (begin.status != 0) {
                 return Result.failure(IllegalStateException("The board refused the erase (status ${begin.status})"))
             }
@@ -242,9 +235,13 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
     private companion object {
         const val MANIFEST = "firmware/firmware.json"
         const val SYNC_TIMEOUT_MS = 400L
-        /** A whole-chip erase is the longest thing the ROM does; 4 MB is seconds, not ms. */
-        const val ERASE_TIMEOUT_MS = 120_000L
-        const val FLASH_BEGIN_TIMEOUT_MS = 60_000L
+        /**
+         * What the merged images are built for (`--flash-size 4MB`). Erasing and then writing
+         * the whole chip in one FLASH_BEGIN is the stock clean install.
+         */
+        const val WHOLE_FLASH_BYTES = 4 * 1024 * 1024
+        /** FLASH_BEGIN now covers the whole-chip erase, which blocks for several seconds. */
+        const val FLASH_BEGIN_TIMEOUT_MS = 180_000L
         const val BLOCK_TIMEOUT_MS = 8_000L
     }
 }

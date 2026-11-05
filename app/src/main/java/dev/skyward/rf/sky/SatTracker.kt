@@ -272,7 +272,12 @@ class SatTracker(
                     ),
                 )
             }
-            out.sortByDescending { it.elevation }
+            // Catalogue order, not elevation order. The map samples this list when the shell is
+            // too large to draw whole, and an elevation sort reshuffles itself on every tick:
+            // the sample then picks different satellites each time, so icons pop in and out at
+            // the edge of the globe. A stable order keeps the same subset plotted from one tick
+            // to the next, and every consumer that wants "highest first" sorts for itself.
+            out.sortBy { it.noradId }
             out
         }
 }

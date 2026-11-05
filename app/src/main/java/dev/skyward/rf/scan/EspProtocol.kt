@@ -111,9 +111,9 @@ object EspSlip {
 /**
  * Command packets and the handful of ROM commands the flasher issues.
  *
- * The sequence is the stock one: reset into the bootloader, SYNC until the board answers,
- * ERASE_FLASH so nothing of the old firmware survives, then FLASH_BEGIN, one FLASH_DATA per
- * 1 KiB block and FLASH_END. No stub loader is uploaded, so this works on an
+ * The sequence is the stock one: reset into the bootloader, SYNC until the board answers, then
+ * FLASH_BEGIN - which erases the whole chip first, because the erase size in its first word is
+ * what the ROM erases before it accepts a byte - one FLASH_DATA per 1 KiB block and FLASH_END. No stub loader is uploaded, so this works on an
  * untouched board with nothing but its ROM: slower than esptool's stub at high baud, but it has
  * no chip-specific second stage that can be mismatched.
  */
@@ -125,7 +125,12 @@ object EspBootloader {
     const val OP_SYNC = 0x08
     const val OP_READ_REG = 0x0A
 
-    /** esptool's ERASE_FLASH: erases the whole chip, not just the range FLASH_BEGIN declares. */
+    /**
+     * esptool's ERASE_FLASH opcode. Deliberately unused: the C3 and C5 ROMs do not implement it
+     * - esptool only ever sends it after uploading its stub - so a board that gets it simply
+     * never answers, which reads from the phone as an erase that hangs forever. The whole-chip
+     * erase rides in FLASH_BEGIN's first word instead, which every ROM does honour.
+     */
     const val OP_ERASE_FLASH = 0xD0
 
     private const val CHECKSUM_SEED = 0xEF
@@ -210,17 +215,19 @@ object EspBootloader {
     }
 
     /**
-     * ERASE_FLASH takes no payload. The ROM erases every sector and answers with a status word,
-     * which is why it gets a long timeout: 4 MB takes several seconds and blocks the console.
-     */
-    fun eraseFlashPayload(): ByteArray = ByteArray(0)
-
-    /**
      * FLASH_BEGIN: erase size, block count, block size, offset and the encrypted flag. The fifth
      * word is what C3/C5 ROMs expect; the classic ESP32 takes four and is not flashed here.
+     *
+     * [eraseBytes] is how much the ROM erases before it takes the first block, and it is the
+     * only whole-chip erase this protocol needs: pass the flash size and the old partition
+     * table, the old NVS and any tail past the new image are gone before anything is written.
      */
-    fun flashBeginPayload(imageSize: Int, blocks: Int, offset: Int = 0): ByteArray =
-        ints(eraseSize(imageSize), blocks, BLOCK_SIZE, offset, 0)
+    fun flashBeginPayload(
+        imageSize: Int,
+        blocks: Int,
+        offset: Int = 0,
+        eraseBytes: Int = eraseSize(imageSize),
+    ): ByteArray = ints(eraseBytes, blocks, BLOCK_SIZE, offset, 0)
 
     fun flashDataPayload(dataSize: Int, seq: Int, data: ByteArray): ByteArray {
         val head = ints(dataSize, seq, 0, 0)
