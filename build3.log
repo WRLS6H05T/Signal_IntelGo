@@ -1,0 +1,32 @@
+> Task :shared:checkKotlinGradlePluginConfigurationErrors
+> Task :desktop:checkKotlinGradlePluginConfigurationErrors
+> Task :desktop:generateComposeResClass UP-TO-DATE
+> Task :desktop:convertXmlValueResourcesForMain NO-SOURCE
+> Task :desktop:copyNonXmlValueResourcesForMain NO-SOURCE
+> Task :desktop:prepareComposeResourcesTaskForMain NO-SOURCE
+> Task :desktop:generateResourceAccessorsForMain NO-SOURCE
+> Task :desktop:processResources UP-TO-DATE
+> Task :desktop:convertXmlValueResourcesForTest NO-SOURCE
+> Task :desktop:copyNonXmlValueResourcesForTest NO-SOURCE
+> Task :desktop:prepareComposeResourcesTaskForTest NO-SOURCE
+> Task :desktop:generateResourceAccessorsForTest NO-SOURCE
+> Task :desktop:processTestResources NO-SOURCE
+> Task :shared:compileKotlin UP-TO-DATE
+> Task :shared:compileJava NO-SOURCE
+> Task :shared:processResources NO-SOURCE
+> Task :shared:classes UP-TO-DATE
+> Task :shared:jar UP-TO-DATE
+> Task :desktop:compileKotlin
+> Task :desktop:compileJava NO-SOURCE
+> Task :desktop:classes UP-TO-DATE
+> Task :desktop:jar
+> Task :desktop:assemble
+> Task :desktop:compileTestKotlin
+> Task :desktop:compileTestJava NO-SOURCE
+> Task :desktop:testClasses UP-TO-DATE
+> Task :desktop:test
+> Task :desktop:check
+> Task :desktop:build
+
+BUILD SUCCESSFUL in 5s
+10 actionable tasks: 6 executed, 4 up-to-date

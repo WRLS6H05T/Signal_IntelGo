@@ -29,14 +29,9 @@ data class SkyState(
  */
 class DesktopSky(
     private val scope: CoroutineScope,
+    private val http: OkHttpClient,
     home: File = File(System.getProperty("user.home"), "signintelgo"),
 ) {
-
-    private val http: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(25, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(true)
-        .build()
 
     private val tracker = SatTracker(FileStore(File(home, "tle")), http)
 

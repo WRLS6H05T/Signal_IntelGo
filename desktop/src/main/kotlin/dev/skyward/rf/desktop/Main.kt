@@ -13,7 +13,10 @@ import dev.skyward.rf.desktop.ble.BleBridge
 import dev.skyward.rf.desktop.host.DeviceHost
 import dev.skyward.rf.desktop.host.HostSettings
 import dev.skyward.rf.desktop.sky.DesktopSky
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 import dev.skyward.rf.desktop.ui.DesktopApp
+import dev.skyward.rf.desktop.ui.TileStore
 import dev.skyward.rf.desktop.ui.Ink
 import dev.skyward.rf.desktop.ui.Panel
 import dev.skyward.rf.desktop.ui.Sky
@@ -44,7 +47,16 @@ class DesktopContainer {
 
     val host = DeviceHost(bridge, scope, settings)
 
-    val sky = DesktopSky(scope)
+    /** One HTTP client for the tiles and the element sets: same pool, same timeouts. */
+    private val http = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(25, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
+        .build()
+
+    val sky = DesktopSky(scope, http)
+
+    val tiles = TileStore(http, scope)
 
     /** The bundled coastlines, read once by the build's copy of the phone's asset. */
     val land: Array<FloatArray> by lazy { WorldLand.load() }

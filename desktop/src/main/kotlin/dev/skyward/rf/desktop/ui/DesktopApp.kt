@@ -50,7 +50,7 @@ val Amber = Color(0xFFFB923C)
 val TextMain = Color(0xFFE8EEF7)
 val TextDim = Color(0xFF8FA3BF)
 
-private val tabs = listOf("Globe", "Host")
+private val tabs = listOf("Map", "Host")
 
 @Composable
 fun DesktopApp(container: DesktopContainer) {
@@ -67,7 +67,7 @@ fun DesktopApp(container: DesktopContainer) {
 
     Box(Modifier.fillMaxSize().background(Ink)) {
         when (tab) {
-            0 -> GlobeScreen(sky, observer, container.land, Modifier.fillMaxSize())
+            0 -> MapScreen(sky, observer, container.land, container.tiles, Modifier.fillMaxSize())
             else -> HostScreen(host, settings, container, Modifier.fillMaxSize())
         }
 
