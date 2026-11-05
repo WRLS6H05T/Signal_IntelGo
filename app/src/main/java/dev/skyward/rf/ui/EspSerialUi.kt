@@ -59,6 +59,7 @@ import kotlinx.coroutines.withContext
 fun EspSerialDialog(c: Container, settings: Settings, onDismiss: () -> Unit) {
     val boards by c.esp32Usb.state.collectAsState()
     val terminal by c.espTerminal.state.collectAsState()
+    val wire by c.espFlasher.wire.collectAsState()
     val scope = rememberCoroutineScope()
 
     var selectedId by remember { mutableStateOf<Int?>(null) }
@@ -133,6 +134,9 @@ fun EspSerialDialog(c: Container, settings: Settings, onDismiss: () -> Unit) {
                         } else {
                             board?.let { c.espTerminal.open(it, settings.esp32Baud) }
                         }
+                    }
+                    Chip(text = "RESET", selected = false, accent = Sky.esp32) {
+                        if (terminal.open) c.espTerminal.reset()
                     }
                     Chip(text = "FLASH FIRMWARE", selected = false, accent = Sky.warn) {
                         image = if (board?.chip?.contains("C5", true) == true) EspImage.C5 else EspImage.C3
@@ -296,6 +300,28 @@ fun EspSerialDialog(c: Container, settings: Settings, onDismiss: () -> Unit) {
                             color = Sky.esp32,
                         )
                         Text(step, color = Sky.textDim, fontSize = 9.sp)
+                    }
+                    if (wire.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 140.dp)
+                                .background(Sky.surfaceHigh, RoundedCornerShape(8.dp))
+                                .border(1.dp, Sky.outline, RoundedCornerShape(8.dp))
+                                .padding(6.dp)
+                                .verticalScroll(rememberScrollState()),
+                        ) {
+                            Text("WIRE LOG", color = Sky.textDim, fontSize = 8.sp)
+                            for (line in wire.takeLast(40)) {
+                                Text(
+                                    line,
+                                    color = Sky.textDim,
+                                    fontSize = 8.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                )
+                            }
+                        }
                     }
                     outcome?.let {
                         Spacer(Modifier.height(8.dp))

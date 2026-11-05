@@ -601,7 +601,11 @@ class UsbBoards(private val context: Context) {
                         0x08, // bDataBits = 8
                     )
                     conn.controlTransfer(0x21, 0x20, 0, ifaceId, line, line.size, 200)
-                    conn.controlTransfer(0x21, 0x22, 0x0003, ifaceId, null, 0, 200)
+                    // Both lines released, deliberately. Asserting DTR or RTS pulls the board's
+                    // EN or IO0 line through the bridge's inverter, which holds the chip in
+                    // reset: a console that never prints its boot log and a flash that never
+                    // starts. The flasher pulses the lines itself; everyone else wants them idle.
+                    conn.controlTransfer(0x21, 0x22, 0x0000, ifaceId, null, 0, 200)
                 }
 
                 Transport.CP210X -> {
@@ -676,6 +680,20 @@ class UsbBoards(private val context: Context) {
             if (dtr) value = value or 0x01
             if (rts) value = value or 0x02
             runCatching { connection.controlTransfer(0x21, 0x22, value, iface.id, null, 0, 200) }
+        }
+
+        /**
+         * Pulses EN so the board restarts, then leaves both lines released.
+         *
+         * A console prints its boot log once per reset, so a board that has been running since
+         * before it was plugged in shows an empty panel until it is restarted.
+         */
+        fun pulseReset() {
+            if (closed.get()) return
+            setLines(dtr = false, rts = true)
+            runCatching { Thread.sleep(120) }
+            setLines(dtr = false, rts = false)
+            runCatching { Thread.sleep(150) }
         }
 
         fun close() {

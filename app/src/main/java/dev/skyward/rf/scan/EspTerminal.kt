@@ -64,6 +64,20 @@ class EspTerminal(private val usb: UsbBoards) {
         append("> ${text.trim()}")
     }
 
+    /**
+     * Restarts the board so the console shows its boot log.
+     *
+     * The banner is printed once per reset, so this is the only way to see one on a board that
+     * was already running when the terminal opened.
+     */
+    fun reset(): Boolean {
+        val s = session ?: return false
+        if (!s.isOpen) return false
+        append("--- reset ---")
+        s.pulseReset()
+        return true
+    }
+
     fun close() {
         running = false
         session?.close()
