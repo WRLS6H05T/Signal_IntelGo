@@ -1,8 +1,8 @@
 name: Build APK
 
-# Every push to main builds a signed debug APK and publishes it as the "latest" release,
-# so the phone can download it from GitHub and install it over the previous build without
-# a cable, an SD card or a computer.
+# Every push to main builds a signed debug APK and publishes it as its own release, so the
+# phone can download it from GitHub and install it over the previous build without a cable,
+# an SD card or a computer. The newest release is always the one marked latest.
 on:
   push:
     branches: [ main ]
@@ -13,7 +13,9 @@ permissions:
 
 concurrency:
   group: apk-${{ github.ref }}
-  cancel-in-progress: true
+  # Queue rather than cancel: a run killed between naming the APK and finishing the upload would
+  # leave a release holding a half-written asset.
+  cancel-in-progress: false
 
 jobs:
   apk:
@@ -55,28 +57,60 @@ jobs:
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           "$BT/apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk
 
+      # The asset name carries the build number. Publishing every build under one fixed name -
+      # which is what this used to do - deletes and re-uploads that file on every push, and a
+      # download overlapping a build then resumes against a different object: the phone shows the
+      # last megabyte and hangs on a file it never finishes. A unique name cannot be swapped
+      # underneath a transfer.
       - name: Name the APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk Signal_IntelGo-debug.apk
+        id: apk
+        run: |
+          BUILD=$(git rev-list --count HEAD)
+          NAME="Signal_IntelGo-1.1.$BUILD.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "$NAME"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "version=1.1.$BUILD" >> "$GITHUB_OUTPUT"
+          echo "code=$((BUILD + 1))" >> "$GITHUB_OUTPUT"
+          ls -l "$NAME"
 
+      # Actions zips whatever it is handed, so this copy is an archive, not something to tap on a
+      # phone. The release asset below is the installable one.
       - name: Upload the artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Signal_IntelGo-debug
-          path: Signal_IntelGo-debug.apk
+          name: Signal_IntelGo-${{ steps.apk.outputs.version }}
+          path: ${{ steps.apk.outputs.name }}
           if-no-files-found: error
 
-      # A release asset is a plain public download: no GitHub login on the phone, and the
-      # URL below never changes, so a bookmark or a home-screen shortcut keeps working.
-      - name: Publish to the latest release
+      # Each build gets its own release and its own asset name, so nothing is written over a file
+      # someone may be downloading. The releases page marks this one latest.
+      - name: Publish this build
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: latest
-          name: Latest build
+          tag_name: build-${{ github.run_number }}
+          name: Signal_IntelGo ${{ steps.apk.outputs.version }}
           body: |
-            Built automatically from ${{ github.sha }} on branch ${{ github.ref_name }}.
+            `${{ steps.apk.outputs.name }}` - version ${{ steps.apk.outputs.version }},
+            versionCode ${{ steps.apk.outputs.code }}.
 
-            Download `Signal_IntelGo-debug.apk` below and open it on the phone to update in
-            place. It is signed with the same key as every earlier build, so Android offers
-            the update rather than refusing it as a different app.
-          files: Signal_IntelGo-debug.apk
+            Built from ${{ github.sha }} on branch ${{ github.ref_name }}. Download the APK
+            below and open it on the phone: Android installs it over the running app, because it
+            is signed with the same key as every earlier build.
+          files: ${{ steps.apk.outputs.name }}
           make_latest: true
+          # A duplicate name must fail loudly rather than be swapped under a downloader.
+          overwrite_files: false
+          fail_on_unmatched_files: true
+
+      # Only the newest handful are kept: a release is a download, not an archive, and the commit
+      # history already holds every build.
+      - name: Prune old builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --limit 100 --json tagName,createdAt \
+            --jq 'sort_by(.createdAt) | reverse | .[5:] | .[].tagName' \
+            | grep '^build-' \
+            | while read -r tag; do
+                gh release delete "$tag" --yes --cleanup-tag
+              done || true

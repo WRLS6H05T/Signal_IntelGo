@@ -2,7 +2,7 @@
 
 # Signal_IntelGo
 
-**Install or update:** [download the latest APK](https://github.com/WRLS6H05T/Signal_IntelGo/releases/latest/download/Signal_IntelGo-debug.apk) - that one link always serves the newest build. It is signed with the same key as every earlier build, so Android installs it over the old one instead of demanding an uninstall.
+**Install or update:** [download the latest APK](https://github.com/WRLS6H05T/Signal_IntelGo/releases/latest) - that page always lists the newest build, whose asset is named for its version. It is signed with the same key as every earlier build, so Android installs it over the old one instead of demanding an uninstall.
 
  under [Releases](https://github.com/WRLS6H05T/Signal_IntelGo/releases) as the *Assets* of the **Latest build**, not in the file tree: it is rebuilt by CI on every push. Setup -> About shows the installed build (for example `Signal_IntelGo 1.1.11`), and the release notes name the commit it was built from, so the two can be compared.
 
@@ -288,12 +288,20 @@ first real handset fix takes over again, and the behaviour is a switch.
 
 ## Installing and updating without a cable or an SD card
 
+Each build is published as its own release with its own file name - `Signal_IntelGo-1.1.57.apk`,
+then `Signal_IntelGo-1.1.58.apk`, and so on. That is deliberate: one fixed file name per build
+means the asset is deleted and re-uploaded on every push, and a download that overlaps a build
+then resumes against a file that no longer exists, which is what leaves the phone stuck on the
+last megabyte of a download it can never open. Take the APK from the newest release on the page
+and the transfer always matches the file. A download that is already stuck will not recover:
+cancel it in the browser downloads list before starting the new one.
+
 Every push to `main` builds the app on GitHub Actions and publishes it as the latest release:
 
-    https://github.com/WRLS6H05T/Signal_IntelGo/releases/latest/download/Signal_IntelGo-debug.apk
+    https://github.com/WRLS6H05T/Signal_IntelGo/releases/latest
 
 Open that link on the phone, download it and tap the file: Android installs it over the running
-app. The URL never changes, so it can be bookmarked or kept on the home screen, and the release
+app. The page link never changes, so it can be bookmarked or kept on the home screen, and the
 is replaced automatically on each push.
 
 Builds are signed with the key committed in `keystore/signal-intelgo.jks` (settings in
