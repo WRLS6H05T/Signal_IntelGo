@@ -9,7 +9,7 @@ plugins {
 /**
  * One signing key for every build, kept in the repository on purpose.
  *
- * A desktop build and CI then produce APKs with the same certificate, so each new build
+ * CI then produces APKs with the same certificate as a local build, so each new build
  * installs *over* the previous one; with the automatic per-machine debug key, Android refuses
  * it as coming from a different app and the only way out is an uninstall.
  */
@@ -117,8 +117,8 @@ android {
 }
 
 dependencies {
-    // The peer wire format, its chunking and the ESP32 advertisement codec are compiled by the
-    // desktop host too, so both ends cannot drift apart about what a byte means.
+    // The peer wire format, the drive recorder and the propagation maths stay free of Android,
+    // so they compile on a build machine and their tests need no device.
     implementation(project(":shared"))
 
     implementation("androidx.core:core-ktx:1.13.1")

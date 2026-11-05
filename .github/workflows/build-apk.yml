@@ -66,7 +66,7 @@ jobs:
           if-no-files-found: error
 
       # A release asset is a plain public download: no GitHub login on the phone, and the
-      # URL below never changes, so a bookmark or a desktop shortcut keeps working.
+      # URL below never changes, so a bookmark or a home-screen shortcut keeps working.
       - name: Publish to the latest release
         uses: softprops/action-gh-release@v2
         with:
@@ -80,53 +80,3 @@ jobs:
             the update rather than refusing it as a different app.
           files: Signal_IntelGo-debug.apk
           make_latest: true
-
-  # The desktop host is a second download on the same release. It runs after the APK job so the
-  # two do not race to create the "latest" release; the URL is as permanent as the APK's.
-  desktop:
-    runs-on: windows-latest
-    needs: apk
-    steps:
-      - name: Check out
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Desktop tests
-        run: ./gradlew :desktop:test --console=plain
-
-      # A jpackage image, not an installer: it needs no administrator rights and carries its own
-      # Java runtime, so the download is a folder that runs rather than something to install.
-      - name: Build the desktop image
-        run: ./gradlew :desktop:createDistributable --console=plain
-
-      - name: Check the image carries the app and its BLE bridge
-        shell: pwsh
-        run: |
-          $image = "desktop/build/compose/binaries/main/app/Signal_IntelGo"
-          Get-ChildItem $image | Select-Object Name
-          if (-not (Test-Path "$image/Signal_IntelGo.exe")) { throw "no launcher in the image" }
-
-      - name: Zip the image
-        shell: pwsh
-        run: |
-          Compress-Archive -Path "desktop/build/compose/binaries/main/app/Signal_IntelGo" `
-            -DestinationPath "Signal_IntelGo-desktop.zip" -CompressionLevel Optimal
-          "{0:N1} MB" -f ((Get-Item "Signal_IntelGo-desktop.zip").Length / 1MB)
-
-      - name: Upload the artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Signal_IntelGo-desktop
-          path: Signal_IntelGo-desktop.zip
-          if-no-files-found: error
-
-      - name: Publish to the latest release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest
-          files: Signal_IntelGo-desktop.zip

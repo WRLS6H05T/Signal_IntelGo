@@ -23,4 +23,3 @@ dependencyResolutionManagement {
 rootProject.name = "Signal_IntelGo"
 include(":app")
 include(":shared")
-include(":desktop")

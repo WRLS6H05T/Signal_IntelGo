@@ -16,9 +16,8 @@ import java.util.Locale
  * Records a drive: every GPS fix is paired with whatever the radios heard at it and stored with
  * a 0..100 signal score. The score is what the map turns into the 5-colour red->green path.
  *
- * The radios are handed in rather than read from a scanner, because the two platforms hear the
- * world in completely different ways: the phone's own Wi-Fi and BLE chips, and the desktop,
- * which has neither and hears through the devices it hosts.
+ * The radios are handed in rather than read from a scanner, so the recorder has no opinion about
+ * how the world was heard: local chips, a peer's table or a board's sweep arrive the same way.
  */
 class WardriveEngine(
     private val store: FileStore,

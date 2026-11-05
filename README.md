@@ -4,9 +4,7 @@
 
 **Install or update:** [download the latest APK](https://github.com/WRLS6H05T/Signal_IntelGo/releases/latest/download/Signal_IntelGo-debug.apk) - that one link always serves the newest build. It is signed with the same key as every earlier build, so Android installs it over the old one instead of demanding an uninstall.
 
-**Desktop host (Windows):** [download the latest build](https://github.com/WRLS6H05T/Signal_IntelGo/releases/latest/download/Signal_IntelGo-desktop.zip) - unzip it anywhere and run `Signal_IntelGo.exe`. There is nothing to install and no administrator rights: the folder carries its own Java runtime. Nothing else is needed: no Python, no Bluetooth driver, no helper - the desk links over Wi-Fi or a USB cable.
-
-The APK lives under [Releases](https://github.com/WRLS6H05T/Signal_IntelGo/releases) as the *Assets* of the **Latest build**, not in the file tree: it is rebuilt by CI on every push. Setup -> About shows the installed build (for example `Signal_IntelGo 1.1.11`), and the release notes name the commit it was built from, so the two can be compared.
+ under [Releases](https://github.com/WRLS6H05T/Signal_IntelGo/releases) as the *Assets* of the **Latest build**, not in the file tree: it is rebuilt by CI on every push. Setup -> About shows the installed build (for example `Signal_IntelGo 1.1.11`), and the release notes name the commit it was built from, so the two can be compared.
 
 A native Android app for live airspace + RF awareness, built around a **Wi-Fi / BLE war-driving recorder**.
 
@@ -300,7 +298,7 @@ is replaced automatically on each push.
 
 Builds are signed with the key committed in `keystore/signal-intelgo.jks` (settings in
 `keystore.properties`) instead of a machine-specific debug key, which is what lets a GitHub
-build replace a desktop build and vice versa. The first build signed this way has to replace
+build replace whatever is already installed. The first build signed this way has to replace
 the old debug-signed install once - uninstall the app, install this APK, and every update is
 in place from then on. The key is committed deliberately: this is a personal side-load app, and
 a stable certificate is the only way in-place updates work. Anyone with access to the
@@ -540,84 +538,3 @@ pulse train or the classic D0/R1 sequence, whichever answers. The image is writt
 so a bare board comes up running it.**Not verified:** there is no C3/C5 on this machine, so the reset sequences, the flash itself and the firmware's radio behaviour have not been exercised on hardware. What is checked is the byte layer - SLIP framing, command headers and checksums, block splitting and the erase size all have JVM tests - and both firmware images compile.
 
 ---
-
-## Desktop host
-
-`:desktop` is the whole app on a PC: the same globe, the same map, the same drive recorder and
-logs, and the seat the phone calls **HOST**. The folded menu in the bottom-right corner is the
-phone's, and it carries the same tabs - **Map**, **Drive**, **Log**, **Setup** and **Host**.
-
-Map is the sphere the phone draws: one filled polygon per coastline ring, its back-side vertices
-pushed outside the disc and a circular clip over the whole ring, which is the only shape that does
-not close across the middle of a continent. Drag turns it, the wheel zooms, and past about zoom
-4.2 it becomes the street map - OpenStreetMap tiles from a disk cache, the satellite shell over
-them, and a recorded drive drawn on either view.
-
-Drive records a drive from the devices the desk is hosting, because a PC has no Wi-Fi scanner and
-no GPS of its own: the position is the fix of whichever linked device reports one, and the
-networks and advertisers are the merged table those devices fill. It writes the same
-`session_*.json` files the phone writes, and the track is coloured on the same five-bin
-red-to-green scale, so a drive reads the way it does in the hand.
-
-Log is those drives - show one on the map, export CSV or GeoJSON, delete it - plus the captured
-entities and the placed signals. Exports go to `~/signintelgo/exports`.
-
-Setup is every setting the desk honours (units, globe spin), the BLE bridge it is using, and the
-sensor boards: a serial console, and the bundled C3/C5 firmware flashed over the same ROM
-bootloader protocol the phone speaks - whole-chip erase, the same 1 KiB blocks, the same frames.
-
-Host is the link. It scans BLE, connects to every phone advertising the two-device service as the
-GATT central, picks up every sensor board from its advertisement, and pushes one settings blob to
-all of them - basemap, weak-dot filter, aircraft switch, spin speed and units decided in one place
-instead of on each device.
-
-Download it from [Releases](https://github.com/WRLS6H05T/Signal_IntelGo/releases/latest/download/Signal_IntelGo-desktop.zip),
-or build it yourself:
-
-```bash
-./gradlew :desktop:run                        # the window, from the source tree
-./gradlew :desktop:run --args="--selftest"    # no window: adapter, coastlines and catalogue
-./gradlew :desktop:createDistributable        # the downloadable folder, in desktop/build/compose
-```
-
-The published zip is a `jpackage` image, not an installer: unzip it anywhere and run
-`Signal_IntelGo.exe`. It needs no administrator rights and carries its own Java runtime, so
-nothing has to be installed first: no Python, no Bluetooth driver, no helper.
-
-### The link: Wi-Fi, a USB cable, or both
-
-There is no radio driver and no helper process. The desk listens on TCP 47800, and a phone finds
-it the way the phone's own link already finds a peer: it broadcasts `SKYWARD?` on UDP 47801, every
-desk answers `SKYWARD!<port>`, and the phone dials whoever answered. Nothing is typed on either
-end, and a desk on another network simply never answers. A phone on USB tethering is the same
-carrier - it is just a client whose address belongs to the cable's network.
-
-A device on a USB cable is read on its own COM port at 115200 (jSerialComm, no vendor driver
-beyond the one Windows installs). Both carriers move the same bytes: `PeerFrames` chunks, one
-base64 line each. Over Bluetooth that framing existed to fit a 20-byte GATT write; over a socket
-or a cable it is simply a record separator, and keeping it identical is what lets one assembler
-on each end serve every carrier.
-
-The phone side is `PeerLan`, which builds its messages from the same `BlePeer` providers and
-replays everything it receives through the same callbacks, so a snapshot is produced in exactly
-one place whether it leaves over Bluetooth, Wi-Fi or a cable.
-
-**Not verified:** no phone was available to dial the desk, and no board was on a cable. The frame
-path is covered by a loopback test that speaks the wire format to the real `LanBridge`, and the
-serial reader is exercised only by compilation.
-
-### One protocol, not two
-
-`:shared` holds the peer wire format (`PeerProtocol`), its chunking (`PeerFrames`), drive
-packaging (`PeerLogs`), the drive recorder and signal log (`WardriveEngine`, `SignalLog`), the settings store, the ESP32 advertisement codec and the bootloader framing (`EspSlip`, `EspBootloader`), the TLE catalogue with SGP4 propagation
-(`SatTracker`, `OrbitMath`) and the core value types. The phone and the desktop compile those same
-files, so the globe on the desk puts a satellite in the same place as the globe in the hand, and
-the coastline is one bundled asset read by both.
-
-**Not verified:** there is no BLE hardware on this machine, so the radio link, the GATT connection
-to a phone and a real board's advertisement have not been exercised against a device. The
-advertisement decode, the chunking and the framing are covered by JVM tests, and `--selftest`
-reports whether the adapter answered, whether the coastlines parsed and whether the catalogue
-produced positions. The flasher has never been run against a board either: the frames and the
-block arithmetic are unit tested, but the erase, the write and the reboot are untested, and the
-console has not been opened on real hardware.
