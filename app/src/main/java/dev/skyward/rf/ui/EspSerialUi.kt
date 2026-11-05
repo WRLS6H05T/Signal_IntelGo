@@ -144,10 +144,17 @@ fun EspSerialDialog(c: Container, settings: Settings, onDismiss: () -> Unit) {
                         showFlash = true
                     }
                     Text(
-                        if (terminal.open) "open" else "closed",
+                        if (terminal.open) "open \u00b7 ${terminal.bytes} B" else "closed",
                         color = if (terminal.open) Sky.esp32 else Sky.textDim,
                         fontSize = 9.sp,
                     )
+                    if (terminal.ports > 1) {
+                        Chip(
+                            text = "PORT ${terminal.portIndex + 1}/${terminal.ports}",
+                            selected = false,
+                            accent = Sky.esp32,
+                        ) { c.espTerminal.nextPort() }
+                    }
                 }
 
                 terminal.error?.let {

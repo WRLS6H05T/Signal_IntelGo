@@ -1,5 +1,6 @@
 package dev.skyward.rf.scan
 
+import android.os.SystemClock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -13,6 +14,11 @@ import kotlinx.coroutines.flow.StateFlow
  *
  * Nothing here interprets the lines: the firmware's own `help`, `status`, `gpspin` and `gpsbaud`
  * are the interface, so the terminal stays useful for a board running anything at all.
+ *
+ * Two things about real hardware are handled here because they read as a dead port otherwise: a
+ * boot log that ends without a newline (flushed after a pause), and a chip that resets itself off
+ * the bus and returns under a new device id (reopened, which is what makes the RESET button
+ * useful - the banner is printed by the chip that comes back).
  */
 class EspTerminal(private val usb: UsbBoards) {
 
@@ -22,6 +28,11 @@ class EspTerminal(private val usb: UsbBoards) {
         val open: Boolean = false,
         val lines: List<String> = emptyList(),
         val error: String? = null,
+        /** Bytes received since connecting. Zero means nothing is arriving at all. */
+        val bytes: Int = 0,
+        /** Interfaces on the device that could be a console, and which one is being read. */
+        val ports: Int = 1,
+        val portIndex: Int = 0,
     )
 
     private val _state = MutableStateFlow(State())
@@ -34,22 +45,56 @@ class EspTerminal(private val usb: UsbBoards) {
 
     private var reader: Thread? = null
 
+    private var board: UsbBoards.Board? = null
+
+    private var baud = 115_200
+
+    private var portIndex = 0
+
+    private var received = 0
+
     /** Takes the board's port at [baud]. False when another session already holds it. */
-    fun open(board: UsbBoards.Board, baud: Int): Boolean {
+    fun open(board: UsbBoards.Board, baud: Int) {
         close()
-        val opened = usb.openSession(board.deviceId, baud)
-        if (opened == null) {
-            _state.value = _state.value.copy(open = false, error = "The port is busy; unplug the board and try again")
-            return false
+        this.baud = baud
+        portIndex = 0
+        if (!connect(board, 0)) {
+            _state.value = State(open = false, error = "The port is busy; unplug the board and try again")
         }
+    }
+
+    /** Reads the next candidate interface on the device, for a device that has more than one. */
+    fun nextPort() {
+        val current = board ?: return
+        val count = usb.portCount(current.deviceId)
+        if (count < 2) return
+        val next = (portIndex + 1) % count
+        close()
+        if (!connect(current, next)) {
+            _state.value = State(open = false, error = "The port is busy; unplug the board and try again")
+        }
+    }
+
+    private fun connect(target: UsbBoards.Board, index: Int): Boolean {
+        val count = usb.portCount(target.deviceId).coerceAtLeast(1)
+        val opened = usb.openSession(target.deviceId, baud, index.coerceIn(0, count - 1)) ?: return false
         session = opened
+        board = target
+        portIndex = index.coerceIn(0, count - 1)
         running = true
-        _state.value = State(port = board.label, open = true, lines = listOf("--- ${board.label} at $baud ---"))
+        received = 0
+        _state.value = State(
+            port = target.label,
+            open = true,
+            lines = listOf("--- ${target.label} at $baud, interface ${portIndex + 1} of $count ---"),
+            ports = count,
+            portIndex = portIndex,
+        )
         // A console only speaks when spoken to. The firmware prints its banner at boot, so a
         // board that has been running for an hour shows an empty panel until it gets a line
         // ending; this hands it one, and a console that prompts reprints its prompt.
         opened.write("\r\n".toByteArray())
-        reader = Thread({ readLoop(opened) }, "esp-terminal").apply {
+        reader = Thread({ readLoop(opened, target) }, "esp-terminal").apply {
             isDaemon = true
             start()
         }
@@ -68,7 +113,8 @@ class EspTerminal(private val usb: UsbBoards) {
      * Restarts the board so the console shows its boot log.
      *
      * The banner is printed once per reset, so this is the only way to see one on a board that
-     * was already running when the terminal opened.
+     * was already running when the terminal opened. On a chip with its own USB peripheral the
+     * reset also takes it off the bus, and [readLoop] picks the new device back up.
      */
     fun reset(): Boolean {
         val s = session ?: return false
@@ -86,10 +132,44 @@ class EspTerminal(private val usb: UsbBoards) {
         _state.value = _state.value.copy(open = false, port = "")
     }
 
-    private fun readLoop(s: UsbBoards.SerialSession) {
+    private fun readLoop(first: UsbBoards.SerialSession, firstBoard: UsbBoards.Board) {
+        var s = first
+        var target = firstBoard
         val text = StringBuilder()
-        while (running && s.isOpen) {
-            val bytes = s.read(256, 200) ?: continue
+        var lastByte = SystemClock.elapsedRealtime()
+        var empty = 0
+        while (running) {
+            if (!s.isOpen) break
+            val bytes = s.read(256, 200)
+            if (bytes == null) {
+                empty++
+                // A chip on its own USB peripheral leaves the bus when it resets and comes back
+                // as a new device id: the port this loop holds is gone and nothing will ever
+                // arrive on it again, however long it waits.
+                if (empty >= 2 && !usb.isAttached(target.deviceId)) {
+                    val next = reopen(target)
+                    if (next == null) {
+                        append("--- the board left the cable ---")
+                        return
+                    }
+                    append("--- the board reset and came back; reading it again ---")
+                    s = next.first
+                    target = next.second
+                    empty = 0
+                    continue
+                }
+                // Text without a line ending still has to show up, or a boot banner that ends in
+                // a prompt reads as a dead port.
+                if (text.isNotEmpty() && SystemClock.elapsedRealtime() - lastByte > 250) {
+                    append(text.toString().trimEnd())
+                    text.setLength(0)
+                }
+                continue
+            }
+            empty = 0
+            lastByte = SystemClock.elapsedRealtime()
+            received += bytes.size
+            _state.value = _state.value.copy(bytes = received)
             for (b in bytes) {
                 val c = b.toInt() and 0xFF
                 when {
@@ -102,6 +182,28 @@ class EspTerminal(private val usb: UsbBoards) {
                 }
             }
         }
+    }
+
+    /** Waits for the device that replaced this one and opens it on the same interface. */
+    private fun reopen(board: UsbBoards.Board): Pair<UsbBoards.SerialSession, UsbBoards.Board>? {
+        session?.close()
+        session = null
+        val deadline = SystemClock.elapsedRealtime() + 5_000
+        while (running && SystemClock.elapsedRealtime() < deadline) {
+            val next = usb.replacementFor(board.vendorId, board.productId, board.deviceId)
+            if (next != null) {
+                val count = usb.portCount(next.deviceId).coerceAtLeast(1)
+                val opened = usb.openSession(next.deviceId, baud, portIndex.coerceIn(0, count - 1))
+                if (opened != null) {
+                    session = opened
+                    this.board = next
+                    _state.value = _state.value.copy(port = next.label, ports = count, open = true)
+                    return opened to next
+                }
+            }
+            Thread.sleep(150)
+        }
+        return null
     }
 
     private fun append(line: String) {

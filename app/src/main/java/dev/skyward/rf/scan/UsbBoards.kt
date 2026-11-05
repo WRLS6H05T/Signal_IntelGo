@@ -710,7 +710,7 @@ class UsbBoards(private val context: Context) {
      * Returns null when the board is gone, the interface is busy, or a poll is still inside its
      * read window - a poll can hold the port for six seconds, so the wait has to outlast that.
      */
-    fun openSession(deviceId: Int, baudRate: Int = baud): SerialSession? {
+    fun openSession(deviceId: Int, baudRate: Int = baud, portIndex: Int = 0): SerialSession? {
         val device = attached[deviceId] ?: return null
         val mgr = manager ?: return null
         if (!mgr.hasPermission(device)) return null
@@ -723,7 +723,7 @@ class UsbBoards(private val context: Context) {
         }
         var session: SerialSession? = null
         try {
-            val port = findPort(device) ?: return null
+            val port = findPorts(device).getOrNull(portIndex) ?: return null
             val conn = runCatching { mgr.openDevice(device) }.getOrNull() ?: return null
             if (!conn.claimInterface(port.first, true)) {
                 runCatching { conn.close() }
@@ -751,8 +751,17 @@ class UsbBoards(private val context: Context) {
 
     // ---------------- descriptors ----------------
 
-    private fun findPort(device: UsbDevice): Triple<UsbInterface, UsbEndpoint, UsbEndpoint?>? {
-        var fallback: Triple<UsbInterface, UsbEndpoint, UsbEndpoint?>? = null
+    /**
+     * Every interface that could carry the console, best first.
+     *
+     * One device can offer more than one. A writable interface wins - GhostESP answers nothing
+     * until it is spoken to - and then the widest packets, because a data interface has both
+     * directions while a stub control interface often has neither. The list matters: a port that
+     * never sends a byte is abandoned in favour of the next one rather than reported as a board
+     * that will not answer.
+     */
+    private fun findPorts(device: UsbDevice): List<Triple<UsbInterface, UsbEndpoint, UsbEndpoint?>> {
+        val candidates = ArrayList<Triple<UsbInterface, UsbEndpoint, UsbEndpoint?>>()
         for (i in 0 until device.interfaceCount) {
             val iface = runCatching { device.getInterface(i) }.getOrNull() ?: continue
             var inEp: UsbEndpoint? = null
@@ -767,14 +776,38 @@ class UsbBoards(private val context: Context) {
                 }
             }
             val input = inEp ?: continue
-            val candidate = Triple(iface, input, outEp)
-            // A writable interface wins: GhostESP answers nothing until it is spoken to, so a
-            // read-only pick would leave it unidentified.
-            if (outEp != null) return candidate
-            if (fallback == null) fallback = candidate
+            candidates.add(Triple(iface, input, outEp))
         }
-        return fallback
+        return candidates.sortedWith(
+            compareByDescending<Triple<UsbInterface, UsbEndpoint, UsbEndpoint?>> { it.third != null }
+                .thenByDescending { it.second.maxPacketSize },
+        )
     }
+
+    private fun findPort(device: UsbDevice): Triple<UsbInterface, UsbEndpoint, UsbEndpoint?>? =
+        findPorts(device).firstOrNull()
+
+    /** How many interfaces the terminal or the flasher could try on this board. */
+    fun portCount(deviceId: Int): Int {
+        val device = attached[deviceId] ?: return 1
+        return findPorts(device).size.coerceAtLeast(1)
+    }
+
+    /** True while the device is still on the cable under this id. */
+    fun isAttached(deviceId: Int): Boolean = attached.containsKey(deviceId)
+
+    /**
+     * The device that has replaced [oldId].
+     *
+     * A chip with its own USB peripheral drops off the bus when EN pulses and enumerates again
+     * with a new device id and the same vendor and product ids. Without this the app keeps a
+     * session on a port that will never carry another byte, which is exactly what a SYNC that
+     * times out with nothing received looks like.
+     */
+    fun replacementFor(vendorId: Int, productId: Int, oldId: Int): Board? =
+        devices.values.firstOrNull {
+            it.deviceId != oldId && it.vendorId == vendorId && it.productId == productId
+        }
 
     fun transportOf(device: UsbDevice): Transport = when (device.vendorId) {
         VID_ESPRESSIF -> Transport.NATIVE_USB

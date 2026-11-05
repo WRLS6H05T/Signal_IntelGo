@@ -47,10 +47,14 @@ data class FlashDetails(
  * image's own span as its erase size, a FLASH_DATA per 1 KiB block, FLASH_END. No stub is uploaded, so a board with nothing but its
  * ROM - a fresh C3 or C5 mini - is enough.
  *
- * The path is unverified without hardware. What is checked here is the part that can be: the
- * frames, checksums, block arithmetic and image manifest all have JVM tests. What happens on the
- * wire is recorded in [wire], so a board that misbehaves leaves something to read rather than
- * another report of a hang.
+ * The one thing this cannot do naively is reset a chip that owns its USB peripheral: such a chip
+ * leaves the bus when EN pulses and returns as a *different* device id. Every read on the old
+ * port then returns nothing for ever, which looks exactly like a board that never answers. So a
+ * lost device is treated as a re-enumeration, reopened on the new id, and retried, and a port
+ * that never sends a single byte is abandoned in favour of the next candidate interface.
+ *
+ * What happens on the wire is recorded in [wire], so a board that misbehaves leaves something to
+ * read rather than another report of a hang.
  */
 class EspFlasher(private val context: Context, private val usb: UsbBoards) {
 
@@ -67,11 +71,26 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
     private val _wire = MutableStateFlow<List<String>>(emptyList())
     val wire: StateFlow<List<String>> = _wire
 
+    /**
+     * Bytes received since this attempt began.
+     *
+     * The difference between a board that refuses a command and a port that is not connected to
+     * the chip at all is this number: zero after a reset means the device re-enumerated and the
+     * old port is a dead end, whatever the writes say.
+     */
+    private var received = 0
+
     private fun note(line: String) {
         _wire.value = (_wire.value + line).takeLast(WIRE_LINES)
     }
 
     private fun wireTail(): String = _wire.value.takeLast(40).joinToString("\n")
+
+    /** The device went away mid-session: a chip that resets re-enumerates. */
+    private class BoardLost : Exception("the board left the bus and came back as a new device")
+
+    /** The port never sent a single byte: wrong interface, or nothing is listening on it. */
+    private class PortSilent(message: String) : Exception(message)
 
     /** Reads `assets/firmware/firmware.json`; null when the build has no images bundled. */
     fun firmware(image: EspImage): EspFirmware? = runCatching {
@@ -103,6 +122,10 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
     /**
      * Flashes [image] to [board]. [onStep] gets a human sentence and 0..1 progress; the call is
      * blocking, so it belongs on an IO dispatcher.
+     *
+     * The outer loop is the part that makes a self-powered USB board work: an attempt either
+     * finishes, fails for a reason worth reporting, or loses the device to a reset - and only the
+     * last two are retried, on the new id or the next interface.
      */
     fun flash(board: UsbBoards.Board, image: EspImage, onStep: (String, Float) -> Unit): Result<String> {
         val bytes = runCatching { context.assets.open(image.asset).use { it.readBytes() } }.getOrNull()
@@ -113,126 +136,187 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
 
         _wire.value = emptyList()
         note("${image.label} ${bytes.size} B on ${board.label} (${board.transport.label})")
-        val session = usb.openSession(board.deviceId, BAUD)
-            ?: return Result.failure(IllegalStateException("The port is busy; unplug the board and try again"))
-
-        try {
-            onStep("Entering the bootloader", 0.02f)
-            if (!enterBootloader(session, board)) {
-                CrashLog.recordQuiet(context, "esp-flash-sync", IllegalStateException(wireTail()))
-                return Result.failure(
-                    IllegalStateException(
-                        "The board never answered a SYNC, after a reset on every line shape. Hold BOOT, " +
-                            "tap RESET, release BOOT, then flash again.",
-                    ),
-                )
+        var target = board
+        var index = 0
+        var relinks = 0
+        var silent = "The board never sent a single byte, on any interface of the device."
+        while (index < usb.portCount(target.deviceId).coerceAtLeast(1)) {
+            val session = usb.openSession(target.deviceId, BAUD, index)
+            if (session == null) {
+                note("interface ${index + 1} could not be opened")
+                index++
+                continue
             }
-
-            val blocks = EspBootloader.blocks(bytes)
-            val eraseBytes = EspBootloader.eraseSize(bytes.size)
-            val label = "Erasing ${eraseBytes / 1024} KiB"
-            onStep(label, 0.04f)
-
-            // esptool's own shape: one FLASH_BEGIN that asks for the image's span and answers only
-            // once the erase is done. The budget is 40 s per megabyte with a floor, and every read
-            // inside it waits on the whole remaining time rather than timing out and cancelling -
-            // a cancelled USB transfer is how an answer that arrived gets thrown away.
-            val eraseTimeoutMs = (bytes.size / 1_000_000.0 * 40_000.0).toLong()
-                .coerceAtLeast(ERASE_MIN_TIMEOUT_MS)
-            val beginExtended = EspBootloader.flashBeginPayload(
-                imageSize = bytes.size,
-                blocks = blocks.size,
-                eraseBytes = eraseBytes,
-                extended = true,
-            )
-            val beginLegacy = EspBootloader.flashBeginPayload(
-                imageSize = bytes.size,
-                blocks = blocks.size,
-                eraseBytes = eraseBytes,
-                extended = false,
-            )
-            val begin = ticking(label, onStep) {
-                command(session, EspBootloader.OP_FLASH_BEGIN, beginExtended, eraseTimeoutMs)
-                    ?: run {
-                        // A fresh SYNC, not a resent command: a chip that is still erasing ignores
-                        // both, but a chip that lost its framing is put back in step by the SYNC.
-                        note("erase unanswered after ${eraseTimeoutMs / 1000}s; re-syncing")
-                        sync(session, "before the second erase attempt")
-                        command(session, EspBootloader.OP_FLASH_BEGIN, beginExtended, eraseTimeoutMs)
-                    }
-                    ?: run {
-                        sync(session, "before the four-word erase attempt")
-                        command(session, EspBootloader.OP_FLASH_BEGIN, beginLegacy, eraseTimeoutMs)
-                    }
+            var lost = false
+            try {
+                return Result.success(attempt(target, session, image, bytes, onStep))
+            } catch (e: BoardLost) {
+                lost = true
+            } catch (e: PortSilent) {
+                silent = e.message ?: silent
+                note("interface ${index + 1} never sent a byte")
+            } catch (t: Throwable) {
+                CrashLog.recordQuiet(context, "esp-flash", t)
+                return Result.failure(t)
+            } finally {
+                session.close()
             }
-
-            if (begin == null || begin.status != 0) {
-                note("whole-span erase failed (status ${begin?.status}); erasing in chunks")
-                val chunked = ticking(label, onStep) { eraseInChunks(session, eraseBytes, onStep) }
-                if (!chunked) {
-                    CrashLog.recordQuiet(context, "esp-flash-erase", IllegalStateException(wireTail()))
+            if (lost) {
+                if (relinks >= MAX_RELINKS) {
                     return Result.failure(
                         IllegalStateException(
-                            "The board never answered the erase, in one span or in chunks. Unplug it, hold " +
-                                "BOOT, plug it back in, then flash again - the wire log in this dialog says " +
-                                "what came back.",
+                            "The board kept dropping off the cable: it resets itself away from the USB port " +
+                                "it was opened on. Unplug it, hold BOOT, plug it back in, then flash again.",
                         ),
                     )
                 }
-                // The flash is erased, so the write's own FLASH_BEGIN must not ask for another:
-                // this one is answered at once and cannot look like a hang.
-                val empty = EspBootloader.flashBeginPayload(
-                    imageSize = bytes.size,
-                    blocks = blocks.size,
-                    eraseBytes = 0,
+                relinks++
+                note("the board left the bus; waiting for it to come back")
+                target = reopen(target) ?: return Result.failure(
+                    IllegalStateException(
+                        "The board reset and never came back. Unplug it, plug it in again, then flash.",
+                    ),
                 )
-                val opened = command(session, EspBootloader.OP_FLASH_BEGIN, empty, BEGIN_TIMEOUT_MS)
-                    ?: run {
-                        sync(session, "before the write")
-                        command(session, EspBootloader.OP_FLASH_BEGIN, empty, BEGIN_TIMEOUT_MS)
-                    }
-                if (opened == null || opened.status != 0) {
-                    CrashLog.recordQuiet(context, "esp-flash-begin", IllegalStateException(wireTail()))
-                    return Result.failure(IllegalStateException("The board stopped answering after the erase."))
-                }
+                note("the board is back as ${target.label}; retrying on interface ${index + 1}")
+                // Same interface index, new device: the reset that caused this already ran.
+                continue
             }
-
-            blocks.forEachIndexed { index, block ->
-                val payload = EspBootloader.flashDataPayload(block.size, index, block)
-                var wrote = false
-                // One retry: a USB hiccup mid-image is worth repeating the block for rather
-                // than failing an erase that has already happened.
-                repeat(2) {
-                    if (wrote) return@repeat
-                    val reply = command(session, EspBootloader.OP_FLASH_DATA, payload, BLOCK_TIMEOUT_MS)
-                    wrote = reply != null && reply.status == 0
-                }
-                if (!wrote) {
-                    CrashLog.recordQuiet(context, "esp-flash-block", IllegalStateException(wireTail()))
-                    return Result.failure(IllegalStateException("The board rejected block $index of ${blocks.size}"))
-                }
-                val done = (index + 1).toFloat() / blocks.size
-                onStep("Writing block ${index + 1} of ${blocks.size}", 0.08f + 0.88f * done)
-            }
-
-            onStep("Restarting", 0.98f)
-            // The ROM does not answer FLASH_END, so this is sent and the reboot is allowed to
-            // happen rather than waited on.
-            session.write(
-                EspSlip.encode(
-                    EspBootloader.command(EspBootloader.OP_FLASH_END, EspBootloader.flashEndPayload(true)),
-                ),
-            )
-            note("FLASH_END sent; the board reboots into the new image")
-            Thread.sleep(900)
-            onStep("Done", 1f)
-            return Result.success("${image.label} v${firmware(image)?.version ?: "?"} written, ${bytes.size / 1024} KiB")
-        } catch (t: Throwable) {
-            CrashLog.recordQuiet(context, "esp-flash", t)
-            return Result.failure(t)
-        } finally {
-            session.close()
+            index++
         }
+        CrashLog.recordQuiet(context, "esp-flash-sync", IllegalStateException(wireTail()))
+        return Result.failure(IllegalStateException(silent))
+    }
+
+    /** Waits for the reset device to re-appear, up to [REATTACH_MS]. */
+    private fun reopen(board: UsbBoards.Board): UsbBoards.Board? {
+        val deadline = SystemClock.elapsedRealtime() + REATTACH_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val next = usb.replacementFor(board.vendorId, board.productId, board.deviceId)
+            if (next != null) return next
+            Thread.sleep(120)
+        }
+        return null
+    }
+
+    /** One full flash over one open port. Throws [BoardLost] or [PortSilent] for the outer loop. */
+    private fun attempt(
+        board: UsbBoards.Board,
+        session: UsbBoards.SerialSession,
+        image: EspImage,
+        bytes: ByteArray,
+        onStep: (String, Float) -> Unit,
+    ): String {
+        received = 0
+        onStep("Entering the bootloader", 0.02f)
+        if (!enterBootloader(session, board)) {
+            if (received == 0) {
+                throw PortSilent(
+                    "Nothing was received from the board at all, on any interface. Its USB device is on " +
+                        "the cable but its serial side is not talking to this phone.",
+                )
+            }
+            throw IllegalStateException(
+                "The board answered nothing after a reset on every line shape. Hold BOOT, tap RESET, " +
+                    "release BOOT, then flash again.",
+            )
+        }
+
+        val blocks = EspBootloader.blocks(bytes)
+        val eraseBytes = EspBootloader.eraseSize(bytes.size)
+        val label = "Erasing ${eraseBytes / 1024} KiB"
+        onStep(label, 0.04f)
+
+        // esptool's own shape: one FLASH_BEGIN that asks for the image's span and answers only
+        // once the erase is done. The budget is 40 s per megabyte with a floor, and every read
+        // inside it waits on the whole remaining time rather than timing out and cancelling - a
+        // cancelled USB transfer is how an answer that arrived gets thrown away.
+        val eraseTimeoutMs = (bytes.size / 1_000_000.0 * 40_000.0).toLong()
+            .coerceAtLeast(ERASE_MIN_TIMEOUT_MS)
+        val beginExtended = EspBootloader.flashBeginPayload(
+            imageSize = bytes.size,
+            blocks = blocks.size,
+            eraseBytes = eraseBytes,
+            extended = true,
+        )
+        val beginLegacy = EspBootloader.flashBeginPayload(
+            imageSize = bytes.size,
+            blocks = blocks.size,
+            eraseBytes = eraseBytes,
+            extended = false,
+        )
+        val begin = ticking(label, onStep) {
+            command(session, EspBootloader.OP_FLASH_BEGIN, beginExtended, eraseTimeoutMs)
+                ?: run {
+                    // A fresh SYNC, not a resent command: a chip that is still erasing ignores
+                    // both, but a chip that lost its framing is put back in step by the SYNC.
+                    note("erase unanswered after ${eraseTimeoutMs / 1000}s; re-syncing")
+                    sync(session, "before the second erase attempt")
+                    command(session, EspBootloader.OP_FLASH_BEGIN, beginExtended, eraseTimeoutMs)
+                }
+                ?: run {
+                    sync(session, "before the four-word erase attempt")
+                    command(session, EspBootloader.OP_FLASH_BEGIN, beginLegacy, eraseTimeoutMs)
+                }
+        }
+
+        if (begin == null || begin.status != 0) {
+            note("whole-span erase failed (status ${begin?.status}); erasing in chunks")
+            val chunked = ticking(label, onStep) { eraseInChunks(session, eraseBytes, onStep) }
+            if (!chunked) {
+                CrashLog.recordQuiet(context, "esp-flash-erase", IllegalStateException(wireTail()))
+                throw IllegalStateException(
+                    "The board never answered the erase, in one span or in chunks. Unplug it, hold BOOT, " +
+                        "plug it back in, then flash again - the wire log in this dialog says what came back.",
+                )
+            }
+            // The flash is erased, so the write's own FLASH_BEGIN must not ask for another: this
+            // one is answered at once and cannot look like a hang.
+            val empty = EspBootloader.flashBeginPayload(
+                imageSize = bytes.size,
+                blocks = blocks.size,
+                eraseBytes = 0,
+            )
+            val opened = command(session, EspBootloader.OP_FLASH_BEGIN, empty, BEGIN_TIMEOUT_MS)
+                ?: run {
+                    sync(session, "before the write")
+                    command(session, EspBootloader.OP_FLASH_BEGIN, empty, BEGIN_TIMEOUT_MS)
+                }
+            if (opened == null || opened.status != 0) {
+                CrashLog.recordQuiet(context, "esp-flash-begin", IllegalStateException(wireTail()))
+                throw IllegalStateException("The board stopped answering after the erase.")
+            }
+        }
+
+        blocks.forEachIndexed { index, block ->
+            val payload = EspBootloader.flashDataPayload(block.size, index, block)
+            var wrote = false
+            // One retry: a USB hiccup mid-image is worth repeating the block for rather than
+            // failing an erase that has already happened.
+            repeat(2) {
+                if (wrote) return@repeat
+                val reply = command(session, EspBootloader.OP_FLASH_DATA, payload, BLOCK_TIMEOUT_MS)
+                wrote = reply != null && reply.status == 0
+            }
+            if (!wrote) {
+                CrashLog.recordQuiet(context, "esp-flash-block", IllegalStateException(wireTail()))
+                throw IllegalStateException("The board rejected block $index of ${blocks.size}")
+            }
+            val done = (index + 1).toFloat() / blocks.size
+            onStep("Writing block ${index + 1} of ${blocks.size}", 0.08f + 0.88f * done)
+        }
+
+        onStep("Restarting", 0.98f)
+        // The ROM does not answer FLASH_END, so this is sent and the reboot is allowed to happen
+        // rather than waited on.
+        session.write(
+            EspSlip.encode(
+                EspBootloader.command(EspBootloader.OP_FLASH_END, EspBootloader.flashEndPayload(true)),
+            ),
+        )
+        note("FLASH_END sent; the board reboots into the new image")
+        Thread.sleep(900)
+        onStep("Done", 1f)
+        return "${image.label} v${firmware(image)?.version ?: "?"} written, ${bytes.size / 1024} KiB"
     }
 
     /**
@@ -354,6 +438,10 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
      * and pulsing its lines is the one way to lose a session that was already good. After that
      * the resets run in the order the transport makes likely, and each ends with both lines
      * released so the chip is actually running when the SYNC is sent.
+     *
+     * A reset on a chip with its own USB peripheral takes the device off the bus, and that is
+     * reported as [BoardLost] rather than as silence: the caller reopens the new device, and the
+     * retry's untouched SYNC finds the chip already in the download mode its reset put it in.
      */
     private fun enterBootloader(session: UsbBoards.SerialSession, board: UsbBoards.Board): Boolean {
         drain(session, 80)
@@ -377,6 +465,10 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
         for ((name, shape) in shapes) {
             note("reset: $name")
             applyLines(session, shape)
+            if (!usb.isAttached(session.deviceId)) {
+                note("the board left the bus on the $name; it comes back as a new device")
+                throw BoardLost()
+            }
             drain(session, 250)
             if (sync(session, "after a $name")) return true
         }
@@ -423,6 +515,9 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
         payload: ByteArray,
         timeoutMs: Long,
     ): EspBootloader.Response? {
+        // A session whose device is gone can be written to and will never be read from, which is
+        // the whole "nothing in 400 ms" report: check the bus before blaming the chip.
+        if (!usb.isAttached(session.deviceId)) throw BoardLost()
         if (!session.write(EspSlip.encode(EspBootloader.command(op, payload)))) {
             note("op 0x%02x could not be written".format(op))
             return null
@@ -430,6 +525,7 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
         note("tx 0x%02x %d B %s".format(op, payload.size, hex(payload).take(64)))
         val reader = EspSlip.Reader()
         val until = SystemClock.elapsedRealtime() + timeoutMs
+        var empty = 0
         while (true) {
             val left = until - SystemClock.elapsedRealtime()
             if (left <= 0) {
@@ -439,7 +535,16 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
             // One transfer that spans whatever is left. A read that times out cancels the pending
             // USB transfer on Android, and a reply that arrives inside that cancellation is gone
             // for good - which is precisely the reply the erase sends after its silence.
-            val chunk = session.read(512, left.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()) ?: continue
+            val chunk = session.read(512, left.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+            if (chunk == null) {
+                empty++
+                // Two empty transfers on a device that is no longer on the bus means the port is
+                // dead, not that the chip is slow.
+                if (empty >= 2 && !usb.isAttached(session.deviceId)) throw BoardLost()
+                continue
+            }
+            empty = 0
+            received += chunk.size
             note("rx %d B %s".format(chunk.size, hex(chunk).take(64)))
             for (frame in reader.feed(chunk)) {
                 val response = EspBootloader.response(frame) ?: continue
@@ -473,5 +578,11 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
         const val CHUNK_GAP_MS = 60L
         const val BLOCK_TIMEOUT_MS = 8_000L
         const val WIRE_LINES = 160
+
+        /** How long a chip that reset has to re-appear on the bus before it is called gone. */
+        const val REATTACH_MS = 6_000L
+
+        /** A board that drops off the bus more often than this is not going to be flashed. */
+        const val MAX_RELINKS = 3
     }
 }
