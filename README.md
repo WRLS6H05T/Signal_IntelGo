@@ -390,8 +390,8 @@ far it has gone.
 
 ### Timed intel updates
 
-Setup -> Watcher -> **Timed intel update** keys the Watcher up on its own every **3, 5, 7, 10 or
-30 minutes**, or not at all on **OFF**. Each transmission opens as a call - *Watcher to operator,
+Setup -> **Intel updates** has a switch and the interval: **3, 5, 7, 10 or 30 minutes**, and the
+switch off for never. Each transmission opens as a call - *Watcher to operator,
 intel update* - and then reads the **INTEL tab** down: the watch list, satellites, aircraft,
 drones, mesh nodes, cell towers, Wi-Fi and Bluetooth totals, the GPS fix, and whether a drive is
 running. It then reads the **alert sightings**: how many watch hits appeared since the last update

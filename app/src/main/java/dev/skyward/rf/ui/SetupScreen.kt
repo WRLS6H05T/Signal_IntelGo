@@ -521,40 +521,6 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                         onCheckedChange = { on -> c.settingsStore.update { it.copy(voiceAudio = on) } },
                     )
                 }
-                Spacer(Modifier.height(8.dp))
-                Text("Timed intel update", color = Sky.text, fontSize = 13.sp)
-                Text(
-                    "Minutes between the Watcher keying up on its own to read the INTEL tab and " +
-                        "what has been sighted since the last update. Off, it only speaks when " +
-                        "asked.",
-                    color = Sky.textDim,
-                    fontSize = 10.sp,
-                )
-                Spacer(Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    for (choice in intArrayOf(0, 3, 5, 7, 10, 30)) {
-                        FilterChip(
-                            selected = settings.intelUpdateMinutes == choice,
-                            onClick = {
-                                c.settingsStore.update { it.copy(intelUpdateMinutes = choice) }
-                            },
-                            label = {
-                                Text(
-                                    if (choice == 0) "OFF" else "$choice",
-                                    fontSize = 10.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                )
-                            },
-                            shape = RoundedCornerShape(9.dp),
-                            colors = FilterChipDefaults.filterChipColors(
-                                containerColor = Sky.surfaceHigh,
-                                labelColor = Sky.textDim,
-                                selectedContainerColor = Sky.cyan.copy(alpha = 0.22f),
-                                selectedLabelColor = Sky.cyan,
-                            ),
-                        )
-                    }
-                }
                 Spacer(Modifier.height(6.dp))
                 Text(
                     "It only listens between a tap on the status box under the map's clock and the " +
@@ -590,6 +556,70 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                     Spacer(Modifier.height(6.dp))
                     Text(note, color = Sky.warn, fontSize = 10.sp)
                 }
+            }
+        }
+
+        item {
+            SectionCard(
+                title = "Intel updates",
+                trailing = if (settings.intelUpdateMinutes <= 0) "off"
+                else "every ${settings.intelUpdateMinutes} min",
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Timed intel update", color = Sky.text, fontSize = 13.sp)
+                        Text(
+                            "The Watcher reads the INTEL tab out on its own",
+                            color = Sky.textDim,
+                            fontSize = 10.sp,
+                        )
+                    }
+                    Switch(
+                        checked = settings.intelUpdateMinutes > 0,
+                        onCheckedChange = { on ->
+                            val keep = settings.intelUpdateMinutes
+                            c.settingsStore.update {
+                                it.copy(intelUpdateMinutes = if (on) (if (keep > 0) keep else 5) else 0)
+                            }
+                        },
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("MINUTES BETWEEN UPDATES", style = SkywardThemeLabel(), color = Sky.textDim)
+                Spacer(Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    for (choice in intArrayOf(3, 5, 7, 10, 30)) {
+                        FilterChip(
+                            selected = settings.intelUpdateMinutes == choice,
+                            onClick = {
+                                c.settingsStore.update { it.copy(intelUpdateMinutes = choice) }
+                            },
+                            label = {
+                                Text("$choice", fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                            },
+                            shape = RoundedCornerShape(9.dp),
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = Sky.surfaceHigh,
+                                labelColor = Sky.textDim,
+                                selectedContainerColor = Sky.cyan.copy(alpha = 0.22f),
+                                selectedLabelColor = Sky.cyan,
+                            ),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    if (settings.intelUpdateMinutes <= 0) {
+                        "Off. The Watcher only speaks when it is asked to."
+                    } else {
+                        "Every ${settings.intelUpdateMinutes} minutes it keys up with 'Watcher " +
+                            "to operator, intel update', reads the INTEL tab, then the watch " +
+                            "sightings since the last update, and signs off 'Watcher out'. It " +
+                            "needs hands-free voice on; on a peer link only the host speaks it."
+                    },
+                    color = Sky.textDim,
+                    fontSize = 10.sp,
+                )
             }
         }
 
