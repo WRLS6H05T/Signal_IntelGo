@@ -14,6 +14,7 @@ import dev.skyward.rf.location.LocationTracker
 import dev.skyward.rf.net.WeatherFeed
 import dev.skyward.rf.net.WigleApi
 import dev.skyward.rf.peer.BlePeer
+import dev.skyward.rf.peer.PeerLan
 import dev.skyward.rf.peer.PeerProtocol
 import dev.skyward.rf.scan.CellScanner
 import dev.skyward.rf.scan.RfScanner
@@ -112,6 +113,15 @@ class Container(context: Context) {
      * and a UDP discovery port, which is not something an app should do uninvited.
      */
     val peer = BlePeer(appContext)
+
+    /**
+     * The same link over Wi-Fi, so a desk on the network hears this phone too.
+     *
+     * It is not a second protocol: every message it sends is built from [peer]'s own providers
+     * and every message it receives goes through [peer]'s own callbacks, so the Bluetooth link
+     * and the network link can be on at the same time without disagreeing about anything.
+     */
+    val lan = PeerLan(peer, settingsStore)
 
     /** The drives the other phone says it has, as last offered over the link. */
     val peerLogs = MutableStateFlow<List<PeerProtocol.LogInfo>>(emptyList())
@@ -561,7 +571,10 @@ class Container(context: Context) {
         // The persisted rate has to be on the port before the first probe opens it.
         esp32Usb.setBaud(settingsStore.current.esp32Baud)
         esp32.start()
-        if (settingsStore.current.peerEnabled) peer.start()
+        if (settingsStore.current.peerEnabled) {
+            peer.start()
+            lan.start()
+        }
         airspace.start()
 
         // Feed fixes to the observer and, when recording, to the wardrive engine.

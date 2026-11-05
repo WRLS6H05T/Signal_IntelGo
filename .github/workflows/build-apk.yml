@@ -110,7 +110,6 @@ jobs:
           $image = "desktop/build/compose/binaries/main/app/Signal_IntelGo"
           Get-ChildItem $image | Select-Object Name
           if (-not (Test-Path "$image/Signal_IntelGo.exe")) { throw "no launcher in the image" }
-          if (-not (Test-Path "$image/tools/ble_bridge.py")) { throw "the BLE bridge was not staged" }
 
       - name: Zip the image
         shell: pwsh

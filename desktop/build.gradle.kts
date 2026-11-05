@@ -49,23 +49,6 @@ tasks.withType<Test>().configureEach {
     useJUnit()
 }
 
-/**
- * Puts the BLE bridge beside the packaged executable.
- *
- * The app image carries its own Java runtime, but it cannot carry a Python one, so the script is
- * shipped as a plain file next to the .exe and found at runtime by [dev.skyward.rf.desktop.ble.BleBridge].
- */
-val stageBleBridge = tasks.register<Copy>("stageBleBridge") {
-    from(layout.projectDirectory.file("tools/ble_bridge.py"))
-    into(layout.buildDirectory.dir("compose/binaries/main/app/Signal_IntelGo/tools"))
-}
-
-// The Compose plugin registers this task lazily, so it is matched rather than named: asking for
-// it by name here would run before it exists and fail the whole configuration.
-tasks.matching { it.name == "createDistributable" }.configureEach {
-    finalizedBy(stageBleBridge)
-}
-
 compose.desktop {
     application {
         mainClass = "dev.skyward.rf.desktop.MainKt"

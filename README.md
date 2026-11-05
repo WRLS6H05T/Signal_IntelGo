@@ -4,7 +4,7 @@
 
 **Install or update:** [download the latest APK](https://github.com/WRLS6H05T/Signal_IntelGo/releases/latest/download/Signal_IntelGo-debug.apk) - that one link always serves the newest build. It is signed with the same key as every earlier build, so Android installs it over the old one instead of demanding an uninstall.
 
-**Desktop host (Windows):** [download the latest build](https://github.com/WRLS6H05T/Signal_IntelGo/releases/latest/download/Signal_IntelGo-desktop.zip) - unzip it anywhere and run `Signal_IntelGo.exe`. There is nothing to install and no administrator rights: the folder carries its own Java runtime. Python with `bleak` is the one prerequisite (`python -m pip install bleak`).
+**Desktop host (Windows):** [download the latest build](https://github.com/WRLS6H05T/Signal_IntelGo/releases/latest/download/Signal_IntelGo-desktop.zip) - unzip it anywhere and run `Signal_IntelGo.exe`. There is nothing to install and no administrator rights: the folder carries its own Java runtime. Nothing else is needed: no Python, no Bluetooth driver, no helper - the desk links over Wi-Fi or a USB cable.
 
 The APK lives under [Releases](https://github.com/WRLS6H05T/Signal_IntelGo/releases) as the *Assets* of the **Latest build**, not in the file tree: it is rebuilt by CI on every push. Setup -> About shows the installed build (for example `Signal_IntelGo 1.1.11`), and the release notes name the commit it was built from, so the two can be compared.
 
@@ -582,27 +582,29 @@ or build it yourself:
 
 The published zip is a `jpackage` image, not an installer: unzip it anywhere and run
 `Signal_IntelGo.exe`. It needs no administrator rights and carries its own Java runtime, so
-nothing has to be installed first except Python with `bleak`.
+nothing has to be installed first: no Python, no Bluetooth driver, no helper.
 
-### Bluetooth on Windows
+### The link: Wi-Fi, a USB cable, or both
 
-Windows exposes BLE through WinRT, which the JVM cannot call, and every pure-Java BLE library is
-Linux-only. The desktop therefore starts a small Python process (`desktop/tools/ble_bridge.py`)
-that drives `bleak` - the same WinRT stack the system Bluetooth settings use - and talks to the
-app in JSON lines over stdin/stdout. One dependency, on the machine that already owns the radio:
+There is no radio driver and no helper process. The desk listens on TCP 47800, and a phone finds
+it the way the phone's own link already finds a peer: it broadcasts `SKYWARD?` on UDP 47801, every
+desk answers `SKYWARD!<port>`, and the phone dials whoever answered. Nothing is typed on either
+end, and a desk on another network simply never answers. A phone on USB tethering is the same
+carrier - it is just a client whose address belongs to the cable's network.
 
-```bash
-python -m pip install bleak
-```
+A device on a USB cable is read on its own COM port at 115200 (jSerialComm, no vendor driver
+beyond the one Windows installs). Both carriers move the same bytes: `PeerFrames` chunks, one
+base64 line each. Over Bluetooth that framing existed to fit a 20-byte GATT write; over a socket
+or a cable it is simply a record separator, and keeping it identical is what lets one assembler
+on each end serve every carrier.
 
-`SIGNALGO_PYTHON` picks the interpreter if `python` is not the right one, and
-`-Dsignalg.ble.bridge=<path>` points at the script by hand. If the bridge cannot start, the Host
-tab says why - missing module, no adapter, Bluetooth off - instead of showing an idle roster.
+The phone side is `PeerLan`, which builds its messages from the same `BlePeer` providers and
+replays everything it receives through the same callbacks, so a snapshot is produced in exactly
+one place whether it leaves over Bluetooth, Wi-Fi or a cable.
 
-Phones are connected as a GATT **central**: the desktop subscribes to `7a1f5e11-...` and writes
-`7a1f5e12-...`, the same service and characteristics the phone's own peer link uses. Sensor boards
-need no connection - their telemetry is in the advertisement - so they appear as soon as they are
-in range.
+**Not verified:** no phone was available to dial the desk, and no board was on a cable. The frame
+path is covered by a loopback test that speaks the wire format to the real `LanBridge`, and the
+serial reader is exercised only by compilation.
 
 ### One protocol, not two
 

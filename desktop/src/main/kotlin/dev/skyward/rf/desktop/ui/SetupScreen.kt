@@ -37,7 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.skyward.rf.core.Units
 import dev.skyward.rf.desktop.DesktopContainer
-import dev.skyward.rf.desktop.ble.BleBridge
+import dev.skyward.rf.desktop.link.LinkBridge
 import dev.skyward.rf.desktop.esp.EspFlash
 import dev.skyward.rf.desktop.esp.EspImage
 import dev.skyward.rf.desktop.esp.SerialBoard
@@ -94,13 +94,9 @@ fun SetupScreen(container: DesktopContainer, modifier: Modifier = Modifier) {
                 Text(host.adapterDetail, color = TextDim, fontSize = 11.sp)
             }
             Spacer(Modifier.height(8.dp))
-            Text("BLE bridge", color = TextDim, fontSize = 10.sp, letterSpacing = 1.sp)
-            Text(
-                BleBridge.defaultScript().absolutePath,
-                color = TextMain,
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
-            )
+            Text("Link", color = TextDim, fontSize = 10.sp, letterSpacing = 1.sp)
+            Text(container.lan.detail, color = TextMain, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+            Text(container.usb.detail, color = TextMain, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
             Spacer(Modifier.height(4.dp))
             Text(
                 "${host.devices.size} devices  ·  ${host.framesIn} frames in  ·  ${host.framesOut} out",
@@ -109,10 +105,33 @@ fun SetupScreen(container: DesktopContainer, modifier: Modifier = Modifier) {
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                "The desktop has no Bluetooth radio of its own: the Python bridge drives the Windows adapter and the Host tab is what it finds. Set SIGNALGO_BLE_BRIDGE to use a different script.",
+                "No radio and no helper process. The desk listens on TCP ${LinkBridge.PORT} and answers the phone's UDP probe on ${LinkBridge.DISCOVERY_PORT}, so a phone on the same Wi-Fi - or on USB tethering - finds it and dials in. A device on a USB cable is read on its own COM port.",
                 color = TextDim,
                 fontSize = 10.sp,
             )
+            Spacer(Modifier.height(8.dp))
+            Text("USB cable", color = TextDim, fontSize = 10.sp, letterSpacing = 1.sp)
+            Spacer(Modifier.height(4.dp))
+            val cables = container.usb.ports()
+            if (cables.isEmpty()) {
+                Text("No COM port found. Plug the device in and reopen this tab.", color = TextDim, fontSize = 10.sp)
+            } else {
+                cables.forEach { board ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            board.pretty,
+                            color = TextDim,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Action("OPEN") { container.usb.toggle(board.path) }
+                    }
+                }
+            }
         }
 
         Spacer(Modifier.height(10.dp))

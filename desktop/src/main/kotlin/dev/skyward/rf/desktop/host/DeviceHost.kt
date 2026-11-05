@@ -4,8 +4,8 @@ import dev.skyward.rf.core.LatLon
 import dev.skyward.rf.peer.PeerFrames
 import dev.skyward.rf.peer.PeerProtocol
 import dev.skyward.rf.scan.Esp32Codec
-import dev.skyward.rf.desktop.ble.BleBridge
-import dev.skyward.rf.desktop.ble.BleEvent
+import dev.skyward.rf.desktop.link.LinkBridge
+import dev.skyward.rf.desktop.link.LinkEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,7 +28,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * source the phone builds. There is one wire format in this project, not two.
  */
 class DeviceHost(
-    private val bridge: BleBridge,
+    private val links: List<LinkBridge>,
     private val scope: CoroutineScope,
     private val settings: StateFlow<HostSettings>,
 ) {
@@ -104,16 +104,19 @@ class DeviceHost(
 
     private val connecting = ConcurrentHashMap<String, Long>()
 
+    /** Which carrier owns each address, so a reply goes back out the way it came in. */
+    private val owners = ConcurrentHashMap<String, LinkBridge>()
+
     private val outCount = AtomicInteger(0)
 
     private val notes = ArrayDeque<String>()
 
     fun start() {
-        scope.launch {
-            bridge.events.collect { event -> handle(event) }
+        for (link in links) {
+            scope.launch { link.events.collect { event -> handle(event, link) } }
+            link.start()
+            link.scan(true)
         }
-        bridge.start()
-        bridge.scan(true)
         scope.launch {
             while (true) {
                 delay(SEND_MS)
@@ -124,27 +127,39 @@ class DeviceHost(
     }
 
     fun stop() {
-        bridge.scan(false)
-        bridge.stop()
+        for (link in links) {
+            link.scan(false)
+            link.stop()
+        }
     }
 
-    private fun handle(event: BleEvent) {
+    private fun handle(event: LinkEvent, link: LinkBridge) {
+        // Remember which carrier an address belongs to before acting on it: a phone on Wi-Fi and
+        // a phone on a cable both addressed here, and their replies must not cross.
+        val address = when (event) {
+            is LinkEvent.Advert -> event.address
+            is LinkEvent.Connected -> event.address
+            is LinkEvent.Notified -> event.address
+            else -> null
+        }
+        if (address != null) owners[address] = link
+
         when (event) {
-            is BleEvent.Ready -> {
-                _state.value = _state.value.copy(adapterOk = true, adapterDetail = "adapter ${event.adapter}, scanning")
-                note("BLE adapter ready (${event.adapter})")
+            is LinkEvent.Ready -> {
+                _state.value = _state.value.copy(adapterOk = true, adapterDetail = event.detail)
+                note("link ready: ${event.detail}")
             }
 
-            is BleEvent.Failed -> {
+            is LinkEvent.Failed -> {
                 _state.value = _state.value.copy(adapterOk = false, adapterDetail = event.message)
                 note(event.message)
             }
 
-            is BleEvent.Note -> note(event.message)
+            is LinkEvent.Note -> note(event.message)
 
-            is BleEvent.Advert -> onAdvert(event)
+            is LinkEvent.Advert -> onAdvert(event, link)
 
-            is BleEvent.Connected -> {
+            is LinkEvent.Connected -> {
                 assemblers[event.address] = PeerFrames.Assembler()
                 devices[event.address] = (devices[event.address] ?: return).copy(
                     connected = true,
@@ -155,7 +170,7 @@ class DeviceHost(
                 publish()
             }
 
-            is BleEvent.Disconnected -> {
+            is LinkEvent.Disconnected -> {
                 assemblers.remove(event.address)
                 connecting.remove(event.address)
                 devices[event.address]?.let { devices[event.address] = it.copy(connected = false, mtu = 0) }
@@ -163,11 +178,12 @@ class DeviceHost(
                 publish()
             }
 
-            is BleEvent.Notified -> onFrames(event)
+            is LinkEvent.Notified -> onFrames(event)
         }
     }
 
-    private fun onAdvert(advert: BleEvent.Advert) {
+    private fun onAdvert(advert: LinkEvent.Advert, link: LinkBridge) {
+        owners[advert.address] = link
         val board = HostCodec.boardAdvert(advert)
         if (board != null) {
             val existing = devices[advert.address]
@@ -214,13 +230,13 @@ class DeviceHost(
         val lastTry = connecting[advert.address] ?: 0L
         if (existing?.connected != true && now - lastTry > RECONNECT_MS) {
             connecting[advert.address] = now
-            bridge.connect(advert.address)
+            owners[advert.address]?.connect(advert.address)
             note("dialling $peerId at ${advert.address}")
         }
         publish()
     }
 
-    private fun onFrames(event: BleEvent.Notified) {
+    private fun onFrames(event: LinkEvent.Notified) {
         val assembler = assemblers.getOrPut(event.address) { PeerFrames.Assembler() }
         val message = assembler.add(event.data) ?: return
         val decoded = PeerProtocol.decode(String(message, Charsets.UTF_8)) ?: return
@@ -284,7 +300,7 @@ class DeviceHost(
             if (frames.isEmpty()) continue
             scope.launch {
                 for (chunk in frames) {
-                    if (!bridge.write(device.address, DOWN, chunk)) break
+                    if (owners[device.address]?.write(device.address, DOWN, chunk) != true) break
                     outCount.incrementAndGet()
                     delay(FRAME_GAP_MS)
                 }
@@ -359,7 +375,7 @@ data class HostSettings(
 object HostCodec {
 
     /** The board's own telemetry, if this advertisement is one of ours. */
-    fun boardAdvert(advert: BleEvent.Advert): Esp32Codec.Advert? {
+    fun boardAdvert(advert: LinkEvent.Advert): Esp32Codec.Advert? {
         val payload = advert.manufacturer[Esp32Codec.COMPANY_ID] ?: return null
         // Esp32Codec.decode expects the company id in front of the payload, as it sits on air.
         val wire = ByteArray(payload.size + 2)
@@ -370,7 +386,7 @@ object HostCodec {
     }
 
     /** The peer id a phone is advertising, if this advertisement is one. */
-    fun peerId(advert: BleEvent.Advert): String? {
+    fun peerId(advert: LinkEvent.Advert): String? {
         val service = DeviceHost.PEER_SERVICE.toString()
         val data = advert.serviceData[service] ?: return null
         val id = String(data, Charsets.UTF_8).trim()

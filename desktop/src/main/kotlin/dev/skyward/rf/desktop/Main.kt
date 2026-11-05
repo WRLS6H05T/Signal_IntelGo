@@ -11,7 +11,8 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import dev.skyward.rf.core.FileStore
 import dev.skyward.rf.core.SettingsStore
-import dev.skyward.rf.desktop.ble.BleBridge
+import dev.skyward.rf.desktop.link.LanBridge
+import dev.skyward.rf.desktop.link.SerialBridge
 import dev.skyward.rf.desktop.esp.EspFlash
 import dev.skyward.rf.desktop.host.DeviceHost
 import dev.skyward.rf.desktop.host.DriveFeed
@@ -51,9 +52,13 @@ class DesktopContainer {
     /** What this desktop pushes to every linked device; [HostSettings.rev] moves on each change. */
     val settings = MutableStateFlow(HostSettings())
 
-    val bridge = BleBridge()
+    /** The network carrier: the desk listens, and a phone on Wi-Fi or USB tethering dials in. */
+    val lan = LanBridge()
 
-    val host = DeviceHost(bridge, scope, settings)
+    /** The cable carrier: a device on a COM port, carrying the same frames. */
+    val usb = SerialBridge()
+
+    val host = DeviceHost(listOf(lan, usb), scope, settings)
 
     /** One HTTP client for the tiles and the element sets: same pool, same timeouts. */
     private val http = OkHttpClient.Builder()
@@ -122,7 +127,8 @@ object SelfTest {
         }
         val host = container.host.state.value
         val sky = container.sky.state.value
-        println("bridge=${BleBridge.defaultScript().absolutePath}")
+        println("lan=${container.lan.detail}")
+        println("usb=${container.usb.detail}")
         println("adapter_ok=${host.adapterOk}")
         println("detail=${host.adapterDetail}")
         println("devices=${host.devices.size}")

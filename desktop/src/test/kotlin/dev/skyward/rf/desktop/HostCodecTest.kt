@@ -1,7 +1,7 @@
 package dev.skyward.rf.desktop
 
-import dev.skyward.rf.desktop.ble.BleEvent
-import dev.skyward.rf.desktop.ble.BleEventCodec
+import dev.skyward.rf.desktop.link.LinkEvent
+import dev.skyward.rf.desktop.link.LinkEventCodec
 import dev.skyward.rf.desktop.host.DeviceHost
 import dev.skyward.rf.desktop.host.HostCodec
 import dev.skyward.rf.scan.Esp32Codec
@@ -41,7 +41,7 @@ class HostCodecTest {
     private fun advert(
         manufacturer: Map<Int, ByteArray> = emptyMap(),
         serviceData: Map<String, ByteArray> = emptyMap(),
-    ) = BleEvent.Advert(
+    ) = LinkEvent.Advert(
         address = "AA:BB:CC:DD:EE:FF",
         name = "test",
         rssi = -61,
@@ -108,9 +108,9 @@ class HostCodecTest {
              "manufacturer":{"65535":"${Base64.getEncoder().encodeToString(payload)}"},
              "service_data":{}}
         """.trimIndent()
-        val event = BleEventCodec.decode(line)
-        assertTrue(event is BleEvent.Advert)
-        val advert = event as BleEvent.Advert
+        val event = LinkEventCodec.decode(line)
+        assertTrue(event is LinkEvent.Advert)
+        val advert = event as LinkEvent.Advert
         assertEquals("AA:BB", advert.address)
         assertEquals(-70, advert.rssi)
         assertEquals(listOf("7a1f5e10-3c6b-4a2e-9f1d-5b8c2d4e6f70"), advert.serviceUuids)
@@ -121,14 +121,14 @@ class HostCodecTest {
 
     @Test
     fun `a bridge error is reported rather than swallowed`() {
-        val event = BleEventCodec.decode("""{"ev":"error","message":"no adapter"}""")
-        assertTrue(event is BleEvent.Failed)
-        assertEquals("no adapter", (event as BleEvent.Failed).message)
+        val event = LinkEventCodec.decode("""{"ev":"error","message":"no adapter"}""")
+        assertTrue(event is LinkEvent.Failed)
+        assertEquals("no adapter", (event as LinkEvent.Failed).message)
     }
 
     @Test
     fun `a broken line is not an event`() {
-        assertNull(BleEventCodec.decode("BLE is on"))
-        assertNull(BleEventCodec.decode("{"))
+        assertNull(LinkEventCodec.decode("BLE is on"))
+        assertNull(LinkEventCodec.decode("{"))
     }
 }

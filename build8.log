@@ -1,0 +1,78 @@
+> Task :shared:checkKotlinGradlePluginConfigurationErrors
+> Task :desktop:checkKotlinGradlePluginConfigurationErrors
+> Task :app:checkKotlinGradlePluginConfigurationErrors
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :desktop:generateComposeResClass UP-TO-DATE
+> Task :desktop:convertXmlValueResourcesForMain NO-SOURCE
+> Task :desktop:copyNonXmlValueResourcesForMain NO-SOURCE
+> Task :desktop:prepareComposeResourcesTaskForMain NO-SOURCE
+> Task :desktop:generateResourceAccessorsForMain NO-SOURCE
+> Task :desktop:processResources UP-TO-DATE
+> Task :desktop:convertXmlValueResourcesForTest NO-SOURCE
+> Task :desktop:copyNonXmlValueResourcesForTest NO-SOURCE
+> Task :desktop:prepareComposeResourcesTaskForTest NO-SOURCE
+> Task :desktop:generateResourceAccessorsForTest NO-SOURCE
+> Task :shared:compileKotlin UP-TO-DATE
+> Task :shared:compileJava NO-SOURCE
+> Task :shared:processResources NO-SOURCE
+> Task :shared:classes UP-TO-DATE
+> Task :shared:jar UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:generateDebugResValues UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:processDebugMainManifest
+> Task :app:processDebugManifest
+> Task :app:processDebugManifestForPackage
+> Task :app:processDebugResources
+
+> Task :desktop:compileKotlin
+e: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/desktop/src/main/kotlin/dev/skyward/rf/desktop/link/LanBridge.kt:162:102 Unresolved reference: address
+e: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/desktop/src/main/kotlin/dev/skyward/rf/desktop/link/LanBridge.kt:162:129 Unresolved reference: port
+
+> Task :desktop:compileKotlin FAILED
+
+> Task :app:compileDebugKotlin
+e: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/app/src/main/java/dev/skyward/rf/peer/PeerLan.kt:183:40 Smart cast to 'Double' is impossible, because 'message.lat' is a public API property declared in different module
+e: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/app/src/main/java/dev/skyward/rf/peer/PeerLan.kt:183:53 Smart cast to 'Double' is impossible, because 'message.lon' is a public API property declared in different module
+
+> Task :app:compileDebugKotlin FAILED
+
+FAILURE: Build completed with 2 failures.
+
+1: Task failed with an exception.
+-----------
+* What went wrong:
+Execution failed for task ':desktop:compileKotlin'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+   > Compilation error. See log for more details
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+==============================================================================
+
+2: Task failed with an exception.
+-----------
+* What went wrong:
+Execution failed for task ':app:compileDebugKotlin'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+   > Compilation error. See log for more details
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+==============================================================================
+
+BUILD FAILED in 5s
+22 actionable tasks: 10 executed, 12 up-to-date

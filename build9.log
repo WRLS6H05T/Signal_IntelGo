@@ -1,0 +1,98 @@
+> Task :shared:checkKotlinGradlePluginConfigurationErrors
+> Task :desktop:checkKotlinGradlePluginConfigurationErrors
+> Task :desktop:generateComposeResClass UP-TO-DATE
+> Task :desktop:convertXmlValueResourcesForMain NO-SOURCE
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :desktop:copyNonXmlValueResourcesForMain NO-SOURCE
+> Task :app:checkKotlinGradlePluginConfigurationErrors
+> Task :desktop:prepareComposeResourcesTaskForMain NO-SOURCE
+> Task :desktop:generateResourceAccessorsForMain NO-SOURCE
+> Task :desktop:processResources UP-TO-DATE
+> Task :desktop:convertXmlValueResourcesForTest NO-SOURCE
+> Task :desktop:copyNonXmlValueResourcesForTest NO-SOURCE
+> Task :desktop:prepareComposeResourcesTaskForTest NO-SOURCE
+> Task :desktop:generateResourceAccessorsForTest NO-SOURCE
+> Task :desktop:processTestResources NO-SOURCE
+> Task :shared:compileKotlin UP-TO-DATE
+> Task :shared:compileJava NO-SOURCE
+> Task :shared:processResources NO-SOURCE
+> Task :shared:classes UP-TO-DATE
+> Task :shared:jar UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:generateDebugResValues UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:mergeDebugShaders UP-TO-DATE
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets UP-TO-DATE
+> Task :app:compressDebugAssets UP-TO-DATE
+> Task :app:l8DexDesugarLibDebug UP-TO-DATE
+> Task :app:desugarDebugFileDependencies UP-TO-DATE
+> Task :app:checkDebugDuplicateClasses UP-TO-DATE
+> Task :app:mergeExtDexDebug UP-TO-DATE
+> Task :app:mergeLibDexDebug UP-TO-DATE
+> Task :app:mergeDebugJniLibFolders UP-TO-DATE
+> Task :app:mergeDebugNativeLibs NO-SOURCE
+> Task :app:stripDebugDebugSymbols NO-SOURCE
+> Task :app:validateSigningDebug UP-TO-DATE
+> Task :app:writeDebugAppMetadata UP-TO-DATE
+> Task :app:writeDebugSigningConfigVersions UP-TO-DATE
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :app:compileDebugKotlin
+> Task :app:compileDebugJavaWithJavac NO-SOURCE
+> Task :app:dexBuilderDebug
+> Task :app:mergeDebugGlobalSynthetics UP-TO-DATE
+> Task :app:processDebugJavaRes UP-TO-DATE
+> Task :app:mergeDebugJavaResource UP-TO-DATE
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:mergeProjectDexDebug
+> Task :app:compileDebugUnitTestKotlin
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes UP-TO-DATE
+
+> Task :desktop:compileKotlin
+w: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/desktop/src/main/kotlin/dev/skyward/rf/desktop/link/LanBridge.kt:157:25 Variable 'read' is never used
+w: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/desktop/src/main/kotlin/dev/skyward/rf/desktop/ui/DriveScreen.kt:124:69 Unnecessary non-null assertion (!!) on a non-null receiver of type LatLon
+
+> Task :desktop:compileJava NO-SOURCE
+> Task :desktop:classes UP-TO-DATE
+> Task :desktop:jar
+> Task :desktop:assemble
+> Task :app:testDebugUnitTest
+> Task :app:packageDebug
+> Task :app:createDebugApkListingFileRedirect
+> Task :app:assembleDebug
+
+> Task :desktop:compileTestKotlin FAILED
+e: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/desktop/src/test/kotlin/dev/skyward/rf/desktop/LanLinkTest.kt:74:56 Unresolved reference: PEER_SERVICE
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':desktop:compileTestKotlin'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+   > Compilation error. See log for more details
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 10s
+50 actionable tasks: 15 executed, 35 up-to-date
