@@ -112,8 +112,8 @@ object EspSlip {
  * Command packets and the handful of ROM commands the flasher issues.
  *
  * The sequence is the stock one: reset into the bootloader, SYNC until the board answers,
- * READ_REG at the chip-detect address to learn which silicon is attached, then FLASH_BEGIN, one
- * FLASH_DATA per 1 KiB block and FLASH_END. No stub loader is uploaded, so this works on an
+ * ERASE_FLASH so nothing of the old firmware survives, then FLASH_BEGIN, one FLASH_DATA per
+ * 1 KiB block and FLASH_END. No stub loader is uploaded, so this works on an
  * untouched board with nothing but its ROM: slower than esptool's stub at high baud, but it has
  * no chip-specific second stage that can be mismatched.
  */
@@ -124,6 +124,9 @@ object EspBootloader {
     const val OP_FLASH_END = 0x04
     const val OP_SYNC = 0x08
     const val OP_READ_REG = 0x0A
+
+    /** esptool's ERASE_FLASH: erases the whole chip, not just the range FLASH_BEGIN declares. */
+    const val OP_ERASE_FLASH = 0xD0
 
     private const val CHECKSUM_SEED = 0xEF
 
@@ -205,6 +208,12 @@ object EspBootloader {
         val data = if (size > 0 && frame.size >= 8 + size) frame.copyOfRange(8, 8 + size) else ByteArray(0)
         return Response(op, value, data)
     }
+
+    /**
+     * ERASE_FLASH takes no payload. The ROM erases every sector and answers with a status word,
+     * which is why it gets a long timeout: 4 MB takes several seconds and blocks the console.
+     */
+    fun eraseFlashPayload(): ByteArray = ByteArray(0)
 
     /**
      * FLASH_BEGIN: erase size, block count, block size, offset and the encrypted flag. The fifth

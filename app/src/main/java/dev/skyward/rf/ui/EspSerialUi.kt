@@ -112,6 +112,14 @@ fun EspSerialDialog(c: Container, settings: Settings, onDismiss: () -> Unit) {
                         ) { selectedId = b.deviceId }
                     }
                 }
+                if (boards.isEmpty()) {
+                    Spacer(Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Plug the board in, then rescan.", color = Sky.textDim, fontSize = 9.sp)
+                        Spacer(Modifier.width(6.dp))
+                        Chip(text = "RESCAN", selected = false, accent = Sky.esp32) { c.esp32Usb.rescan() }
+                    }
+                }
                 if (boards.size > 1) Spacer(Modifier.height(4.dp))
 
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -301,6 +309,10 @@ fun EspSerialDialog(c: Container, settings: Settings, onDismiss: () -> Unit) {
                     onClick = {
                         val target = board ?: return@TextButton
                         scope.launch {
+                            // The terminal holds the interface and the USB stack will not let a
+                            // second claim have it, so the port is handed over before the flash
+                            // starts. Without this the flasher only ever saw a busy port.
+                            c.espTerminal.close()
                             flashing = true
                             outcome = null
                             val result = withContext(Dispatchers.IO) {

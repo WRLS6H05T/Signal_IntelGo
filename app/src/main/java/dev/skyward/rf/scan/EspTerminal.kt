@@ -45,6 +45,10 @@ class EspTerminal(private val usb: UsbBoards) {
         session = opened
         running = true
         _state.value = State(port = board.label, open = true, lines = listOf("--- ${board.label} at $baud ---"))
+        // A console only speaks when spoken to. The firmware prints its banner at boot, so a
+        // board that has been running for an hour shows an empty panel until it gets a line
+        // ending; this hands it one, and a console that prompts reprints its prompt.
+        opened.write("\r\n".toByteArray())
         reader = Thread({ readLoop(opened) }, "esp-terminal").apply {
             isDaemon = true
             start()

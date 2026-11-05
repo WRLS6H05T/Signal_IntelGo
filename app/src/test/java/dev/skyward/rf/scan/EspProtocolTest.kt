@@ -14,6 +14,16 @@ import org.junit.Test
 class EspProtocolTest {
 
     @Test
+    fun `erase flash is the rom whole-chip erase and carries no payload`() {
+        assertEquals(0xD0, EspBootloader.OP_ERASE_FLASH)
+        val packet = EspBootloader.command(EspBootloader.OP_ERASE_FLASH, EspBootloader.eraseFlashPayload())
+        assertEquals(8, packet.size)
+        assertEquals(EspBootloader.OP_ERASE_FLASH, packet[1].toInt() and 0xFF)
+        assertEquals(0, packet[2].toInt())
+        assertEquals(0xEF, packet[4].toInt() and 0xFF)
+    }
+
+    @Test
     fun `slip escapes the reserved bytes and decodes back`() {
         val payload = byteArrayOf(0x01, 0xC0.toByte(), 0xDB.toByte(), 0x55, 0xC0.toByte())
         val framed = EspSlip.encode(payload)

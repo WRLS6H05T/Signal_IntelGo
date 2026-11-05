@@ -41,8 +41,8 @@ data class FlashDetails(
  * Writes the bundled sensor firmware over the cable, from the phone, with no PC involved.
  *
  * This speaks the ROM bootloader's own protocol (see [EspBootloader]) rather than shelling out
- * to esptool, which cannot exist on a phone: reset into download mode, SYNC, FLASH_BEGIN, a
- * FLASH_DATA per 1 KiB block, FLASH_END. No stub is uploaded, so a board with nothing but its
+ * to esptool, which cannot exist on a phone: reset into download mode, SYNC, ERASE_FLASH,
+ * FLASH_BEGIN, a FLASH_DATA per 1 KiB block, FLASH_END. No stub is uploaded, so a board with nothing but its
  * ROM - a fresh C3 or C5 mini - is enough.
  *
  * The path is unverified without hardware. What is checked here is the part that can be: the
@@ -99,8 +99,24 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
                 return Result.failure(IllegalStateException("No answer from the bootloader. Hold BOOT and tap RESET, then try again"))
             }
 
+            // Whole-chip erase before anything is written. The merged image only covers the
+            // sectors it declares, so without this the old partition table, the old NVS - which
+            // is where a previous firmware kept its own settings - and any tail past the end of
+            // the new image all survive the flash. esptool calls this ERASE_FLASH; the ROM takes
+            // no payload and answers with a status word once every sector is gone.
+            onStep("Erasing the whole flash", 0.04f)
+            val erased = command(
+                session,
+                EspBootloader.OP_ERASE_FLASH,
+                EspBootloader.eraseFlashPayload(),
+                ERASE_TIMEOUT_MS,
+            ) ?: return Result.failure(IllegalStateException("The board stopped answering while erasing"))
+            if (erased.status != 0) {
+                return Result.failure(IllegalStateException("The board refused the erase (status ${erased.status})"))
+            }
+
             val blocks = EspBootloader.blocks(bytes)
-            onStep("Erasing ${EspBootloader.eraseSize(bytes.size) / 1024} KiB", 0.08f)
+            onStep("Erasing ${EspBootloader.eraseSize(bytes.size) / 1024} KiB for the image", 0.08f)
             val begin = command(
                 session,
                 EspBootloader.OP_FLASH_BEGIN,
@@ -226,6 +242,8 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
     private companion object {
         const val MANIFEST = "firmware/firmware.json"
         const val SYNC_TIMEOUT_MS = 400L
+        /** A whole-chip erase is the longest thing the ROM does; 4 MB is seconds, not ms. */
+        const val ERASE_TIMEOUT_MS = 120_000L
         const val FLASH_BEGIN_TIMEOUT_MS = 60_000L
         const val BLOCK_TIMEOUT_MS = 8_000L
     }

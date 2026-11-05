@@ -242,7 +242,13 @@ static void saveConfig() {
 
 static void handleConsole(String line) {
   line.trim();
-  if (line.length() == 0) return;
+  if (line.length() == 0) {
+    // A panel that has just opened is talking to a board that booted long ago, so one blank
+    // line is treated as "who are you": banner, command list and the current GPS setting.
+    printHelp();
+    Serial.printf("GPS pin: %d baud: %d\r\n", gpsPin, gpsBaud);
+    return;
+  }
   String verb = line;
   String arg = "";
   int space = line.indexOf(' ');
@@ -306,17 +312,24 @@ static void handleConsole(String line) {
 }
 
 static String serialLine;
+static bool lastWasCr = false;
 
 static void consolePump() {
   while (Serial.available() > 0) {
     char c = (char)Serial.read();
     if (c == '\r' || c == '\n') {
-      if (serialLine.length() > 0) {
-        handleConsole(serialLine);
-        serialLine = "";
+      // CRLF is one line ending, not two: the second half is swallowed so a blank line
+      // printed its banner once.
+      if (c == '\n' && lastWasCr) {
+        lastWasCr = false;
+        continue;
       }
-    } else if (serialLine.length() < 96) {
-      serialLine += c;
+      lastWasCr = (c == '\r');
+      handleConsole(serialLine);
+      serialLine = "";
+    } else {
+      lastWasCr = false;
+      if (serialLine.length() < 96) serialLine += c;
     }
   }
 }

@@ -301,8 +301,19 @@ fun buildMarkers(
     maxSats: Int = 1_500,
 ): List<MapMarker> {
     val out = ArrayList<MapMarker>(sky.sats.size + sky.aircraft.size + sky.drones.size + sky.mesh.size)
-    if (showSats) sky.sats.take(maxSats).forEach { s: SatView ->
-        if (s.score < minScore) return@forEach
+    // Satellites are the one layer the score must not filter. Their score is elevation above
+    // the observer, so keeping only the strong ones kept only the ones overhead, and the globe
+    // showed a knot of icons at the GPS pin instead of a sky. Truncating from the top of the
+    // list is the same knot again, because the list arrives elevation-sorted: the cap is taken
+    // as an even stride across the catalogue instead, which keeps every orbit and inclination.
+    val plottedSats: List<SatView> = if (showSats) {
+        val sats = sky.sats
+        val stride = if (sats.size > maxSats) (sats.size + maxSats - 1) / maxSats else 1
+        sats.filterIndexed { index, _ -> index % stride == 0 }.take(maxSats)
+    } else {
+        emptyList()
+    }
+    plottedSats.forEach { s: SatView ->
         out.add(
             MapMarker(
                 key = "SAT:${s.noradId}",
