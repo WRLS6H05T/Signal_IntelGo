@@ -193,9 +193,14 @@ class MeshSource(private val settings: () -> dev.skyward.rf.core.Settings) {
         if (observerLat == null || observerLon == null) return
         var changed = false
         for ((k, n) in nodes) {
-            if (n.lat != null && n.lon != null) {
-                val d = OrbitMath.groundDistanceKm(observerLat, observerLon, n.lat, n.lon)
-                if (n.distanceKm == null || kotlin.math.abs(n.distanceKm - d) > 0.25) {
+            // Hoisted because MeshNode is compiled in :shared; a smart cast would not cross
+            // that boundary.
+            val nLat = n.lat
+            val nLon = n.lon
+            if (nLat != null && nLon != null) {
+                val d = OrbitMath.groundDistanceKm(observerLat, observerLon, nLat, nLon)
+                val previous = n.distanceKm
+                if (previous == null || kotlin.math.abs(previous - d) > 0.25) {
                     nodes[k] = n.copy(distanceKm = d)
                     changed = true
                 }

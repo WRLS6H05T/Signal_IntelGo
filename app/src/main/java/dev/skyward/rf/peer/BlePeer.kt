@@ -616,7 +616,11 @@ class BlePeer(private val context: Context) {
         if (decoded.diagIn > 0f) peerDiagIn = decoded.diagIn
         if (decoded.mode.isNotBlank()) peerMode = decoded.mode
         if (decoded.id.isNotBlank()) peerId = decoded.id
-        val fix = if (decoded.lat != null && decoded.lon != null) LatLon(decoded.lat, decoded.lon) else null
+        // Local copies: the message type is compiled in :shared now, and a smart cast does not
+        // cross a module boundary, so the null check has to be on the same values it guards.
+        val fixLat = decoded.lat
+        val fixLon = decoded.lon
+        val fix = if (fixLat != null && fixLon != null) LatLon(fixLat, fixLon) else null
         if (fix != null) _peerFix.value = fix
         _state.value = _state.value.copy(
             peerName = decoded.name.ifBlank { decoded.id },

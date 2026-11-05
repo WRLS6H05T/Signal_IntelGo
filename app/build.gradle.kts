@@ -117,6 +117,10 @@ android {
 }
 
 dependencies {
+    // The peer wire format, its chunking and the ESP32 advertisement codec are compiled by the
+    // desktop host too, so both ends cannot drift apart about what a byte means.
+    implementation(project(":shared"))
+
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")

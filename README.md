@@ -535,9 +535,72 @@ Flashing is done on the phone, with no PC: the app speaks the ROM bootloader's o
 (SLIP framing, `SYNC`, `FLASH_BEGIN`, 1 KiB `FLASH_DATA` blocks, `FLASH_END`) rather than
 shelling out to esptool, and resets the board into download mode itself with the USB-Serial-JTAG
 pulse train or the classic D0/R1 sequence, whichever answers. The image is written at offset `0`,
-so a bare board comes up running it.
+so a bare board comes up running it.**Not verified:** there is no C3/C5 on this machine, so the reset sequences, the flash itself and the firmware's radio behaviour have not been exercised on hardware. What is checked is the byte layer - SLIP framing, command headers and checksums, block splitting and the erase size all have JVM tests - and both firmware images compile.
 
-**Not verified:** there is no C3/C5 on this machine, so the reset sequences, the flash itself and
-the firmware's radio behaviour have not been exercised on hardware. What is checked is the byte
-layer - SLIP framing, command headers and checksums, block splitting and the erase size all have
-JVM tests - and both firmware images compile.
+---
+
+## Desktop host
+
+`:desktop` is the same product on a PC, in the seat the phone calls **HOST**. It scans BLE,
+links to every phone advertising the two-device service, picks up every ESP32 sensor board from
+their advertisements, and merges what they hear into one table. It also pushes one settings blob
+to all of them, so the basemap, weak-dot filter, aircraft switch, spin speed and units are decided
+in one place instead of on each device.
+
+```bash
+./gradlew :desktop:run      # the window
+./gradlew :desktop:run --args="--selftest"   # no window: proves the bridge and adapter answer
+```
+
+### Bluetooth on Windows
+
+Windows exposes BLE through WinRT, which the JVM cannot call, and every pure-Java BLE library is
+Linux-only. The desktop therefore starts a small Python process (`desktop/tools/ble_bridge.py`)
+that drives `bleak` - the same WinRT stack the system Bluetooth settings use - and talks to the
+app in JSON lines over stdin/stdout. One dependency, on the machine that already owns the radio:
+
+```bash
+python -m pip install bleak
+```
+
+`SIGNALGO_PYTHON` picks the interpreter if `python` is not the right one, and
+`-Dsignalg.ble.bridge=<path>` points at the script by hand. If the bridge cannot start, the
+window says why (missing module, no adapter, Bluetooth off) instead of showing an idle roster.
+
+Phones are connected as a GATT **central**: the desktop subscribes to `7a1f5e11-...` and writes
+`7a1f5e12-...`, the same service and characteristics the phone's own peer link uses. Sensor
+boards need no connection - their telemetry is in the advertisement - so they appear as soon as
+they are in range.
+
+### One protocol, not two
+
+`:shared` holds the peer wire format (`PeerProtocol`), its chunking (`PeerFrames`), drive
+packaging (`PeerLogs`), the ESP32 advertisement codec and the core value types. The phone and the
+desktop compile those same files, so a field cannot drift between the two ends: there is one
+definition of what a snapshot byte means.
+
+### Google sign-in
+
+The desktop uses the flow Google requires for installed apps: a loopback listener on
+`127.0.0.1`, the system browser, and **PKCE** (`S256`) with a verifier that never leaves the
+machine. No embedded web view, and the app never sees a password. The refresh token is kept in
+`~/.signintelgo/auth.json` and refreshed on launch when it has aged out.
+
+The client id belongs to whoever runs the app, so it is not in the repository. Create an OAuth
+**Desktop app** client in the Google Cloud Console, then either:
+
+```bash
+# environment
+export SIGNAL_GOOGLE_CLIENT_ID="...apps.googleusercontent.com"
+
+# or ~/.signintelgo/google.json
+{"client_id": "...apps.googleusercontent.com", "client_secret": "..."}
+```
+
+Without a client id the window says so and the host still runs: the link, the roster and the
+settings push do not depend on an account.
+
+**Not verified:** there is no BLE hardware and no Google client id on this machine, so the
+advertisement decode, the chunking and the PKCE transform are covered by JVM tests, while the
+radio link itself, the GATT connection to a phone and a completed Google consent round-trip have
+not been exercised. `--selftest` reports which of those the machine is missing.

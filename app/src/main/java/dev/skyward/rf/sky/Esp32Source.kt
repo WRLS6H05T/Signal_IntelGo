@@ -310,8 +310,12 @@ class Esp32Source(
         val lon = observerLon
         val out = nodes.values.map { e ->
             val n = e.node
-            val d = if (lat != null && lon != null && n.lat != null && n.lon != null) {
-                OrbitMath.groundDistanceKm(lat, lon, n.lat, n.lon)
+            // Node coordinates are hoisted: Esp32Node comes from :shared, so the null check
+            // does not make the values non-null for the compiler across that boundary.
+            val nodeLat = n.lat
+            val nodeLon = n.lon
+            val d = if (lat != null && lon != null && nodeLat != null && nodeLon != null) {
+                OrbitMath.groundDistanceKm(lat, lon, nodeLat, nodeLon)
             } else {
                 null
             }
