@@ -381,6 +381,15 @@ class Container(context: Context) {
             }
         }
 
+        // GPS is a switch, not a mute: off stops the receiver instead of ignoring its fixes, so
+        // a session at a desk does not spend the battery on a chip nothing is reading.
+        scope.launch {
+            settingsStore.state.collect { cfg ->
+                if (!running) return@collect
+                if (cfg.gpsEnabled) location.start() else location.stop()
+            }
+        }
+
         // The host's revision, bumped only when a shared setting actually moves. A follower
         // reads it to tell "the host just decided this" from "the host is repeating itself".
         scope.launch {
@@ -555,7 +564,7 @@ class Container(context: Context) {
         if (running) return
         running = true
 
-        location.start()
+        if (settingsStore.current.gpsEnabled) location.start()
         rf.startAll()
         mesh.start()
         // The persisted rate has to be on the port before the first probe opens it.

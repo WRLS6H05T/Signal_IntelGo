@@ -26,6 +26,11 @@ data class Settings(
      * and street detail is handed to the phone's own map app, with no tile requests at all.
      */
     val useDeviceMap: Boolean = false,
+    /**
+     * The phone's own GNSS receiver. Off means stopped, not muted: nothing keeps waking the
+     * chip for fixes nothing reads. The map keeps the last position it had.
+     */
+    val gpsEnabled: Boolean = true,
     val refreshSatMs: Long = 5_000,
     val refreshAircraftMs: Long = 12_000,
     val dropWeakDots: Boolean = false,

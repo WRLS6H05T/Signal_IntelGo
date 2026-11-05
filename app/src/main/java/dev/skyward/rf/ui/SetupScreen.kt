@@ -175,6 +175,33 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
         }
 
         item {
+            SectionCard(title = "Location", trailing = if (settings.gpsEnabled) "on" else "off") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Phone GPS", color = Sky.text, fontSize = 13.sp)
+                        Text(
+                            "Satellites, aircraft and watch hits need a fix",
+                            color = Sky.textDim,
+                            fontSize = 10.sp,
+                        )
+                    }
+                    Switch(
+                        checked = settings.gpsEnabled,
+                        onCheckedChange = { on -> c.settingsStore.update { it.copy(gpsEnabled = on) } },
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Off stops the receiver; the map keeps the last position it had. Everything " +
+                        "that needs a fix - overhead satellites, ADS-B, a watch hit's placement - " +
+                        "goes quiet until it is switched back on.",
+                    color = Sky.textDim,
+                    fontSize = 10.sp,
+                )
+            }
+        }
+
+        item {
             SectionCard(title = "Mesh nodes", trailing = if (c.mesh.isRunning()) "live" else "off") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
