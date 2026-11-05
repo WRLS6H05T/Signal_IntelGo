@@ -4,6 +4,8 @@
 
 **Install or update:** [download the latest APK](https://github.com/WRLS6H05T/Signal_IntelGo/releases/latest/download/Signal_IntelGo-debug.apk) - that one link always serves the newest build. It is signed with the same key as every earlier build, so Android installs it over the old one instead of demanding an uninstall.
 
+**Desktop host (Windows):** [download the latest build](https://github.com/WRLS6H05T/Signal_IntelGo/releases/latest/download/Signal_IntelGo-desktop.zip) - unzip it anywhere and run `Signal_IntelGo.exe`. There is nothing to install and no administrator rights: the folder carries its own Java runtime. Python with `bleak` is the one prerequisite (`python -m pip install bleak`), and Google sign-in needs a client id of your own - see [Desktop host](#desktop-host).
+
 The APK lives under [Releases](https://github.com/WRLS6H05T/Signal_IntelGo/releases) as the *Assets* of the **Latest build**, not in the file tree: it is rebuilt by CI on every push. Setup -> About shows the installed build (for example `Signal_IntelGo 1.1.11`), and the release notes name the commit it was built from, so the two can be compared.
 
 A native Android app for live airspace + RF awareness, built around a **Wi-Fi / BLE war-driving recorder**.
@@ -547,10 +549,18 @@ their advertisements, and merges what they hear into one table. It also pushes o
 to all of them, so the basemap, weak-dot filter, aircraft switch, spin speed and units are decided
 in one place instead of on each device.
 
+Download it from [Releases](https://github.com/WRLS6H05T/Signal_IntelGo/releases/latest/download/Signal_IntelGo-desktop.zip),
+or build it yourself:
+
 ```bash
-./gradlew :desktop:run      # the window
-./gradlew :desktop:run --args="--selftest"   # no window: proves the bridge and adapter answer
+./gradlew :desktop:run                        # the window, from the source tree
+./gradlew :desktop:run --args="--selftest"    # no window: proves the bridge and adapter answer
+./gradlew :desktop:createDistributable        # the downloadable folder, in desktop/build/compose
 ```
+
+The published zip is a `jpackage` image, not an installer: unzip and run `Signal_IntelGo.exe`.
+It needs no administrator rights and carries its own Java runtime, so nothing has to be installed
+first except Python with `bleak`.
 
 ### Bluetooth on Windows
 

@@ -14,6 +14,7 @@ desktop/build/
 # Per-module build logs
 *-build.log
 desktop-test.log
+dist.log
 build.log
 test.log
 check.log

@@ -205,6 +205,7 @@ class BleBridge(
     companion object {
 
         private const val ENV_PYTHON = "SIGNALGO_PYTHON"
+        private const val ENV_BRIDGE = "SIGNALGO_BLE_BRIDGE"
         private const val PROP_BRIDGE = "signalg.ble.bridge"
 
         fun pythonExecutable(): String {
@@ -217,14 +218,30 @@ class BleBridge(
          * installed image (beside the app) or pointed at one by hand.
          */
         fun defaultScript(): File {
+            System.getenv(ENV_BRIDGE)?.takeIf { it.isNotBlank() }?.let { return File(it) }
             System.getProperty(PROP_BRIDGE)?.takeIf { it.isNotBlank() }?.let { return File(it) }
-            val candidates = listOf(
-                File("tools/ble_bridge.py"),
-                File("desktop/tools/ble_bridge.py"),
-                File("ble_bridge.py"),
-                File(System.getProperty("user.dir"), "desktop/tools/ble_bridge.py"),
-            )
-            return candidates.firstOrNull { it.exists() } ?: candidates[1]
+            val here = System.getProperty("user.dir").orEmpty()
+            val candidates = buildList {
+                // Running from the source tree, through Gradle or an IDE.
+                add(File(here, "tools/ble_bridge.py"))
+                add(File(here, "desktop/tools/ble_bridge.py"))
+                add(File("tools/ble_bridge.py"))
+                add(File("desktop/tools/ble_bridge.py"))
+                // An installed image: the app's jars sit in <image>/app, and the packaging step
+                // puts the bridge in <image>/tools beside the executable.
+                val roots = System.getProperty("java.class.path").orEmpty()
+                    .split(File.pathSeparator)
+                    .map(::File)
+                    .map { if (it.isDirectory) it else it.parentFile ?: it }
+                for (root in roots) {
+                    add(File(root, "tools/ble_bridge.py"))
+                    root.parentFile?.let { add(File(it, "tools/ble_bridge.py")) }
+                }
+                System.getProperty("compose.application.resources.dir")?.takeIf { it.isNotBlank() }?.let {
+                    add(File(it, "tools/ble_bridge.py"))
+                }
+            }
+            return candidates.firstOrNull { it.exists() } ?: File(here, "desktop/tools/ble_bridge.py")
         }
     }
 }
