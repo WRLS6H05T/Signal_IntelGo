@@ -60,11 +60,11 @@ object VoiceStyles {
 
     /**
      * Pitch and rate are the whole performance available. The woman sits a little above the
-     * engine's natural voice; the man well below it. Both speak slowly enough to sound like a
-     * machine reading, not a person talking.
+     * engine's natural voice; the man well below it - low enough to read as a man rather than a
+     * slowed engine, with the rate pulled back so the low voice stays intelligible.
      */
     fun of(name: String?): VoiceStyle = when (name?.lowercase()) {
-        "male", "man", "m" -> VoiceStyle(WatcherGender.MALE, 0.52f, 0.86f, 0.40f, 0.70f)
+        "male", "man", "m" -> VoiceStyle(WatcherGender.MALE, 0.42f, 0.82f, 0.28f, 0.66f)
         else -> VoiceStyle(WatcherGender.FEMALE, 1.12f, 0.92f, 0.72f, 0.74f)
     }
 

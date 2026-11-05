@@ -11,9 +11,11 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
 import dev.skyward.rf.core.VoiceStyle
 import dev.skyward.rf.core.VoiceStyles
 import dev.skyward.rf.core.Watcher
+import dev.skyward.rf.core.WatcherGender
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import java.util.Locale
@@ -60,6 +62,8 @@ class WatcherVoice(private val context: Context) {
     var style: VoiceStyle = VoiceStyles.of("female")
 
     private val main = Handler(Looper.getMainLooper())
+    /** The channel: squelch either side of every transmission, and the radio's own call framing. */
+    private val radio by lazy { RadioChatter(context) }
     private var recognizer: SpeechRecognizer? = null
     private var speaker: TextToSpeech? = null
     private var speakerReady = false
@@ -127,10 +131,14 @@ class WatcherVoice(private val context: Context) {
         lastSpokeAt = now
 
         val voice = style
-        val line = voice.render(text, glitch)
+        // Every line goes out as a radio call, not a phone notification: the words are addressed
+        // to the net and closed with "over", and a squelch opens the channel before the engine
+        // starts and closes it afterwards.
+        val line = Radio.frame(voice.render(text, glitch), alert = glitch)
 
         state.update { it.copy(speaking = true) }
         runCatching { recognizer?.cancel() }
+        radio.open(alert = glitch)
 
         // Pitch and rate are the performance the engine actually offers; the glitched alert drags
         // below whichever voice is chosen.
@@ -268,6 +276,31 @@ class WatcherVoice(private val context: Context) {
         runCatching {
             engine.language = if (available >= TextToSpeech.LANG_AVAILABLE) wanted else Locale.US
         }
+        // The pitch is the main instrument, but a man should use a man's engine voice when the
+        // phone has one installed: pitching a woman's recordings down far enough is what made
+        // the old male preset sound like a machine impersonating one.
+        runCatching { pickVoice(engine, voice)?.let { engine.voice = it } }
+    }
+
+    /**
+     * The deepest installed voice for this gender, or null to leave the engine's default alone.
+     *
+     * Android does not expose gender as a property, so this is the names the engines ship with:
+     * "en-us-x-iom" and friends on Google's engine carry "male" or "guy" in their name, and a
+     * handful of OEM engines still do. When nothing matches, the pitch still does the work.
+     */
+    private fun pickVoice(engine: TextToSpeech, style: VoiceStyle): Voice? {
+        val wanted = if (style.gender == WatcherGender.MALE) {
+            listOf("male", "guy", "david", "george", "james", "daniel")
+        } else {
+            listOf("female", "woman", "samantha", "victoria", "karen")
+        }
+        val english = runCatching { engine.voices.orEmpty().toList() }.getOrDefault(emptyList())
+            .filter { it.locale.language == "en" && !it.isNetworkConnectionRequired }
+        return english.firstOrNull { v ->
+            val name = v.name.lowercase(Locale.US)
+            wanted.any { name.contains(it) }
+        }
     }
 
     private fun prepareSpeaker() {
@@ -303,5 +336,7 @@ class WatcherVoice(private val context: Context) {
         main.removeCallbacks(watchdog)
         if (!state.value.speaking) return
         state.update { it.copy(speaking = false) }
+        // The channel closes after the last word, the way a handheld does.
+        radio.close()
     }
 }
