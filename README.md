@@ -388,6 +388,19 @@ then the **signal intel**: Wi-Fi networks, Bluetooth devices, cell towers, mesh 
 and aircraft in range, whether a GPS fix is held, and whether a drive is being recorded and how
 far it has gone.
 
+### Timed intel updates
+
+Setup -> Watcher -> **Timed intel update** keys the Watcher up on its own every **3, 5, 7, 10 or
+30 minutes**, or not at all on **OFF**. Each transmission opens as a call - *Watcher to operator,
+intel update* - and then reads the **INTEL tab** down: the watch list, satellites, aircraft,
+drones, mesh nodes, cell towers, Wi-Fi and Bluetooth totals, the GPS fix, and whether a drive is
+running. It then reads the **alert sightings**: how many watch hits appeared since the last update
+and the three strongest of them, by family and signal strength. It closes on *Watcher out*, like
+every other transmission, with the squelch either side and the tone from the same radio. The
+interval is read again at the end of each wait, so moving it in Setup takes effect without a
+restart; a phone that is the follower on a peer link stays quiet, because the host holds the
+picture it would be reading.
+
 There are two machine voices, **WOMAN** and **MAN** - the same Watcher, Watch Dogs' ctOS, one
 pitched above the engine's natural voice and one well below it. A phone's text-to-speech engine has
 one voice per locale and a pitch and rate dial, so the machine is carried by the pacing instead:

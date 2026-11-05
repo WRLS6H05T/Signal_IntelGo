@@ -80,6 +80,15 @@ class Container(context: Context) {
 
     val logged = LoggedRegistry(FileStore(File(rootData, "logged").apply { mkdirs() }))
 
+    /**
+     * Watch hits in the order they appeared, with the moment they did.
+     *
+     * A timed update has to say what is new since the last one, and a WatchView carries no
+     * timestamp of its own, so the sighting is stamped as it joins the list.
+     */
+    private val recentAlerts =
+        java.util.concurrent.CopyOnWriteArrayList<Pair<Long, dev.skyward.rf.core.WatchView>>()
+
     /** Every signal heard with a fix, placed where it was heard and coloured by strength. */
     val signalLog = SignalLog(FileStore(File(rootData, "signals").apply { mkdirs() }))
     val wardrive = WardriveEngine(
@@ -548,11 +557,43 @@ class Container(context: Context) {
                 mesh = sky.mesh.size,
                 sats = sky.sats.size,
                 aircraft = sky.aircraft.size,
+                drones = sky.drones.size,
                 gps = observer.value != null,
                 logging = drive.active,
                 km = drive.km,
                 unit = settingsStore.current.distanceUnit,
             ),
+        )
+    }
+
+    /**
+     * The timed intel update, read from the same picture the spoken report uses.
+     *
+     * The sightings are the watch list as it appeared during the last [minutes], stamped by the
+     * collector in [start], so the update can say what is new rather than re-reading the table.
+     */
+    fun intelUpdate(minutes: Int): String {
+        val sky = airspace.state.value
+        val totals = rf.totals()
+        val drive = wardrive.state.value
+        val since = System.currentTimeMillis() - minutes * 60_000L
+        return Watcher.intelUpdate(
+            Watcher.ReportInput(
+                watches = sky.watch,
+                wifi = totals.wifi,
+                ble = totals.ble,
+                cells = sky.cells.size,
+                mesh = sky.mesh.size,
+                sats = sky.sats.size,
+                aircraft = sky.aircraft.size,
+                drones = sky.drones.size,
+                gps = observer.value != null,
+                logging = drive.active,
+                km = drive.km,
+                unit = settingsStore.current.distanceUnit,
+            ),
+            minutes,
+            sightings = recentAlerts.filter { it.first >= since }.map { it.second },
         )
     }
 
@@ -568,6 +609,36 @@ class Container(context: Context) {
         esp32.start()
         if (settingsStore.current.peerEnabled) peer.start()
         airspace.start()
+
+        // Stamps every watch hit as it appears, so the timed update can report what is new. The
+        // list is trimmed to an hour: nothing older than the longest interval is ever asked for.
+        scope.launch {
+            airspace.state.collect { sky ->
+                val now = System.currentTimeMillis()
+                val known = recentAlerts.mapTo(HashSet()) { it.second.kind to it.second.id }
+                for (w in sky.watch) {
+                    if ((w.kind to w.id) !in known) recentAlerts.add(now to w)
+                }
+                recentAlerts.removeAll { now - it.first > 60 * 60_000L }
+            }
+        }
+
+        // The timed intel update. The gap is read fresh each round, so a change in Setup takes
+        // effect at the end of the current wait rather than needing a restart.
+        scope.launch {
+            while (true) {
+                val minutes = settingsStore.current.intelUpdateMinutes
+                if (minutes <= 0 || !settingsStore.current.voiceEnabled) {
+                    kotlinx.coroutines.delay(20_000L)
+                    continue
+                }
+                kotlinx.coroutines.delay(minutes * 60_000L)
+                // Moved while waiting: that is a new schedule, not this one.
+                if (settingsStore.current.intelUpdateMinutes != minutes) continue
+                if (!settingsStore.current.voiceEnabled || !isHostPhone()) continue
+                voice.speak(intelUpdate(minutes), intel = true)
+            }
+        }
 
         // Feed fixes to the observer and, when recording, to the wardrive engine.
         scope.launch {

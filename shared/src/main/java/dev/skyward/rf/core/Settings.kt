@@ -61,6 +61,11 @@ data class Settings(
     val voiceGender: String = "female",
     /** Speak the replies and the watch alerts out loud. */
     val voiceAudio: Boolean = true,
+    /**
+     * Minutes between the Watcher's own intel updates: 0 off, otherwise 3, 5, 7, 10 or 30. The
+     * update is the INTEL tab read down, plus whatever has been sighted since the last one.
+     */
+    val intelUpdateMinutes: Int = 0,
     /** ESP32 sensor boards: BLE advertisements always, MQTT when a Wi-Fi board publishes. */
     val esp32Enabled: Boolean = true,
     /** GhostESP, ESP32 Marauder, Biscuit and anything else ESP32 plugged into the USB port. */

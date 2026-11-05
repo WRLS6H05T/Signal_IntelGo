@@ -521,6 +521,40 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                         onCheckedChange = { on -> c.settingsStore.update { it.copy(voiceAudio = on) } },
                     )
                 }
+                Spacer(Modifier.height(8.dp))
+                Text("Timed intel update", color = Sky.text, fontSize = 13.sp)
+                Text(
+                    "Minutes between the Watcher keying up on its own to read the INTEL tab and " +
+                        "what has been sighted since the last update. Off, it only speaks when " +
+                        "asked.",
+                    color = Sky.textDim,
+                    fontSize = 10.sp,
+                )
+                Spacer(Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    for (choice in intArrayOf(0, 3, 5, 7, 10, 30)) {
+                        FilterChip(
+                            selected = settings.intelUpdateMinutes == choice,
+                            onClick = {
+                                c.settingsStore.update { it.copy(intelUpdateMinutes = choice) }
+                            },
+                            label = {
+                                Text(
+                                    if (choice == 0) "OFF" else "$choice",
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                )
+                            },
+                            shape = RoundedCornerShape(9.dp),
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = Sky.surfaceHigh,
+                                labelColor = Sky.textDim,
+                                selectedContainerColor = Sky.cyan.copy(alpha = 0.22f),
+                                selectedLabelColor = Sky.cyan,
+                            ),
+                        )
+                    }
+                }
                 Spacer(Modifier.height(6.dp))
                 Text(
                     "It only listens between a tap on the status box under the map's clock and the " +

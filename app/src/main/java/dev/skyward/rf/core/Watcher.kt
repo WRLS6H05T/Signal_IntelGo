@@ -42,10 +42,13 @@ object Watcher {
         val mesh: Int = 0,
         val sats: Int = 0,
         val aircraft: Int = 0,
+        val drones: Int = 0,
         val gps: Boolean = false,
         val logging: Boolean = false,
         val km: Double = 0.0,
         val unit: String = Units.KM,
+        /** Watch hits heard since the last timed update; the on-demand report ignores this. */
+        val sightings: List<WatchView> = emptyList(),
     )
 
     /**
@@ -187,6 +190,42 @@ object Watcher {
             if (r.logging) "Logging is on, ${Units.distance(r.km, r.unit, 1)} so far."
             else "Logging is off.",
         )
+        return sb.toString()
+    }
+
+    /**
+     * The timed intel update: the tab read down, then what has been sighted since the last one.
+     *
+     * The call - "Watcher to operator, intel update" - is radio framing rather than text, so this
+     * begins at the tab itself. Every row the INTEL box shows is spoken, because the point of the
+     * update is to hear what is on screen without looking at it, and the sightings are the part
+     * that has changed since the last time it spoke.
+     */
+    fun intelUpdate(
+        r: ReportInput,
+        windowMinutes: Int,
+        sightings: List<WatchView> = r.sightings,
+    ): String {
+        val sb = StringBuilder("Intel tab. ")
+        sb.append(count(r.watches.size, "watch match", "watch matches")).append(". ")
+        sb.append("Satellites ${r.sats}, aircraft ${r.aircraft}, drones ${r.drones}, ")
+        sb.append("mesh nodes ${r.mesh}, cell towers ${r.cells}. ")
+        sb.append("Wi-Fi networks ${r.wifi}, Bluetooth devices ${r.ble}. ")
+        sb.append(if (r.gps) "GPS fix held. " else "No GPS fix. ")
+        sb.append(
+            if (r.logging) "Logging on, ${Units.distance(r.km, r.unit, 1)} so far. "
+            else "Logging off. ",
+        )
+
+        val window = count(windowMinutes, "minute")
+        sb.append("Alert sightings. ")
+        if (sightings.isEmpty()) {
+            sb.append("Nothing new in the last $window.")
+        } else {
+            sb.append(count(sightings.size, "sighting")).append(" in the last $window. ")
+            val lines = sightings.take(3).map { "${it.kind.spoken}, ${strength(it.rssi)}" }
+            sb.append(lines.joinToString(", ")).append('.')
+        }
         return sb.toString()
     }
 
