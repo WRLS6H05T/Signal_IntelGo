@@ -9,6 +9,21 @@ import kotlin.math.sin
 data class Projected(val x: Float, val y: Float, val front: Float, val lift: Float)
 
 /**
+ * The same four numbers, written into an object the caller keeps.
+ *
+ * The draw loop projects every entity on every frame. On a full sky that was a few hundred
+ * `Projected` objects sixty times a second - tens of thousands a second, none of them outliving
+ * the frame - and the collector's pauses were the regular dip in the globe's spin, arriving
+ * sooner the more of the catalogue was plotted. A sink is allocated once and refilled in place.
+ */
+class ProjectedSink {
+    var x: Float = 0f
+    var y: Float = 0f
+    var front: Float = 1f
+    var lift: Float = 0f
+}
+
+/**
  * Blended projection: Web-Mercator while zoomed in, orthographic sphere when zoomed out.
  *
  * Instead of switching projections, every point is projected both ways and interpolated by
@@ -38,14 +53,33 @@ class ViewProjection(
     fun elevated(lat: Double, lon: Double, altM: Double?): Projected =
         project(lat, lon, liftFor(altM))
 
+    /** [surface] into a sink: the draw loop may not allocate per entity per frame. */
+    fun surfaceInto(lat: Double, lon: Double, out: ProjectedSink) = projectInto(lat, lon, 0.0, out)
+
+    /** [elevated] into a sink. */
+    fun elevatedInto(lat: Double, lon: Double, altM: Double?, out: ProjectedSink) =
+        projectInto(lat, lon, liftFor(altM), out)
+
     private fun project(lat: Double, lon: Double, lift: Double): Projected {
+        val out = ProjectedSink()
+        projectInto(lat, lon, lift, out)
+        return Projected(out.x, out.y, out.front, out.lift)
+    }
+
+    private fun projectInto(lat: Double, lon: Double, lift: Double, out: ProjectedSink) {
         val la = Math.toRadians(lat.coerceIn(-89.9, 89.9))
         val dLon = Math.toRadians(lon) - lon0
+        val m = flat.toScreen(lat, lon)
+        if (t <= 0.001f) {
+            out.x = m.x
+            out.y = m.y
+            out.front = 1f
+            out.lift = 0f
+            return
+        }
+
         val cosLat = cos(la)
         val cosc = sinLat0 * sin(la) + cosLat0 * cosLat * cos(dLon)
-        val m = flat.toScreen(lat, lon)
-        if (t <= 0.001f) return Projected(m.x, m.y, 1f, 0f)
-
         val x3 = cosLat * sin(dLon)
         val y3 = cosLat0 * sin(la) - sinLat0 * cosLat * cos(dLon)
         // Tilt the ball toward the viewer about the screen's horizontal axis. An orthographic
@@ -57,12 +91,10 @@ class ViewProjection(
         val k = radius * (1.0 + lift)
         val gx = (cx + k * x3).toFloat()
         val gy = (cy - k * ty).toFloat()
-        return Projected(
-            x = m.x + (gx - m.x) * t,
-            y = m.y + (gy - m.y) * t,
-            front = 1f - (1f - tz.coerceIn(0.0, 1.0).toFloat()) * t,
-            lift = (lift * t).toFloat(),
-        )
+        out.x = m.x + (gx - m.x) * t
+        out.y = m.y + (gy - m.y) * t
+        out.front = 1f - (1f - tz.coerceIn(0.0, 1.0).toFloat()) * t
+        out.lift = (lift * t).toFloat()
     }
 }
 

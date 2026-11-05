@@ -1476,41 +1476,49 @@ private fun TacticalMap(
             // Above this the sky is too dense for detail: one wedge each, no tethers.
             val plottedAircraft = markers.count { it.layer == Layer.AIRCRAFT }
             val denseAircraft = plottedAircraft > 300
+            // One of each per frame: a logged globe draws hundreds of rings, and a fresh
+            // Stroke for every one of them was the same allocation problem as the projections.
+            val ringStroke = Stroke(width = 1.2f * density)
+            val selectStroke = Stroke(width = 1.6f * density)
+
+            // Two reusable projections for the whole frame: see [ProjectedSink].
+            val pa = ProjectedSink()
+            val pb = ProjectedSink()
 
             // ---- wardrive path: 5-bin red -> green, weak to strong ----
             if (path.size > 1) {
                 for (i in 1 until path.size) {
-                    val a = vp.surface(path[i - 1].lat, path[i - 1].lon)
-                    val b = vp.surface(path[i].lat, path[i].lon)
-                    if (cull && (a.front <= 0.02f || b.front <= 0.02f)) continue
-                    if (a.x < -200f || a.y < -200f || a.x > size.width + 200f || a.y > size.height + 200f) continue
+                    vp.surfaceInto(path[i - 1].lat, path[i - 1].lon, pa)
+                    vp.surfaceInto(path[i].lat, path[i].lon, pb)
+                    if (cull && (pa.front <= 0.02f || pb.front <= 0.02f)) continue
+                    if (pa.x < -200f || pa.y < -200f || pa.x > size.width + 200f || pa.y > size.height + 200f) continue
                     drawLine(
                         color = Color.Black.copy(alpha = 0.55f),
-                        start = Offset(a.x, a.y),
-                        end = Offset(b.x, b.y),
+                        start = Offset(pa.x, pa.y),
+                        end = Offset(pb.x, pb.y),
                         strokeWidth = 9f * density,
                     )
                 }
                 for (i in 1 until path.size) {
-                    val a = vp.surface(path[i - 1].lat, path[i - 1].lon)
-                    val b = vp.surface(path[i].lat, path[i].lon)
-                    if (cull && (a.front <= 0.02f || b.front <= 0.02f)) continue
-                    if (a.x < -200f || a.y < -200f || a.x > size.width + 200f || a.y > size.height + 200f) continue
+                    vp.surfaceInto(path[i - 1].lat, path[i - 1].lon, pa)
+                    vp.surfaceInto(path[i].lat, path[i].lon, pb)
+                    if (cull && (pa.front <= 0.02f || pb.front <= 0.02f)) continue
+                    if (pa.x < -200f || pa.y < -200f || pa.x > size.width + 200f || pa.y > size.height + 200f) continue
                     drawLine(
                         color = Color(SignalScale.colorOfScore(path[i].score)),
-                        start = Offset(a.x, a.y),
-                        end = Offset(b.x, b.y),
+                        start = Offset(pa.x, pa.y),
+                        end = Offset(pb.x, pb.y),
                         strokeWidth = 5.5f * density,
                     )
                 }
                 // dots make the bin colour readable at street zoom
                 if (camera.zoom >= 14.0) {
                     for (p in path) {
-                        val s = vp.surface(p.lat, p.lon)
+                        vp.surfaceInto(p.lat, p.lon, pa)
                         drawCircle(
                             color = Color(SignalScale.colorOfScore(p.score)),
                             radius = 2.4f * density,
-                            center = Offset(s.x, s.y),
+                            center = Offset(pa.x, pa.y),
                         )
                     }
                 }
@@ -1521,13 +1529,13 @@ private fun TacticalMap(
             // the logged-entity halos, and the sphere is for the sky, not the streets.
             if (signals.isNotEmpty() && !globeMode) {
                 for (s in signals) {
-                    val pr = vp.surface(s.lat, s.lon)
-                    if (pr.x < -20f || pr.y < -20f ||
-                        pr.x > size.width + 20f || pr.y > size.height + 20f
+                    vp.surfaceInto(s.lat, s.lon, pb)
+                    if (pb.x < -20f || pb.y < -20f ||
+                        pb.x > size.width + 20f || pb.y > size.height + 20f
                     ) {
                         continue
                     }
-                    val p = Offset(pr.x, pr.y)
+                    val p = Offset(pb.x, pb.y)
                     drawCircle(color = s.color.copy(alpha = 0.20f), radius = 3.6f * density, center = p)
                     drawCircle(color = s.color, radius = 1.7f * density, center = p)
                 }
@@ -1535,24 +1543,25 @@ private fun TacticalMap(
 
             // ---- entities: lifted off the globe by their own altitude ----
             for (m in markers) {
-                val pr = vp.elevated(m.lat, m.lon, m.altM)
+                vp.elevatedInto(m.lat, m.lon, m.altM, pa)
                 // whatever has rotated round the back of the sphere is not drawn
-                if (cull && pr.front <= 0.02f) continue
-                if (pr.x < -80f || pr.y < -80f || pr.x > size.width + 80f || pr.y > size.height + 80f) continue
-                val a = if (cull) smoothstep(pr.front) else 1f
+                if (cull && pa.front <= 0.02f) continue
+                if (pa.x < -80f || pa.y < -80f || pa.x > size.width + 80f || pa.y > size.height + 80f) continue
+                val a = if (cull) smoothstep(pa.front) else 1f
                 if (a <= 0.02f) continue
 
                 val base = markerColor(m, satEntity)
                 val color = base.copy(alpha = a)
-                val p = Offset(pr.x, pr.y)
+                val p = Offset(pa.x, pa.y)
 
                 // tether down to the ground point: the height cue that makes it airborne
                 // A tether is an altitude cue for things that belong to the ground: crewed
                 // traffic, a drone, a node on a mast. It is not one for a satellite catalogue -
                 // once the whole shell is plotted, hundreds of lines from sub-point to icon read
                 // as scratches across the ball rather than as height.
-                if (pr.lift > 0.004f && m.layer != Layer.AIRCRAFT && m.layer != Layer.SATELLITE) {
-                    val g = vp.surface(m.lat, m.lon)
+                if (pa.lift > 0.004f && m.layer != Layer.AIRCRAFT && m.layer != Layer.SATELLITE) {
+                    vp.surfaceInto(m.lat, m.lon, pb)
+                    val g = pb
                     drawLine(
                         color = base.copy(alpha = 0.28f * a),
                         start = Offset(g.x, g.y),
@@ -1591,7 +1600,7 @@ private fun TacticalMap(
                         color = ring.copy(alpha = a),
                         radius = r * 2.4f,
                         center = p,
-                        style = Stroke(width = 1.2f * density),
+                        style = ringStroke,
                     )
                 }
                 if (isIss(m)) {
@@ -1628,7 +1637,7 @@ private fun TacticalMap(
                         color = Sky.cyan.copy(alpha = a),
                         radius = r * 3.4f,
                         center = p,
-                        style = Stroke(width = 1.6f * density),
+                        style = selectStroke,
                     )
                 }
                 if (labels && a > 0.6f) {
@@ -1640,8 +1649,8 @@ private fun TacticalMap(
 
             // ---- own position ----
             if (self != null) {
-                val sp = vp.surface(self.lat, self.lon)
-                val p = Offset(sp.x, sp.y)
+                vp.surfaceInto(self.lat, self.lon, pa)
+                val p = Offset(pa.x, pa.y)
                 drawGpsLogo(p, 7.5f * density, Sky.cyan)
                 labelPaint.color = Sky.cyan.toArgb()
                 labelPaint.textSize = 9.5f * density
