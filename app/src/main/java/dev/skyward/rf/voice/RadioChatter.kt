@@ -25,14 +25,15 @@ object Radio {
     /**
      * Wraps a line in a radio call.
      *
-     * Alerts open with "break, break" - the phrase that means the net stops for traffic - and
-     * everything closes on "over", so a reply has an end rather than trailing off.
+     * An alert opens with the call sign - "Watcher to operator" - because it is the Watcher
+     * hailing; a reply does not, it is just the Watcher keying up. Both close on "Watcher out",
+     * the sign-off that ends a transmission on the net.
      */
     fun frame(text: String, alert: Boolean = false): String {
         val body = text.trim()
         if (body.isEmpty()) return body
-        val opener = if (alert) "Break, break. Watcher to all units." else "Watcher to all units."
-        return "$opener $body Over."
+        val opener = if (alert) "Watcher to operator. " else ""
+        return "$opener$body Watcher out."
     }
 }
 
