@@ -1,0 +1,44 @@
+> Task :shared:checkKotlinGradlePluginConfigurationErrors
+> Task :app:checkKotlinGradlePluginConfigurationErrors
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :desktop:checkKotlinGradlePluginConfigurationErrors
+> Task :desktop:generateComposeResClass UP-TO-DATE
+> Task :desktop:convertXmlValueResourcesForMain NO-SOURCE
+> Task :desktop:copyNonXmlValueResourcesForMain NO-SOURCE
+> Task :desktop:prepareComposeResourcesTaskForMain NO-SOURCE
+> Task :desktop:generateResourceAccessorsForMain NO-SOURCE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:generateDebugResValues UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :shared:processResources NO-SOURCE
+> Task :app:processDebugMainManifest
+> Task :app:processDebugManifest
+> Task :app:processDebugManifestForPackage
+> Task :app:processDebugResources
+
+> Task :shared:compileKotlin
+w: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/shared/src/main/java/dev/skyward/rf/scan/EspProtocol.kt:64:23 Variable 'next' is never used
+
+> Task :shared:compileJava NO-SOURCE
+> Task :shared:classes UP-TO-DATE
+> Task :shared:jar
+
+> Task :desktop:compileKotlin
+w: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/desktop/src/main/kotlin/dev/skyward/rf/desktop/ui/DriveScreen.kt:124:69 Unnecessary non-null assertion (!!) on a non-null receiver of type LatLon
+
+> Task :app:compileDebugKotlin
+w: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/app/src/main/java/dev/skyward/rf/ui/AppRoot.kt:138:36 'List: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.List
+w: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/app/src/main/java/dev/skyward/rf/ui/MapScreen.kt:522:9 Variable 'rf' is never used
+w: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/app/src/main/java/dev/skyward/rf/ui/MapScreen.kt:1249:5 Parameter 'accuracyM' is never used
+w: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/app/src/main/java/dev/skyward/rf/ui/MapScreen.kt:1385:13 The expression is unused
+w: file:///C:/Users/WirelessGhost/.config/freebuff-desktop/local-projects/6336bf32-1305-4ed8-a7d0-a9e7655d54ff/app/src/main/java/dev/skyward/rf/ui/WigleCard.kt:151:29 The value 'true' assigned to 'var stopped: Boolean defined in dev.skyward.rf.ui.WigleCard.`<anonymous>`.`<anonymous>`.`<anonymous>`.`<anonymous>`' is never used
+
+BUILD SUCCESSFUL in 19s
+21 actionable tasks: 12 executed, 9 up-to-date

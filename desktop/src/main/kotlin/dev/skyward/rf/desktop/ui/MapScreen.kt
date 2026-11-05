@@ -45,6 +45,8 @@ import androidx.compose.ui.unit.sp
 import dev.skyward.rf.core.Geo
 import dev.skyward.rf.core.LatLon
 import dev.skyward.rf.core.SatView
+import dev.skyward.rf.core.SignalScale
+import dev.skyward.rf.wardrive.WardriveSession
 import dev.skyward.rf.desktop.sky.SkyState
 import kotlin.math.PI
 import kotlin.math.atan
@@ -97,6 +99,8 @@ fun MapScreen(
     observer: LatLon?,
     land: Array<FloatArray>,
     tiles: TileStore,
+    drive: WardriveSession? = null,
+    spin: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     var centerLat by remember { mutableStateOf(observer?.lat ?: 20.0) }
@@ -117,8 +121,8 @@ fun MapScreen(
     val tileVersion by tiles.version.collectAsState()
 
     // A globe left alone should turn; dragging takes it, releasing gives it back.
-    LaunchedEffect(dragging, zoom) {
-        while (!dragging && zoom < GLOBE_BELOW_ZOOM) {
+    LaunchedEffect(dragging, zoom, spin) {
+        while (!dragging && zoom < GLOBE_BELOW_ZOOM && spin) {
             withFrameNanos { }
             centerLon = ((centerLon + 0.02 + 180.0) % 360.0) - 180.0
         }
@@ -151,12 +155,16 @@ fun MapScreen(
                     }
                 },
         ) {
+            val center = Offset(size.width / 2f, size.height / 2f)
+            val radius = min(size.width, size.height) * 0.42f
             if (zoom < GLOBE_BELOW_ZOOM) {
-                drawGlobeWorld(land, centerLat, centerLon, Offset(size.width / 2f, size.height / 2f), min(size.width, size.height) * 0.42f)
-                drawGlobeSats(sky.sats, centerLat, centerLon, Offset(size.width / 2f, size.height / 2f), min(size.width, size.height) * 0.42f)
+                drawGlobeWorld(land, centerLat, centerLon, center, radius)
+                drawGlobeSats(sky.sats, centerLat, centerLon, center, radius)
+                drawDriveGlobe(drive, centerLat, centerLon, center, radius)
             } else {
                 drawTiles(tiles, centerLat, centerLon, zoom, tileVersion)
                 drawMappedSats(sky.sats, centerLat, centerLon, zoom)
+                drawDriveMap(drive, centerLat, centerLon, zoom)
             }
             drawObserver(observer, centerLat, centerLon, zoom)
         }
@@ -190,6 +198,14 @@ fun MapScreen(
                 color = TextDim,
                 fontSize = 10.sp,
             )
+            if (drive != null) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "drive ${drive.name}  ·  ${drive.points.size} fixes",
+                    color = Mint,
+                    fontSize = 10.sp,
+                )
+            }
         }
 
         Text(
@@ -432,4 +448,81 @@ private fun DrawScope.drawObserver(observer: LatLon?, centerLat: Double, centerL
     val y = (Geo.latToNorm(observer.lat) * worldPx - cy + size.height / 2.0).toFloat()
     drawCircle(Color(0xFF5BE49B), radius = 3.5f, center = Offset(x, y))
     drawCircle(Color(0xFF5BE49B).copy(alpha = 0.7f), radius = 10f, center = Offset(x, y), style = Stroke(width = 1.2f))
+}
+
+// ---------------- drive overlay ----------------
+
+/**
+ * A recorded drive on the sphere: the track the phone draws on its globe.
+ *
+ * Each segment takes the colour of the fix that ended it, on the same 5-bin red->green scale, so
+ * a drive reads at a glance: green where the radios were loud, red where they went quiet.
+ *
+ * The projection is the globe's, and a segment whose end is over the horizon is dropped rather
+ * than clipped - drawing it to a pushed-out point would paint a line across the back of the ball.
+ */
+private fun DrawScope.drawDriveGlobe(
+    session: WardriveSession?,
+    centerLat: Double,
+    centerLon: Double,
+    center: Offset,
+    radius: Float,
+) {
+    if (session == null || session.points.isEmpty()) return
+    val sinLat0 = sin(Math.toRadians(centerLat))
+    val cosLat0 = cos(Math.toRadians(centerLat))
+    val lon0 = Math.toRadians(centerLon)
+    val cosTilt = cos(Math.toRadians(TILT_DEG))
+    val sinTilt = sin(Math.toRadians(TILT_DEG))
+    val disc = Path().apply {
+        addOval(Rect(center.x - radius, center.y - radius, center.x + radius, center.y + radius))
+    }
+    clipPath(disc) {
+        var prev: Offset? = null
+        for (point in session.points) {
+            val la = Math.toRadians(point.lat)
+            val dLon = Math.toRadians(point.lon) - lon0
+            val cosLat = cos(la)
+            val cosc = sinLat0 * sin(la) + cosLat0 * cosLat * cos(dLon)
+            val y3 = cosLat0 * sin(la) - sinLat0 * cosLat * cos(dLon)
+            val front = y3 * sinTilt + cosc * cosTilt
+            if (front <= 0.02) {
+                prev = null
+                continue
+            }
+            val current = Offset(
+                (center.x + radius * (cosLat * sin(dLon))).toFloat(),
+                (center.y - radius * (y3 * cosTilt - cosc * sinTilt)).toFloat(),
+            )
+            val from = prev
+            val colour = Color(SignalScale.binArgb[SignalScale.binOfScore(point.score)])
+            if (from != null) drawLine(colour, from, current, strokeWidth = 2.6f)
+            drawCircle(colour, radius = 2.2f, center = current)
+            prev = current
+        }
+    }
+}
+
+/** A recorded drive on the flat map, in the map's own pixel space. */
+private fun DrawScope.drawDriveMap(
+    session: WardriveSession?,
+    centerLat: Double,
+    centerLon: Double,
+    zoom: Double,
+) {
+    if (session == null || session.points.isEmpty()) return
+    val worldPx = TILE * 2.0.pow(zoom)
+    val originX = Geo.lonToNorm(centerLon) * worldPx
+    val originY = Geo.latToNorm(centerLat) * worldPx
+    var prev: Offset? = null
+    for (point in session.points) {
+        val current = Offset(
+            (Geo.lonToNorm(point.lon) * worldPx - originX + size.width / 2.0).toFloat(),
+            (Geo.latToNorm(point.lat) * worldPx - originY + size.height / 2.0).toFloat(),
+        )
+        val colour = Color(SignalScale.binArgb[SignalScale.binOfScore(point.score)])
+        val from = prev
+        if (from != null) drawLine(colour, from, current, strokeWidth = 3.2f)
+        prev = current
+    }
 }

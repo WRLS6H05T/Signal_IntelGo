@@ -543,10 +543,28 @@ so a bare board comes up running it.**Not verified:** there is no C3/C5 on this 
 
 ## Desktop host
 
-`:desktop` is the same product on a PC, in the seat the phone calls **HOST**. It opens on the
-globe - the sphere, its graticule, the bundled coastlines and the live satellite shell, drag to
-spin - and the folded menu in the bottom-right corner, the same one the phone has, carries the
-tabs. **Host** is one of them.
+`:desktop` is the whole app on a PC: the same globe, the same map, the same drive recorder and
+logs, and the seat the phone calls **HOST**. The folded menu in the bottom-right corner is the
+phone's, and it carries the same tabs - **Map**, **Drive**, **Log**, **Setup** and **Host**.
+
+Map is the sphere the phone draws: one filled polygon per coastline ring, its back-side vertices
+pushed outside the disc and a circular clip over the whole ring, which is the only shape that does
+not close across the middle of a continent. Drag turns it, the wheel zooms, and past about zoom
+4.2 it becomes the street map - OpenStreetMap tiles from a disk cache, the satellite shell over
+them, and a recorded drive drawn on either view.
+
+Drive records a drive from the devices the desk is hosting, because a PC has no Wi-Fi scanner and
+no GPS of its own: the position is the fix of whichever linked device reports one, and the
+networks and advertisers are the merged table those devices fill. It writes the same
+`session_*.json` files the phone writes, and the track is coloured on the same five-bin
+red-to-green scale, so a drive reads the way it does in the hand.
+
+Log is those drives - show one on the map, export CSV or GeoJSON, delete it - plus the captured
+entities and the placed signals. Exports go to `~/signintelgo/exports`.
+
+Setup is every setting the desk honours (units, globe spin), the BLE bridge it is using, and the
+sensor boards: a serial console, and the bundled C3/C5 firmware flashed over the same ROM
+bootloader protocol the phone speaks - whole-chip erase, the same 1 KiB blocks, the same frames.
 
 Host is the link. It scans BLE, connects to every phone advertising the two-device service as the
 GATT central, picks up every sensor board from its advertisement, and pushes one settings blob to
@@ -589,7 +607,7 @@ in range.
 ### One protocol, not two
 
 `:shared` holds the peer wire format (`PeerProtocol`), its chunking (`PeerFrames`), drive
-packaging (`PeerLogs`), the ESP32 advertisement codec, the TLE catalogue with SGP4 propagation
+packaging (`PeerLogs`), the drive recorder and signal log (`WardriveEngine`, `SignalLog`), the settings store, the ESP32 advertisement codec and the bootloader framing (`EspSlip`, `EspBootloader`), the TLE catalogue with SGP4 propagation
 (`SatTracker`, `OrbitMath`) and the core value types. The phone and the desktop compile those same
 files, so the globe on the desk puts a satellite in the same place as the globe in the hand, and
 the coastline is one bundled asset read by both.
@@ -598,4 +616,6 @@ the coastline is one bundled asset read by both.
 to a phone and a real board's advertisement have not been exercised against a device. The
 advertisement decode, the chunking and the framing are covered by JVM tests, and `--selftest`
 reports whether the adapter answered, whether the coastlines parsed and whether the catalogue
-produced positions.
+produced positions. The flasher has never been run against a board either: the frames and the
+block arithmetic are unit tested, but the erase, the write and the reboot are untested, and the
+console has not been opened on real hardware.

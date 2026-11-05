@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -50,13 +51,15 @@ val Amber = Color(0xFFFB923C)
 val TextMain = Color(0xFFE8EEF7)
 val TextDim = Color(0xFF8FA3BF)
 
-private val tabs = listOf("Map", "Host")
+private val tabs = listOf("Map", "Drive", "Log", "Setup", "Host")
 
 @Composable
 fun DesktopApp(container: DesktopContainer) {
     val host by container.host.state.collectAsState()
     val settings by container.settings.collectAsState()
     val sky by container.sky.state.collectAsState()
+    val drive by container.wardrive.overlay.collectAsState()
+    val config by container.settingsStore.state.collectAsState()
 
     // The first device on the link that holds a fix stands in as the observer, the way a board
     // stands in on the phone when the handset has none.
@@ -67,7 +70,19 @@ fun DesktopApp(container: DesktopContainer) {
 
     Box(Modifier.fillMaxSize().background(Ink)) {
         when (tab) {
-            0 -> MapScreen(sky, observer, container.land, container.tiles, Modifier.fillMaxSize())
+            0 -> MapScreen(
+                sky = sky,
+                observer = observer,
+                land = container.land,
+                tiles = container.tiles,
+                drive = drive,
+                spin = config.globeSpin > 0,
+                modifier = Modifier.fillMaxSize(),
+            )
+
+            1 -> DriveScreen(container, host, Modifier.fillMaxSize())
+            2 -> LogScreen(container, Modifier.fillMaxSize()) { tab = 0 }
+            3 -> SetupScreen(container, Modifier.fillMaxSize())
             else -> HostScreen(host, settings, container, Modifier.fillMaxSize())
         }
 
@@ -265,8 +280,54 @@ private fun DeviceRow(device: DeviceHost.Hosted) {
     }
 }
 
+/** A tappable label in the phone's style: tinted, boxed, and quiet when it is not available. */
 @Composable
-private fun Stat(label: String, value: String, modifier: Modifier = Modifier) {
+fun Action(label: String, color: Color = Sky, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(
+        Modifier.clip(RoundedCornerShape(8.dp))
+            .background(color.copy(alpha = if (enabled) 0.12f else 0.04f))
+            .border(1.dp, color.copy(alpha = if (enabled) 0.45f else 0.12f), RoundedCornerShape(8.dp))
+            .clickable(enabled = enabled) { onClick() }
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    ) {
+        Text(
+            label,
+            color = if (enabled) color else TextDim.copy(alpha = 0.5f),
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.8.sp,
+        )
+    }
+}
+
+/** A titled block: the shape every screen on the phone is built from. */
+@Composable
+fun Section(title: String, trailing: String? = null, content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(Panel)
+            .border(1.dp, Line, RoundedCornerShape(10.dp))
+            .padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                title.uppercase(),
+                color = Sky,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.4.sp,
+                modifier = Modifier.weight(1f),
+            )
+            if (trailing != null) Text(trailing, color = TextDim, fontSize = 10.sp)
+        }
+        Spacer(Modifier.height(8.dp))
+        content()
+    }
+}
+
+@Composable
+fun Stat(label: String, value: String, modifier: Modifier = Modifier) {
     Column(
         modifier.clip(RoundedCornerShape(8.dp)).background(Panel).border(1.dp, Line, RoundedCornerShape(8.dp))
             .padding(horizontal = 10.dp, vertical = 8.dp),
@@ -277,7 +338,7 @@ private fun Stat(label: String, value: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun Toggle(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+fun Toggle(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(vertical = 1.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = TextMain, fontSize = 12.sp, modifier = Modifier.weight(1f))
         Switch(

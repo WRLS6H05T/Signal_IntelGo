@@ -15,6 +15,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.8.1")
     // The satellite catalogue is the phone's tracker, which takes an OkHttp client.
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Serial ports for the ESP32 console and flasher: the desktop has no UsbManager, so the
+    // board is reached through the OS's own COM port with DTR/RTS for the bootloader reset.
+    implementation("com.fazecast:jSerialComm:2.11.0")
 
     testImplementation("junit:junit:4.13.2")
 }
@@ -32,7 +35,9 @@ java {
  */
 tasks.named<ProcessResources>("processResources") {
     from(rootProject.file("app/src/main/assets")) {
-        include("world_land.txt")
+        // The same coastlines and the same sensor firmware the phone ships, so the desk can
+        // flash a board with the image the phone would have written.
+        include("world_land.txt", "firmware/**")
     }
 }
 

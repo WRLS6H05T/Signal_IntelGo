@@ -3,8 +3,8 @@ package dev.skyward.rf.wardrive
 import dev.skyward.rf.core.FileStore
 import dev.skyward.rf.core.appJson
 import dev.skyward.rf.core.Geo
+import dev.skyward.rf.core.RfObservation
 import dev.skyward.rf.core.SignalScale
-import dev.skyward.rf.scan.RfScanner
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.decodeFromString
@@ -13,9 +13,12 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Records a drive: every GPS fix is paired with the Wi-Fi/BLE snapshot from [RfScanner] and
- * stored with a 0..100 signal score. The score is what the map turns into the 5-colour
- * red->green path.
+ * Records a drive: every GPS fix is paired with whatever the radios heard at it and stored with
+ * a 0..100 signal score. The score is what the map turns into the 5-colour red->green path.
+ *
+ * The radios are handed in rather than read from a scanner, because the two platforms hear the
+ * world in completely different ways: the phone's own Wi-Fi and BLE chips, and the desktop,
+ * which has neither and hears through the devices it hosts.
  */
 class WardriveEngine(
     private val store: FileStore,
@@ -102,8 +105,10 @@ class WardriveEngine(
         lon: Double,
         accuracyM: Float,
         now: Long,
-        snapshot: RfScanner.Snapshot,
-        counts: LoggedCounts,
+        wifi: List<RfObservation>,
+        ble: List<RfObservation>,
+        droneKeys: Set<String> = emptySet(),
+        counts: LoggedCounts = LoggedCounts(),
     ): WardrivePoint? {
         val st = _state.value
         if (!st.active) return null
@@ -114,8 +119,6 @@ class WardriveEngine(
         if (lastFixAt != 0L && elapsed < 2_000) return null
         if (lastFixAt != 0L && movedM < 2.0 && elapsed < 8_000) return null
 
-        val wifi = snapshot.wifi
-        val ble = snapshot.ble
         val obs = wifi + ble
         val peak = SignalScale.peakScore(obs)
         val avg = SignalScale.meanScore(obs)
@@ -145,7 +148,7 @@ class WardriveEngine(
 
         wifi.forEach { seenWifi.add(it.id) }
         ble.forEach { seenBle.add(it.id) }
-        snapshot.drones.keys.forEach { seenDrones.add(it) }
+        droneKeys.forEach { seenDrones.add(it) }
         if (peak > bestScore) bestScore = peak
 
         val addedDistance = if (lastFixAt == 0L) 0.0 else Geo.distanceM(lastLat, lastLon, lat, lon)

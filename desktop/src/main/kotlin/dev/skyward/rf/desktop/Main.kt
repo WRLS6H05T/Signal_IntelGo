@@ -9,9 +9,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import dev.skyward.rf.core.FileStore
+import dev.skyward.rf.core.SettingsStore
 import dev.skyward.rf.desktop.ble.BleBridge
+import dev.skyward.rf.desktop.esp.EspFlash
 import dev.skyward.rf.desktop.host.DeviceHost
+import dev.skyward.rf.desktop.host.DriveFeed
 import dev.skyward.rf.desktop.host.HostSettings
+import dev.skyward.rf.wardrive.LoggedRegistry
+import dev.skyward.rf.wardrive.SignalLog
+import dev.skyward.rf.wardrive.WardriveEngine
+import java.io.File
 import dev.skyward.rf.desktop.sky.DesktopSky
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
@@ -58,11 +66,29 @@ class DesktopContainer {
 
     val tiles = TileStore(http, scope)
 
+    /** Everything the desk keeps on disk, in the phone's own file layout. */
+    val store = FileStore(File(System.getProperty("user.home"), "signintelgo"))
+
+    /** The phone's settings - units, globe spin and the rest - honoured by these screens. */
+    val settingsStore = SettingsStore(store)
+
+    val logged = LoggedRegistry(store)
+
+    val signals = SignalLog(store)
+
+    val wardrive = WardriveEngine(store, logged)
+
+    /** Serial ports: the console and the flasher for a board on the desk's USB. */
+    val esp = EspFlash()
+
+    private val driveFeed = DriveFeed(host, wardrive, signals, scope)
+
     /** The bundled coastlines, read once by the build's copy of the phone's asset. */
     val land: Array<FloatArray> by lazy { WorldLand.load() }
 
     fun start() {
         host.start()
+        driveFeed.start()
         // A device on the link with a fix is the observer, exactly as a board stands in for a
         // handset with no lock of its own.
         sky.start { host.state.value.devices.firstNotNullOfOrNull { it.fix } }

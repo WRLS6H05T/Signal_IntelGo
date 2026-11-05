@@ -1,0 +1,30 @@
+> Task :shared:checkKotlinGradlePluginConfigurationErrors
+> Task :desktop:checkKotlinGradlePluginConfigurationErrors
+> Task :desktop:generateComposeResClass UP-TO-DATE
+> Task :desktop:convertXmlValueResourcesForMain NO-SOURCE
+> Task :desktop:copyNonXmlValueResourcesForMain NO-SOURCE
+> Task :desktop:prepareComposeResourcesTaskForMain NO-SOURCE
+> Task :desktop:generateResourceAccessorsForMain NO-SOURCE
+> Task :desktop:processResources UP-TO-DATE
+> Task :desktop:prepareAppResources NO-SOURCE
+> Task :shared:compileKotlin UP-TO-DATE
+> Task :shared:compileJava NO-SOURCE
+> Task :shared:processResources NO-SOURCE
+> Task :shared:classes UP-TO-DATE
+> Task :shared:jar UP-TO-DATE
+> Task :desktop:compileKotlin UP-TO-DATE
+> Task :desktop:compileJava NO-SOURCE
+> Task :desktop:classes UP-TO-DATE
+> Task :desktop:jar
+
+> Task :desktop:run
+bridge=C:\Users\WirelessGhost\.config\freebuff-desktop\local-projects\6336bf32-1305-4ed8-a7d0-a9e7655d54ff\desktop\tools\ble_bridge.py
+adapter_ok=true
+detail=adapter winrt, scanning
+devices=0
+land_rings=129
+sats=240
+tle=240 element sets
+
+BUILD SUCCESSFUL in 5s
+9 actionable tasks: 4 executed, 5 up-to-date

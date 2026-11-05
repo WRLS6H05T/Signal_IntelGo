@@ -586,12 +586,15 @@ class Container(context: Context) {
                     launch { runCatching { weather.refresh(fix.lat, fix.lon) } }
                 }
                 if (wardrive.state.value.active) {
+                    val snap = rf.snapshot()
                     wardrive.onFix(
                         lat = fix.lat,
                         lon = fix.lon,
                         accuracyM = fix.accuracyM,
                         now = fix.at,
-                        snapshot = rf.snapshot(),
+                        wifi = snap.wifi,
+                        ble = snap.ble,
+                        droneKeys = snap.drones.keys,
                         counts = airspace.countsSnapshot(),
                     )
                 }
