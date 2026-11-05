@@ -112,8 +112,8 @@ object EspSlip {
  * Command packets and the handful of ROM commands the flasher issues.
  *
  * The sequence is the stock one: reset into the bootloader, SYNC until the board answers, then
- * FLASH_BEGIN - which erases the whole chip first, because the erase size in its first word is
- * what the ROM erases before it accepts a byte - one FLASH_DATA per 1 KiB block and FLASH_END. No stub loader is uploaded, so this works on an
+ * FLASH_BEGIN - which erases as much flash as its first word asks for before accepting a byte -
+ * one FLASH_DATA per 1 KiB block and FLASH_END. No stub loader is uploaded, so this works on an
  * untouched board with nothing but its ROM: slower than esptool's stub at high baud, but it has
  * no chip-specific second stage that can be mismatched.
  */
@@ -128,8 +128,8 @@ object EspBootloader {
     /**
      * esptool's ERASE_FLASH opcode. Deliberately unused: the C3 and C5 ROMs do not implement it
      * - esptool only ever sends it after uploading its stub - so a board that gets it simply
-     * never answers, which reads from the phone as an erase that hangs forever. The whole-chip
-     * erase rides in FLASH_BEGIN's first word instead, which every ROM does honour.
+     * never answers, which reads from the phone as an erase that hangs forever. The erase rides in
+     * FLASH_BEGIN's first word instead, which every ROM does honour.
      */
     const val OP_ERASE_FLASH = 0xD0
 
@@ -215,12 +215,15 @@ object EspBootloader {
     }
 
     /**
-     * FLASH_BEGIN: erase size, block count, block size, offset and the encrypted flag. The fifth
-     * word is what C3/C5 ROMs expect; the classic ESP32 takes four and is not flashed here.
+     * FLASH_BEGIN: erase size, block count, block size, offset - four words, the shape esptool
+     * sends to a ROM loader. The stub's fifth word is the encrypted-image flag and is not sent:
+     * an image that is not encrypted has no use for it, and a fifth word is one more thing a
+     * ROM can misread at exactly the point where the board goes quiet.
      *
-     * [eraseBytes] is how much the ROM erases before it takes the first block, and it is the
-     * only whole-chip erase this protocol needs: pass the flash size and the old partition
-     * table, the old NVS and any tail past the new image are gone before anything is written.
+     * [eraseBytes] is how much the ROM erases before it takes the first block. It defaults to
+     * the image's own span, rounded up to whole 4 KiB sectors: the merged image carries its own
+     * bootloader and partition table, so that is everything this write touches, and it finishes
+     * in seconds where asking for the whole chip stalls the cable.
      */
     fun flashBeginPayload(
         imageSize: Int,
