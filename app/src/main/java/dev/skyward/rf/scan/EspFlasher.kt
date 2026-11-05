@@ -109,21 +109,32 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
             // obvious alternative: esptool only sends that after uploading its stub.
             val blocks = EspBootloader.blocks(bytes)
             val eraseBytes = EspBootloader.eraseSize(bytes.size)
-            val beginPayload = EspBootloader.flashBeginPayload(bytes.size, blocks.size, eraseBytes = eraseBytes)
-            onStep("Erasing ${eraseBytes / 1024} KiB", 0.04f)
+            // The extended, five-word FLASH_BEGIN: the C3 and C5 ROMs do not answer the
+            // four-word form at all, which is why this step used to hang instead of failing.
+            val beginPayload = EspBootloader.flashBeginPayload(
+                imageSize = bytes.size,
+                blocks = blocks.size,
+                eraseBytes = eraseBytes,
+                extended = true,
+            )
+            // esptool's own budget for a ROM erase: 40 s per megabyte, never less than a few
+            // seconds. A 1.3 MiB image gets about a minute, which is generous for the erase and
+            // short enough that a dead cable is reported rather than waited out.
+            val eraseTimeoutMs = (bytes.size / 1_000_000.0 * 40_000.0).toLong()
+                .coerceAtLeast(ERASE_MIN_TIMEOUT_MS)
+            val label = "Erasing ${eraseBytes / 1024} KiB"
+            onStep(label, 0.04f)
             // A command dropped in the first moments after SYNC is worth one repeat: the board
             // has not started erasing if it never answered the first one.
-            val begin = command(session, EspBootloader.OP_FLASH_BEGIN, beginPayload, ERASE_TIMEOUT_MS)
-                ?: run {
-                    onStep("Erasing ${eraseBytes / 1024} KiB (retry)", 0.04f)
-                    command(session, EspBootloader.OP_FLASH_BEGIN, beginPayload, ERASE_TIMEOUT_MS)
-                }
-                ?: return Result.failure(
-                    IllegalStateException(
-                        "The board never answered the erase. Hold BOOT, tap RESET, release BOOT, " +
-                            "then flash again.",
-                    ),
-                )
+            val begin = ticking(label, onStep) {
+                command(session, EspBootloader.OP_FLASH_BEGIN, beginPayload, eraseTimeoutMs)
+                    ?: command(session, EspBootloader.OP_FLASH_BEGIN, beginPayload, eraseTimeoutMs)
+            } ?: return Result.failure(
+                IllegalStateException(
+                    "The board never answered the erase after ${eraseTimeoutMs / 1000}s twice. " +
+                        "Hold BOOT, tap RESET, release BOOT, then flash again.",
+                ),
+            )
             if (begin.status != 0) {
                 return Result.failure(IllegalStateException("The board refused the erase (status ${begin.status})"))
             }
@@ -157,6 +168,35 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
             return Result.failure(t)
         } finally {
             session.close()
+        }
+    }
+
+    /**
+     * Runs [block] while a step line counts the seconds.
+     *
+     * A ROM erase is a long silence on the wire by design: the board erases everything the
+     * command asked for before it answers. Without this, a working erase and a dead cable look
+     * identical on the phone, which is exactly how the flasher was being reported.
+     */
+    private fun <T> ticking(label: String, onStep: (String, Float) -> Unit, block: () -> T): T {
+        val started = SystemClock.elapsedRealtime()
+        val running = java.util.concurrent.atomic.AtomicBoolean(true)
+        val ticker = Thread {
+            while (running.get()) {
+                if (runCatching { Thread.sleep(1_000) }.isFailure) break
+                if (!running.get()) break
+                val seconds = (SystemClock.elapsedRealtime() - started) / 1_000
+                runCatching { onStep("$label, ${seconds}s", 0.04f) }
+            }
+        }.apply {
+            isDaemon = true
+            start()
+        }
+        return try {
+            block()
+        } finally {
+            running.set(false)
+            ticker.interrupt()
         }
     }
 
@@ -243,11 +283,8 @@ class EspFlasher(private val context: Context, private val usb: UsbBoards) {
     private companion object {
         const val MANIFEST = "firmware/firmware.json"
         const val SYNC_TIMEOUT_MS = 400L
-        /**
-         * How long the ROM may take to erase the image's span before the command is treated as
-         * lost. A 1.5 MiB image is well under a second of flash time; the rest is cable slack.
-         */
-        const val ERASE_TIMEOUT_MS = 20_000L
+        /** Never wait less than this for an erase, however small the image is. */
+        const val ERASE_MIN_TIMEOUT_MS = 20_000L
         const val BLOCK_TIMEOUT_MS = 8_000L
     }
 }

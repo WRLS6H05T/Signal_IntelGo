@@ -215,22 +215,29 @@ object EspBootloader {
     }
 
     /**
-     * FLASH_BEGIN: erase size, block count, block size, offset - four words, the shape esptool
-     * sends to a ROM loader. The stub's fifth word is the encrypted-image flag and is not sent:
-     * an image that is not encrypted has no use for it, and a fifth word is one more thing a
-     * ROM can misread at exactly the point where the board goes quiet.
+     * FLASH_BEGIN: erase size, block count, block size, offset and, on everything newer than the
+     * classic ESP32, a fifth word carrying the encrypted-write flag. esptool omits the fifth word
+     * only for the ESP32 and ESP8266 ROMs; the C3 and C5 ROMs here take the extended form, and a
+     * four-word payload is a command they ignore - which on the phone is an erase that never
+     * finishes.
      *
      * [eraseBytes] is how much the ROM erases before it takes the first block. It defaults to
      * the image's own span, rounded up to whole 4 KiB sectors: the merged image carries its own
      * bootloader and partition table, so that is everything this write touches, and it finishes
-     * in seconds where asking for the whole chip stalls the cable.
+     * in seconds where asking for the whole chip leaves the board silent for minutes.
      */
     fun flashBeginPayload(
         imageSize: Int,
         blocks: Int,
         offset: Int = 0,
         eraseBytes: Int = eraseSize(imageSize),
-    ): ByteArray = ints(eraseBytes, blocks, BLOCK_SIZE, offset)
+        /** The extended format, which is what every chip newer than the ESP32 expects. */
+        extended: Boolean = true,
+    ): ByteArray = if (extended) {
+        ints(eraseBytes, blocks, BLOCK_SIZE, offset, 0)
+    } else {
+        ints(eraseBytes, blocks, BLOCK_SIZE, offset)
+    }
 
     fun flashDataPayload(dataSize: Int, seq: Int, data: ByteArray): ByteArray {
         val head = ints(dataSize, seq, 0, 0)
