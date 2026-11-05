@@ -26,8 +26,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -377,11 +379,116 @@ private fun DrawScope.drawGlobeSats(
         val k = radius * (1.0 + lift)
         val x = (center.x + k * (cosLat * sin(dLon))).toFloat()
         val y = (center.y - k * (y3 * cosTilt - cosc * sinTilt)).toFloat()
-        val body = Color(0xFF38BDF8)
-        drawCircle(body, radius = 1.7f, center = Offset(x, y))
-        drawLine(body.copy(alpha = 0.75f), Offset(x - 4f, y), Offset(x - 1.8f, y), strokeWidth = 1f)
-        drawLine(body.copy(alpha = 0.75f), Offset(x + 1.8f, y), Offset(x + 4f, y), strokeWidth = 1f)
+        // Higher in the sky means nearer the observer, so it is drawn a little larger: a pass
+        // overhead reads as a spacecraft rather than the same dot as one on the horizon.
+        val scale = 0.95f + (sat.elevation.coerceIn(0.0, 90.0) / 90.0).toFloat() * 0.5f
+        drawSatIcon(Offset(x, y), scale, satTint(sat))
     }
+}
+
+/** Cyan for a live element, the logged violet for one this machine has captured. */
+private fun satTint(sat: SatView): Color =
+    if (sat.logged) Color(SignalScale.LOGGED_COLOR) else Color(0xFF38BDF8)
+
+/**
+ * A spacecraft, not a dot: body, two solar wings with their cells, the masts that hold them and
+ * a whip antenna.
+ *
+ * The globe is a dark sphere seen from far away, so the icon carries its own contrast - a soft
+ * glow under a light body, wings dark enough to read as panels and outlined in the live tint -
+ * and it stays axis-aligned, because a rotated glyph at this size turns into a smear.
+ */
+private fun DrawScope.drawSatIcon(anchor: Offset, scale: Float, tint: Color) {
+    val u = scale
+    val bodyW = 6.2f * u
+    val bodyH = 5.2f * u
+    val panelW = 8.4f * u
+    val panelH = 4.8f * u
+    val gap = 1.1f * u
+
+    // Halo, so a satellite over the dark ocean still reads as a lit object.
+    drawCircle(tint.copy(alpha = 0.14f), radius = 10.5f * u, center = anchor)
+    drawCircle(tint.copy(alpha = 0.07f), radius = 14f * u, center = anchor)
+
+    val panelFill = Color(0xFF0E2C4F)
+    val cellLine = Color(0xFF9AB6D4)
+
+    fun wing(atX: Float) {
+        drawRoundRect(
+            color = panelFill,
+            topLeft = Offset(atX, anchor.y - panelH / 2f),
+            size = Size(panelW, panelH),
+            cornerRadius = CornerRadius(0.7f * u),
+        )
+        drawRoundRect(
+            color = tint.copy(alpha = 0.85f),
+            topLeft = Offset(atX, anchor.y - panelH / 2f),
+            size = Size(panelW, panelH),
+            cornerRadius = CornerRadius(0.7f * u),
+            style = Stroke(width = 0.7f * u),
+        )
+        for (i in 1 until 3) {
+            val x = atX + panelW * i / 3f
+            drawLine(
+                cellLine.copy(alpha = 0.6f),
+                Offset(x, anchor.y - panelH / 2f + 0.7f * u),
+                Offset(x, anchor.y + panelH / 2f - 0.7f * u),
+                strokeWidth = 0.5f * u,
+            )
+        }
+        drawLine(
+            cellLine.copy(alpha = 0.5f),
+            Offset(atX + 0.6f * u, anchor.y),
+            Offset(atX + panelW - 0.6f * u, anchor.y),
+            strokeWidth = 0.5f * u,
+        )
+    }
+
+    val leftX = anchor.x - bodyW / 2f - gap - panelW
+    val rightX = anchor.x + bodyW / 2f + gap
+    wing(leftX)
+    wing(rightX)
+
+    // Masts: without them the wings float beside the body instead of being attached to it.
+    drawLine(
+        tint.copy(alpha = 0.8f),
+        Offset(anchor.x - bodyW / 2f, anchor.y),
+        Offset(leftX + panelW, anchor.y),
+        strokeWidth = 0.9f * u,
+    )
+    drawLine(
+        tint.copy(alpha = 0.8f),
+        Offset(anchor.x + bodyW / 2f, anchor.y),
+        Offset(rightX, anchor.y),
+        strokeWidth = 0.9f * u,
+    )
+
+    val bodyTop = anchor.y - bodyH / 2f
+    drawRoundRect(
+        color = Color(0xFFE8EEF7),
+        topLeft = Offset(anchor.x - bodyW / 2f, bodyTop),
+        size = Size(bodyW, bodyH),
+        cornerRadius = CornerRadius(1.5f * u),
+    )
+    drawRoundRect(
+        color = tint,
+        topLeft = Offset(anchor.x - bodyW / 2f, bodyTop),
+        size = Size(bodyW, bodyH),
+        cornerRadius = CornerRadius(1.5f * u),
+        style = Stroke(width = 0.9f * u),
+    )
+    // Instrument band across the bus.
+    drawLine(
+        Color(0xFF0B111B).copy(alpha = 0.45f),
+        Offset(anchor.x - bodyW / 2f + 1.1f * u, anchor.y + 0.7f * u),
+        Offset(anchor.x + bodyW / 2f - 1.1f * u, anchor.y + 0.7f * u),
+        strokeWidth = 0.9f * u,
+    )
+
+    // Whip antenna, up out of the bus, with its tip lit.
+    val tip = Offset(anchor.x, bodyTop - 3.6f * u)
+    drawLine(tint.copy(alpha = 0.9f), Offset(anchor.x, bodyTop), tip, strokeWidth = 0.9f * u)
+    drawCircle(tint, radius = 1.2f * u, center = tip)
 }
 
 // ---------------- flat map ----------------
@@ -432,9 +539,8 @@ private fun DrawScope.drawMappedSats(sats: List<SatView>, centerLat: Double, cen
     for (sat in sats) {
         val x = Geo.lonToNorm(sat.lon) * worldPx - cx + size.width / 2.0
         val y = Geo.latToNorm(sat.lat) * worldPx - cy + size.height / 2.0
-        if (x < -20 || y < -20 || x > size.width + 20 || y > size.height + 20) continue
-        val body = Color(0xFF38BDF8)
-        drawCircle(body, radius = 2.2f, center = Offset(x.toFloat(), y.toFloat()))
+        if (x < -30 || y < -30 || x > size.width + 30 || y > size.height + 30) continue
+        drawSatIcon(Offset(x.toFloat(), y.toFloat()), 0.8f, satTint(sat))
     }
 }
 
