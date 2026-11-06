@@ -78,6 +78,7 @@ import dev.skyward.rf.scan.UsbBoards
 import dev.skyward.rf.sky.SatTracker
 import dev.skyward.rf.core.Layer
 import dev.skyward.rf.core.MeshNode
+import dev.skyward.rf.meshcore.MeshCore
 import dev.skyward.rf.core.SatView
 import dev.skyward.rf.core.RfKind
 import dev.skyward.rf.core.ScanPlan
@@ -123,6 +124,8 @@ data class MapMarker(
     val birds3: Boolean = false,
     /** Which surveillance family matched, when this marker is a watch hit. */
     val watch: WatchKind? = null,
+    /** A MeshCore repeater: infrastructure gets its own glyph, not another dish. */
+    val meshRepeater: Boolean = false,
 )
 
 /**
@@ -292,6 +295,7 @@ private fun markerColor(m: MapMarker, satEntity: Color = Sky.logged): Color = wh
         WatchKind.TRACKER -> Sky.watchTracker
         null -> Sky.watchFlock
     }
+    m.layer == Layer.MESH && m.meshRepeater -> Sky.meshCore
     else -> Sky.mesh
 }
 
@@ -426,16 +430,26 @@ fun buildMarkers(
                 lat = lat,
                 lon = lon,
                 title = n.name.ifBlank { n.id },
-                subtitle = "Meshtastic · ${n.source.uppercase()}",
+                // MeshCore says what a node is; Meshtastic does not, and the source is all
+                // that can be claimed about it.
+                subtitle = if (n.role == MeshCore.Role.UNKNOWN) {
+                    "Meshtastic · ${n.source.uppercase()}"
+                } else {
+                    "MeshCore · ${n.role.label}"
+                },
                 score = n.score,
                 logged = n.logged,
                 altM = n.altitudeM.toDouble(),
-                lines = listOf(
+                meshRepeater = n.role == MeshCore.Role.REPEATER,
+                lines = listOfNotNull(
+                    if (n.role != MeshCore.Role.UNKNOWN) "Role" to n.role.label else null,
                     "SNR" to String.format("%.1f dB", n.snr),
+                    n.rssi?.let { "RSSI" to "$it dBm" },
                     "Hops" to n.hops.toString(),
                     "Battery" to if (n.batteryPct >= 0) "${n.batteryPct}%" else "—",
                     "Altitude" to "${n.altitudeM} m",
                     "Distance" to (n.distanceKm?.let { Units.distance(it, distanceUnit, 1) } ?: "—"),
+                    n.pubkey.takeIf { it.isNotBlank() }?.let { "Public key" to it.take(16) + "…" },
                     "Node id" to n.id,
                 ),
             ),
@@ -848,6 +862,10 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
             // "the feed is off" without opening Setup.
             val meshBle = sky.mesh.count { it.source.equals("ble", ignoreCase = true) }
             val meshMqtt = sky.mesh.count { it.source.equals("mqtt", ignoreCase = true) }
+            // MeshCore nodes are counted apart from the Meshtastic feed: a repeater is
+            // infrastructure, and its count is the part of the mesh worth watching.
+            val meshCore = sky.mesh.count { it.role != MeshCore.Role.UNKNOWN }
+            val meshRpt = sky.mesh.count { it.role == MeshCore.Role.REPEATER }
             // No attached node, no card: an empty box of zeros was only taking the space the
             // INTEL table needs.
             if (sky.mesh.isNotEmpty()) StatusCard(
@@ -858,17 +876,27 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 onToggle = { meshOpen = !meshOpen },
             ) {
                 Text(
-                    (if (settings.meshMqttEnabled) "broker on" else "broker off") +
-                        " \u00b7 ble " + meshBle + " \u00b7 mqtt " + meshMqtt,
+                    (if (settings.meshMqttEnabled || settings.meshCoreEnabled) "broker on" else "broker off") +
+                        " \u00b7 ble " + meshBle + " \u00b7 mqtt " + meshMqtt +
+                        (if (meshCore > 0) " \u00b7 core " + meshCore + " \u00b7 rpt " + meshRpt else ""),
                     color = Sky.textDim,
                     fontSize = 9.sp,
                     maxLines = 1,
                 )
                 sky.mesh.take(if (meshOpen) 6 else 2).forEach { n ->
+                    // The role tag is what tells a repeater apart from a handheld in a list
+                    // that has no room for a glyph.
+                    val tag = when (n.role) {
+                        MeshCore.Role.REPEATER -> "RPT "
+                        MeshCore.Role.ROOM -> "ROOM "
+                        MeshCore.Role.CHAT -> "CHAT "
+                        MeshCore.Role.SENSOR -> "SNSR "
+                        MeshCore.Role.UNKNOWN -> ""
+                    }
                     Text(
-                        (n.name.ifBlank { n.id }).take(16) +
+                        tag + (n.name.ifBlank { n.id }).take(16) +
                             " \u00b7 " + String.format("%.1f dB", n.snr) + " \u00b7 " + n.hops + "hp",
-                        color = Sky.text,
+                        color = if (n.role == MeshCore.Role.REPEATER) Sky.meshCore else Sky.text,
                         fontSize = 10.sp,
                         maxLines = 1,
                     )
@@ -1843,7 +1871,9 @@ private fun TacticalMap(
                     Layer.AIRCRAFT -> drawPlaneArrow(p, m.headingDeg ?: 0f, r, color, simple = denseAircraft)
                     Layer.SATELLITE -> if (isIss(m)) drawStationIcon(p, iconR, color) else drawSatelliteIcon(p, r, color)
                     Layer.CELL -> drawTowerIcon(p, r, color)
-                    Layer.MESH -> drawDishIcon(p, r, color)
+                    // A repeater is fixed infrastructure, not a node in a pocket: the mast
+                    // reads as one from across the map, the dish stays for everything else.
+                    Layer.MESH -> if (m.meshRepeater) drawRepeaterIcon(p, r, color) else drawDishIcon(p, r, color)
                     Layer.ESP32 -> drawChipIcon(p, r, color)
                     Layer.DRONE -> {
                         // A drone with a track is an arrow, but a smaller one than an airliner:

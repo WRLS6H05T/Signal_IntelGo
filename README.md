@@ -9,7 +9,8 @@
 A native Android app for live airspace + RF awareness, built around a **Wi-Fi / BLE war-driving recorder**.
 
 One screen shows what is above you: **satellites** (SGP4), **aircraft** (ADS-B), **drones**
-(ASTM F3411 Remote ID over BLE) and **mesh nodes** (Meshtastic). The recorder logs
+(ASTM F3411 Remote ID over BLE) and **mesh nodes** (Meshtastic, plus **MeshCore** repeaters
+from WADAMESH firmware and the MQTT observer bridges). The recorder logs
 **Wi-Fi and BLE** as you drive, and the driven path is painted on a **5-colour red → green
 scale** by how strong the best signal was at each fix.
 
@@ -63,7 +64,7 @@ satellite or aircraft that has been logged is distinguishable at a glance from o
 in view.
 
 Layer colours when *not* logged: satellites sky-blue `#38BDF8`, aircraft white `#F8FAFC`,
-drones pink `#F472B6`, mesh nodes green `#34D399`.
+drones pink `#F472B6`, mesh nodes green `#34D399`, MeshCore repeaters lime `#A3E635`.
 
 ---
 
@@ -104,6 +105,7 @@ shaders — the whole catalogue is on screen at globe zoom):
 | Satellite | body with two solar wings |
 | Aircraft | arrow along its track |
 | Mesh node | satellite dish |
+| MeshCore repeater | antenna mast with coverage arcs |
 | Cell tower | lattice tower with signal arcs |
 | Drone | quadcopter, or a smaller arrow when it reports a heading |
 | Your position | GPS reticle labelled `GPS` |
@@ -130,6 +132,7 @@ The continent outline is Natural Earth 110m land, simplified to 0.01° and bundl
 | Aircraft | `api.adsb.lol` point query around the observer | Free community feed, no API key. Radius configurable 10–250 nm. |
 | Drones | BLE ASTM F3411 **Remote ID** service data (`0xFFFA`) | Parsed locally: Basic ID, Location/Vector, System (operator position). Also flags Meshtastic advertisers. |
 | Mesh | Meshtastic JSON over MQTT (`ssl://mqtt.meshtastic.org:8883`) + BLE advertisers | Off by default; enable in Setup. Broker/topic/credentials are editable. |
+| MeshCore | Observer MQTT bridge (`meshcore/{IATA}/{device}/packets`) | Off by default, own broker and topic in Setup. Node adverts are decoded from their hex packets: role (repeater / room server / sensor / chat) and advertised position. Only adverts are decoded — nothing is decrypted and app traffic is ignored. |
 | Wi-Fi | `WifiManager` scan table | BSSID/SSID/RSSI/channel/security. |
 | BLE | `BluetoothLeScanner` (low latency) | Address/name/RSSI, plus Remote ID payloads. |
 
@@ -192,7 +195,7 @@ Unit tests (orbit math, Remote ID parser, colour scale, exports):
 3. **Log** — saved drives with distance/peak counts; show one on the map, or export
    **GeoJSON** (track + per-fix points with `score`/`bin`) and **CSV**. The logged-entity
    registry exports too.
-4. **Setup** — satellite groups, ADS-B radius, Meshtastic broker/topic, basemap
+4. **Setup** — satellite groups, ADS-B radius, Meshtastic and MeshCore broker/topic, basemap
    (dark or streets, both keyless OSM), weak-dot filter, logging radius, permission status.
 
 Basemap tiles are cached on disk, so a drive area works again offline.
@@ -207,6 +210,11 @@ Basemap tiles are cached on disk, so a drive area works again offline.
   reads the freshest table the OS will give and reports the reason when a scan is refused.
 - Drone detection is BLE Remote ID only — no SDR/Wi-Fi NAN capture is implemented.
 - The Meshtastic public broker is shared and rate-limited; use your own broker for serious work.
+- MeshCore repeaters only appear where they advertise a position. WADAMESH has a share-location
+  switch and it is off by some owners: those repeaters are listed in the MESH card with their
+  role and hop count, but are not pinned anywhere, because this phone's fix is not theirs.
+- The MeshCore feed reads only node adverts. Positions in `neighbors` messages are relative
+  signal reports, not coordinates, so they add hops rather than placement.
 - Recording stops when the app is stopped (no foreground service yet), so the screen must stay on.
 - `api.adsb.lol`, OpenSky and OSM tiles are community services — respect their rate limits.
 

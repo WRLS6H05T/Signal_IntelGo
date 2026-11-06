@@ -17,6 +17,14 @@ data class Settings(
     val meshUser: String = "meshdev",
     val meshPass: String = "large4cats",
     /**
+     * MeshCore (WADAMESH and the MQTT observer bridges): a second feed on its own broker,
+     * because the observers publish hex packets rather than Meshtastic JSON.
+     */
+    val meshCoreEnabled: Boolean = false,
+    val meshCoreBroker: String = "tcp://broker.hivemq.com:1883",
+    /** Observer layout: `meshcore/{IATA}/{device}/packets`, where `raw` holds the hex packet. */
+    val meshCoreTopic: String = "meshcore/+/+/packets",
+    /**
      * "streets" (OpenStreetMap) or "dark" (OSM tiles darkened at draw time). OSM is the default: it is keyless and
      * serves full-detail tiles, and the canvas desaturates them anyway.
      */

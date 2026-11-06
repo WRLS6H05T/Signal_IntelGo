@@ -1,5 +1,7 @@
 package dev.skyward.rf.core
 
+import dev.skyward.rf.meshcore.MeshCore
+
 import kotlinx.serialization.Serializable
 
 /**
@@ -106,6 +108,10 @@ data class MeshNode(
     val lastSeen: Long = 0L,
     val source: String = "mqtt",
     val rssi: Int? = null,
+    /** MeshCore role when the node advertised one; Meshtastic nodes stay UNKNOWN. */
+    val role: MeshCore.Role = MeshCore.Role.UNKNOWN,
+    /** Hex public key for a MeshCore node: its identity, and the first byte is its hash. */
+    val pubkey: String = "",
     val distanceKm: Double? = null,
     /** 0..100 from LoRa SNR (or BLE RSSI when the node is only heard locally). */
     val score: Int = 0,

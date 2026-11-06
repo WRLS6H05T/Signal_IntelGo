@@ -949,6 +949,57 @@ private fun MeshConfig(c: Container, settings: Settings) {
     var pass by remember(settings.meshPass) { mutableStateOf(settings.meshPass) }
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        // MeshCore: WADAMESH firmware and the MQTT observer bridges publish node adverts as
+        // hex packets on their own broker, so this feed has its own switch and its own topic.
+        // A repeater that shares a location becomes a fixed point on the map and the globe.
+        var coreBroker by remember(settings.meshCoreBroker) { mutableStateOf(settings.meshCoreBroker) }
+        var coreTopic by remember(settings.meshCoreTopic) { mutableStateOf(settings.meshCoreTopic) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("MeshCore (WADAMESH)", color = Sky.text, fontSize = 13.sp)
+                Text(
+                    "Repeater and room-server adverts from an observer bridge",
+                    color = Sky.textDim,
+                    fontSize = 10.sp,
+                )
+            }
+            Switch(
+                checked = settings.meshCoreEnabled,
+                onCheckedChange = { on ->
+                    c.settingsStore.update { it.copy(meshCoreEnabled = on) }
+                    c.mesh.stop()
+                    c.mesh.start()
+                },
+            )
+        }
+        OutlinedTextField(
+            value = coreBroker,
+            onValueChange = { coreBroker = it },
+            label = { Text("MeshCore broker", fontSize = 11.sp) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = coreTopic,
+            onValueChange = { coreTopic = it },
+            label = { Text("MeshCore topic", fontSize = 11.sp) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        SmallAction("APPLY MESHCORE", Sky.meshCore) {
+            c.settingsStore.update {
+                it.copy(meshCoreBroker = coreBroker, meshCoreTopic = coreTopic)
+            }
+            c.mesh.stop()
+            c.mesh.start()
+        }
+        Text(
+            "Observer layout: meshcore/{IATA}/{device}/packets. Repeaters without a shared " +
+                "location are listed but not placed.",
+            color = Sky.textDim,
+            fontSize = 9.sp,
+        )
+        Spacer(Modifier.height(8.dp))
         OutlinedTextField(
             value = broker,
             onValueChange = { broker = it },

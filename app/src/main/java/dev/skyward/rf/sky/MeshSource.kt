@@ -3,6 +3,7 @@ package dev.skyward.rf.sky
 import dev.skyward.rf.core.FeedStatus
 import dev.skyward.rf.core.Geo
 import dev.skyward.rf.core.MeshNode
+import dev.skyward.rf.meshcore.MeshCore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.Json
@@ -53,10 +54,23 @@ class MeshSource(private val settings: () -> dev.skyward.rf.core.Settings) {
     @Volatile
     private var client: MqttClient? = null
 
-    fun isRunning(): Boolean = client?.isConnected == true
+    /** The MeshCore feed's own connection: a different broker, a different packet format. */
+    @Volatile
+    private var coreClient: MqttClient? = null
 
+    fun isRunning(): Boolean = client?.isConnected == true || coreClient?.isConnected == true
+
+    /**
+     * Starts both mesh feeds. Meshtastic and MeshCore are separate brokers and separate clients:
+     * one being switched off is no reason to leave the other silent.
+     */
     fun start() {
-        if (isRunning()) return
+        startMeshtastic()
+        startMeshCore()
+    }
+
+    private fun startMeshtastic() {
+        if (client?.isConnected == true) return
         val cfg = settings()
         if (!cfg.meshMqttEnabled) {
             _status.value = FeedStatus(null, "mesh feed off", System.currentTimeMillis(), nodes.size)
@@ -67,7 +81,15 @@ class MeshSource(private val settings: () -> dev.skyward.rf.core.Settings) {
             _status.value = FeedStatus(false, "no broker configured", System.currentTimeMillis(), nodes.size)
             return
         }
-        stop()
+        // Only this client is dropped here: the MeshCore feed is a separate connection and a
+        // Meshtastic reconnect must not take it down with it.
+        runCatching {
+            client?.let { old ->
+                if (old.isConnected) old.disconnect()
+                old.close()
+            }
+        }
+        client = null
         runCatching {
             val id = "skyward-" + (1000..9999).random()
             val c = MqttClient(broker, id, MemoryPersistence())
@@ -109,6 +131,139 @@ class MeshSource(private val settings: () -> dev.skyward.rf.core.Settings) {
             }
         }
         client = null
+        runCatching {
+            coreClient?.let { c ->
+                if (c.isConnected) c.disconnect()
+                c.close()
+            }
+        }
+        coreClient = null
+    }
+
+    /**
+     * The MeshCore feed.
+     *
+     * An observer repeater on a roof uplinks what it hears to `meshcore/{IATA}/{device}/packets`
+     * as JSON whose `raw` field is the packet in hex. Only node adverts are decoded, so repeaters
+     * and room servers join the mesh layer without this app needing a MeshCore radio of its own.
+     */
+    private fun startMeshCore() {
+        val cfg = settings()
+        if (!cfg.meshCoreEnabled) return
+        if (coreClient?.isConnected == true) return
+        val broker = cfg.meshCoreBroker.trim()
+        if (broker.isEmpty()) return
+        stopMeshCore()
+        runCatching {
+            val c = MqttClient(broker, "skyward-core-" + (1000..9999).random(), MemoryPersistence())
+            val opts = MqttConnectOptions().apply {
+                isAutomaticReconnect = true
+                isCleanSession = true
+                connectionTimeout = 12
+                keepAliveInterval = 30
+            }
+            c.setCallback(object : MqttCallback {
+                override fun connectionLost(cause: Throwable?) {
+                    _status.value = FeedStatus(
+                        false,
+                        cause?.message ?: "meshcore disconnected",
+                        System.currentTimeMillis(),
+                        nodes.size,
+                    )
+                }
+
+                override fun messageArrived(topic: String?, message: MqttMessage?) {
+                    val payload = message?.payload ?: return
+                    runCatching { ingestCoreJson(String(payload)) }
+                }
+
+                override fun deliveryComplete(token: IMqttDeliveryToken?) = Unit
+            })
+            c.connect(opts)
+            c.subscribe(cfg.meshCoreTopic.trim(), 0)
+            coreClient = c
+            _status.value = FeedStatus(
+                true,
+                "meshcore live · ${cfg.meshCoreTopic}",
+                System.currentTimeMillis(),
+                nodes.size,
+            )
+        }.onFailure {
+            coreClient = null
+            _status.value = FeedStatus(false, it.message ?: "meshcore failed", System.currentTimeMillis(), nodes.size)
+        }
+    }
+
+    private fun stopMeshCore() {
+        runCatching {
+            coreClient?.let { c ->
+                if (c.isConnected) c.disconnect()
+                c.close()
+            }
+        }
+        coreClient = null
+    }
+
+    /** One MeshCore publication: either the `packets` message or the minimal `raw` one. */
+    fun ingestCoreJson(text: String) {
+        val root = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return
+        val hex = root.str("raw") ?: root.str("data") ?: return
+        val advert = MeshCore.decodeHex(hex) ?: return
+        ingestCoreAdvert(
+            advert = advert,
+            snr = root.num("SNR") ?: root.num("snr"),
+            rssi = root.num("RSSI") ?: root.num("rssi"),
+        )
+    }
+
+    /**
+     * Folds one advert into the mesh table.
+     *
+     * A node is keyed by its public key, so a repeater heard through three different observers is
+     * one repeater. A repeater that does not share a location keeps any position it had and is
+     * otherwise listed without one: placing it at this phone's fix would put infrastructure on a
+     * street it has never been on.
+     */
+    fun ingestCoreAdvert(
+        advert: MeshCore.Advert,
+        snr: Double? = null,
+        rssi: Double? = null,
+        now: Long = System.currentTimeMillis(),
+    ) {
+        if (advert.pubkey.isBlank()) return
+        val key = "core:" + advert.pubkey.take(16)
+        val existing = nodes[key]
+        val role = if (advert.role == MeshCore.Role.UNKNOWN) {
+            existing?.role ?: MeshCore.Role.UNKNOWN
+        } else {
+            advert.role
+        }
+        val name = advert.name.ifBlank {
+            existing?.name ?: (advert.role.label + " " + advert.pubkey.take(6))
+        }
+        nodes[key] = MeshNode(
+            id = advert.pubkey.take(16),
+            name = name,
+            lat = advert.lat ?: existing?.lat,
+            lon = advert.lon ?: existing?.lon,
+            altitudeM = existing?.altitudeM ?: 0,
+            snr = snr ?: existing?.snr ?: 0.0,
+            hops = advert.hops,
+            batteryPct = existing?.batteryPct ?: -1,
+            // Heard now, whatever the advert's own clock said: a repeater advertises every
+            // few hours, and its timestamp must not sort it under nodes seen this second.
+            lastSeen = now,
+            source = "meshcore",
+            rssi = rssi?.toInt() ?: existing?.rssi,
+            role = role,
+            pubkey = advert.pubkey,
+            score = when {
+                snr != null -> snrToScore(snr)
+                rssi != null -> Geo.rssiToScore(rssi.toInt())
+                else -> existing?.score ?: 50
+            },
+        )
+        publish()
     }
 
     /** Parses one Meshtastic JSON packet. Safe to call with anything. */

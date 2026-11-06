@@ -41,6 +41,9 @@ object Sky {
 
     /** Saved SDR captures and the spectrum they carry. */
     val sdr = Color(0xFF67E8F9)
+
+    /** A MeshCore repeater: infrastructure, so it must not read as another dish on a desk. */
+    val meshCore = Color(0xFFA3E635)
 }
 
 private val scheme = darkColorScheme(
