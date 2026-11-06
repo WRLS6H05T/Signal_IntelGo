@@ -123,6 +123,8 @@ class UsbBoards(private val context: Context) {
         private const val READ_TIMEOUT_MS = 200
         private const val PROBE_GAP_MS = 380L
         private const val MAX_TEXT = 6_000
+        /** How often the roster is reconciled against the bus when no broadcast arrives. */
+        private const val WATCH_MS = 3_000L
         /** How long each telemetry poll listens after its commands go out. */
         private const val POLL_READ_MS = 6_000L
         /** Gap between the poll's commands, so an AP sweep can finish before BLE starts. */
@@ -264,6 +266,9 @@ class UsbBoards(private val context: Context) {
         Thread(r, "usb-boards").apply { isDaemon = true }
     }
 
+    /** Watches the bus itself, because the detach broadcast is the fast path and not the only one. */
+    private var watchdog: Thread? = null
+
     @Volatile
     private var registered = false
 
@@ -310,11 +315,14 @@ class UsbBoards(private val context: Context) {
         runCatching {
             for (device in mgr.deviceList.values) onAttached(device)
         }
+        ensureWatchdog()
     }
 
     fun stop() {
         if (registered) runCatching { context.unregisterReceiver(receiver) }
         registered = false
+        watchdog?.interrupt()
+        watchdog = null
         polling.clear()
         probing.clear()
         manual.clear()
@@ -326,6 +334,40 @@ class UsbBoards(private val context: Context) {
     fun rescan() {
         val mgr = manager ?: return
         runCatching { for (device in mgr.deviceList.values) onAttached(device) }
+    }
+
+    private fun ensureWatchdog() {
+        if (watchdog?.isAlive == true) return
+        watchdog = Thread({
+            while (registered) {
+                runCatching { reconcile() }.onFailure { CrashLog.recordQuiet(context, "usb-watch", it) }
+                runCatching { Thread.sleep(WATCH_MS) }
+            }
+        }, "usb-watch").apply { isDaemon = true }
+        watchdog?.start()
+    }
+
+    /**
+     * Reconciles the roster against the bus.
+     *
+     * The attach and detach broadcasts are the fast path, not the only one: a broadcast can be
+     * missed - the process was paused when it arrived, or a chip fell off the bus as it reset -
+     * and the roster still has to match the cable. A board that left disappears; a board that
+     * came back appears again without a rescan.
+     */
+    private fun reconcile() {
+        val mgr = manager ?: return
+        // UsbManager keys its list by device name, so the ids are collected explicitly.
+        val live = runCatching { mgr.deviceList.values.map { it.deviceId }.toSet() }.getOrNull() ?: return
+        for (id in devices.keys.toList()) if (id !in live) drop(id)
+        for (device in runCatching { mgr.deviceList.values.toList() }.getOrDefault(emptyList())) {
+            val id = device.deviceId
+            if (attached.containsKey(id) || id in probing || id in polling || id in manual) continue
+            // Permission is asked for when a board is plugged in, not every few seconds: a board
+            // that was refused must not re-raise the system dialog in a loop.
+            if (!mgr.hasPermission(device)) continue
+            probe(device)
+        }
     }
 
     // ---------------- attach / detach ----------------
@@ -797,6 +839,17 @@ class UsbBoards(private val context: Context) {
     fun isAttached(deviceId: Int): Boolean = attached.containsKey(deviceId)
 
     /**
+     * True while the USB host still lists this device.
+     *
+     * Identifying a board takes seconds, so the cable can come out in the middle of it. The bus,
+     * not the roster, answers "is it still here" - the roster is what this class builds.
+     */
+    private fun onBus(deviceId: Int): Boolean {
+        val live = runCatching { manager?.deviceList?.values?.toList() }.getOrNull() ?: return true
+        return live.any { it.deviceId == deviceId }
+    }
+
+    /**
      * The device that has replaced [oldId].
      *
      * A chip with its own USB peripheral drops off the bus when EN pulses and enumerates again
@@ -851,6 +904,14 @@ class UsbBoards(private val context: Context) {
         note: String,
         console: String = "",
     ) {
+        // A probe that outlived the cable must not write the board back in: re-adding it here is
+        // what used to leave an unplugged board in the roster, and in the ESP32 card, until the
+        // app was restarted.
+        if (!onBus(device.deviceId)) {
+            devices.remove(device.deviceId)
+            attached.remove(device.deviceId)
+            return
+        }
         val transport = transportOf(device)
         val chip = runCatching { device.productName }.getOrNull().orEmpty()
             .ifBlank { runCatching { device.manufacturerName }.getOrNull().orEmpty() }

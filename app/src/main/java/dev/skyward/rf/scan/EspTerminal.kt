@@ -150,6 +150,11 @@ class EspTerminal(private val usb: UsbBoards) {
                     val next = reopen(target)
                     if (next == null) {
                         append("--- the board left the cable ---")
+                        // Nothing is attached under that id and no replacement appeared, so the
+                        // panel has to stop calling itself open: it read as a live connection to
+                        // a board that was already in a drawer.
+                        close()
+                        _state.value = _state.value.copy(error = "board left the cable")
                         return
                     }
                     append("--- the board reset and came back; reading it again ---")
