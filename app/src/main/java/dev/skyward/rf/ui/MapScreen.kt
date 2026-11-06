@@ -1884,12 +1884,16 @@ private fun TacticalMap(
             if (self != null) {
                 vp.surfaceInto(self.lat, self.lon, pa)
                 val p = Offset(pa.x, pa.y)
-                drawGpsLogo(p, 7.5f * density, Sky.cyan)
+                // On the globe the pin is one point on a whole planet: at street size its halo
+                // alone covered a country, so the reticle and its label shrink with the view
+                // rather than competing with the continents behind them.
+                val gpsR = (if (globeMode) 3.4f else 7.5f) * density
+                drawGpsLogo(p, gpsR, Sky.cyan)
                 labelPaint.color = Sky.cyan.toArgb()
-                labelPaint.textSize = 9.5f * density
+                labelPaint.textSize = (if (globeMode) 7f else 9.5f) * density
                 drawContext.canvas.nativeCanvas.drawText(
                     "GPS",
-                    p.x + 13f * density,
+                    p.x + (if (globeMode) 7f else 13f) * density,
                     p.y + 3.5f * density,
                     labelPaint,
                 )
