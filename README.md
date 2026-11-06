@@ -416,6 +416,37 @@ and Bluetooth devices. It closes on *Watcher out*. Whether recording is armed is
 what has been collected is the report, and "logging is off" three words before the sign-off was
 heard as a second goodbye.
 
+### Sub-GHz behind an ESP32
+
+A wired GhostESP or ESP32 Marauder with a CC1101 fitted hears the bands the phone's radios
+cannot. When the board's own console mentions the module (`cc1101`, `subghz`) the hardware card
+says `Sub-GHz · CC1101`, and with the Setup switch on, the poll appends one configured command
+to its sweep cycle - `subghz rx` by default, because the verb differs between firmware builds.
+
+What comes back is parsed off the same transcript: a line needs both a carrier frequency in
+300-928 MHz and a level, so a help text that merely lists the band adds nothing. Each carrier
+is logged as one entity, keyed by frequency and keeping its strongest hearing, then drawn on
+the map where the board was listening, counted in the Log tab as **Sub-GHz hits**, and read out
+last in the Watcher's intel report. Carriers stay out of the WiGLE export: WiGLE wants a MAC,
+an SSID and a channel, and a keyfob has none of the three.
+
+### RTL-SDR
+
+With the Setup switch on, plugging in an RTL-SDR (Realtek `0bda:2832`, or `0bda:2838` with an
+R820T/R828D tuner) drops a spectrum panel open at the top centre of the map; it folds back to a
+pill, and is not drawn at all when no dongle is attached or the switch is off. The panel shows
+the live trace with its peak, the tuned centre and span, preset bands (100/145/315/433.92/868/915
+MHz), and **REC** / **STOP · SAVE**.
+
+Stopping saves the capture: the averaged trace plus a waterfall strip, the centre, span, peak,
+length and the fix it started on. The capture is pinned on the map as a small pennant and stays
+there - tapping it opens the trace again without the dongle, which is why the spectrum is what is
+stored rather than the raw I/Q. Captures live in `sdr/sdr_v1.json` beside the rest of the data.
+
+The dongle is detected, opened and read as an I/Q pipe; programming the tuner (demod init and
+the R820T/R828D PLL) is not implemented, so on real hardware the panel reports that it is waiting
+for I/Q instead of drawing an invented spectrum.
+
 ### Timed intel updates
 
 Setup -> **Intel updates** has a switch and the interval: **3, 5, 7, 10 or 30 minutes**, and the

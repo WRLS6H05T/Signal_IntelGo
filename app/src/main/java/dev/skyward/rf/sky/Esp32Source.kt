@@ -211,6 +211,10 @@ class Esp32Source(
                 // A sweep listing is a better count than a summary line a firmware may not print.
                 wifiCount = r.wifi ?: b.sweep.aps.size.takeIf { it > 0 } ?: existing?.wifiCount ?: 0,
                 bleCount = r.ble ?: b.sweep.devices.size.takeIf { it > 0 } ?: existing?.bleCount ?: 0,
+                // A CC1101 is a capability, not a count: the board either has the radio or it
+                // does not, and how many carriers it heard belongs to the last sweep.
+                subGhz = r.subGhz ?: existing?.subGhz ?: false,
+                subGhzHits = b.sweep.subGhz.size.takeIf { it > 0 } ?: existing?.subGhzHits ?: 0,
                 source = "usb",
                 lastSeen = now,
                 // A wired board is still a good link even with no fix, so it never scores 0.

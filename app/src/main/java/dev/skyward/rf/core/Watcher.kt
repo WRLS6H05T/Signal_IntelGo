@@ -70,8 +70,10 @@ object Watcher {
         val watch: Int = 0,
         val wifi: Int = 0,
         val ble: Int = 0,
+        val subGhz: Int = 0,
     ) {
-        val total: Int get() = sats + aircraft + drones + mesh + cells + esp32 + watch + wifi + ble
+        val total: Int
+            get() = sats + aircraft + drones + mesh + cells + esp32 + watch + wifi + ble + subGhz
     }
 
     /**
@@ -226,6 +228,7 @@ object Watcher {
                 r.logged.watch.takeIf { it > 0 }?.let { count(it, "watch match", "watch matches") },
                 r.logged.wifi.takeIf { it > 0 }?.let { count(it, "Wi-Fi network") },
                 r.logged.ble.takeIf { it > 0 }?.let { count(it, "Bluetooth device") },
+                r.logged.subGhz.takeIf { it > 0 }?.let { count(it, "sub-GHz hit") },
             )
             sb.append(count(r.logged.total, "entity", "entities")).append(". ")
             sb.append("I have ${joinWords(caught)}.")

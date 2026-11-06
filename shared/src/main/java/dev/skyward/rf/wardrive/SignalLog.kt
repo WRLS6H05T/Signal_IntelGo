@@ -164,6 +164,9 @@ class SignalLog(private val store: FileStore) {
             .append("CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,Type\n")
         val df = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
         for (s in snapshot()) {
+            // WiGLE only knows WIFI and BLE rows; a sub-GHz carrier has no MAC, no SSID and
+            // no channel, and writing one would either fail the upload or invent a network.
+            if (s.kind == RfKind.SUBGHZ) continue
             val ssid = s.name.replace(',', ' ').replace('"', ' ').trim()
             sb.append(s.id).append(',')
                 .append(ssid).append(',')

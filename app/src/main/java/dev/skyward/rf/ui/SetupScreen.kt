@@ -313,6 +313,31 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                     )
                 }
                 Spacer(Modifier.height(10.dp))
+                // Sub-GHz is a property of the board's hardware, not of the app: a Marauder
+                // without a CC1101 fitted answers nothing, and that is why the switch only
+                // decides whether the command is sent at all.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Sub-GHz (CC1101)", color = Sky.text, fontSize = 13.sp)
+                        Text(
+                            "Sweep on a GhostESP or Marauder with the radio fitted",
+                            color = Sky.textDim,
+                            fontSize = 10.sp,
+                        )
+                    }
+                    Switch(
+                        checked = settings.subGhzEnabled,
+                        onCheckedChange = { on ->
+                            c.settingsStore.update { it.copy(subGhzEnabled = on) }
+                            c.esp32Usb.subGhzCommand = if (on) {
+                                settings.subGhzCommand.trim().ifBlank { null }
+                            } else {
+                                null
+                            }
+                        },
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
                 // The rate lives here as well as on the map's board card: it is a setting of
                 // the cable, and a board flashed at another rate answers a 115200 probe with
                 // noise, which reads exactly like a board that will not scan at all.
@@ -360,6 +385,37 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                 if (serialOpen) EspSerialDialog(c, settings) { serialOpen = false }
                 Spacer(Modifier.height(8.dp))
                 Esp32Config(c, settings)
+            }
+        }
+
+        item {
+            SectionCard(title = "SDR", trailing = if (settings.sdrEnabled) "on" else "off") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("RTL-SDR dongle", color = Sky.text, fontSize = 13.sp)
+                        Text(
+                            "Spectrum on the map, recording and saved pins",
+                            color = Sky.textDim,
+                            fontSize = 10.sp,
+                        )
+                    }
+                    Switch(
+                        checked = settings.sdrEnabled,
+                        onCheckedChange = { on ->
+                            c.settingsStore.update { it.copy(sdrEnabled = on) }
+                            if (on) c.sdr.start() else c.sdr.stop()
+                        },
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Plugged into the USB port, an RTL-SDR (0bda:2832 or 0bda:2838) opens a " +
+                        "spectrum drop-down at the top of the map. Recording saves the trace it " +
+                        "drew and pins it where the fix was, so a capture can be read back later " +
+                        "without the dongle. Off, the dongle is left alone and no panel is drawn.",
+                    color = Sky.textDim,
+                    fontSize = 10.sp,
+                )
             }
         }
 

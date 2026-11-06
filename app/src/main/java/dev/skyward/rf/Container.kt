@@ -19,6 +19,8 @@ import dev.skyward.rf.peer.PeerProtocol
 import dev.skyward.rf.scan.CellScanner
 import dev.skyward.rf.scan.RfScanner
 import dev.skyward.rf.scan.UsbBoards
+import dev.skyward.rf.sdr.SdrLibrary
+import dev.skyward.rf.sdr.SdrStream
 import dev.skyward.rf.sky.AircraftSource
 import dev.skyward.rf.sky.AirspaceEngine
 import dev.skyward.rf.scan.EspTerminal
@@ -113,6 +115,12 @@ class Container(context: Context) {
     /** The board's console, with a keyboard: same port, human on the other end. */
     val espTerminal = EspTerminal(esp32Usb)
 
+    /** Saved RTL-SDR captures: the spectrum that was on screen, kept where it was taken. */
+    val sdrLibrary = SdrLibrary(FileStore(File(rootData, "sdr").apply { mkdirs() }))
+
+    /** The dongle on the USB port, opened only while the SDR switch is on. */
+    val sdr = SdrStream(appContext, sdrLibrary)
+
     /**
      * The second phone on the same network. It stays off until asked for: it opens a TCP port
      * and a UDP discovery port, which is not something an app should do uninvited.
@@ -160,6 +168,25 @@ class Container(context: Context) {
                     via = "board",
                     now = now,
                 )
+                // Carriers have no address, so each one is keyed by its frequency and placed
+                // where the board was listening: the same street corner the board is on.
+                if (sweep.subGhz.isNotEmpty()) {
+                    signalLog.record(
+                        observations = sweep.subGhz.map {
+                            RfObservation(
+                                kind = RfKind.SUBGHZ,
+                                id = String.format(java.util.Locale.US, "%.2f", it.freqMhz),
+                                name = it.label,
+                                rssi = it.rssi,
+                                freqMhz = (it.freqMhz * 1000).toInt(),
+                            )
+                        },
+                        lat = here.lat,
+                        lon = here.lon,
+                        via = "board",
+                        now = now,
+                    )
+                }
             }
         }
     }
@@ -412,6 +439,22 @@ class Container(context: Context) {
             }
         }
 
+        // The dongle and the sub-GHz receive are switches like the feeds: off means the hardware
+        // is left alone, not that its output is merely hidden.
+        scope.launch {
+            settingsStore.state.collect { cfg ->
+                if (!running) return@collect
+                esp32Usb.subGhzCommand = cfg.subGhzCommand.trim()
+                    .takeIf { cfg.subGhzEnabled && it.isNotBlank() }
+                if (cfg.sdrEnabled) {
+                    sdr.setCentre(cfg.sdrCenterMhz)
+                    sdr.start()
+                } else {
+                    sdr.stop()
+                }
+            }
+        }
+
         // The host's revision, bumped only when a shared setting actually moves. A follower
         // reads it to tell "the host just decided this" from "the host is repeating itself".
         scope.launch {
@@ -603,6 +646,7 @@ class Container(context: Context) {
             watch = logged.count(Layer.WATCH),
             wifi = signals.count { it.kind == RfKind.WIFI },
             ble = signals.count { it.kind == RfKind.BLE },
+            subGhz = signals.count { it.kind == RfKind.SUBGHZ },
         )
     }
 
@@ -646,7 +690,15 @@ class Container(context: Context) {
         if (!settingsStore.current.offlineMode) mesh.start()
         // The persisted rate has to be on the port before the first probe opens it.
         esp32Usb.setBaud(settingsStore.current.esp32Baud)
+        // Same reason: the poller reads this every cycle, so it is set before the board is idled.
+        esp32Usb.subGhzCommand = settingsStore.current.subGhzCommand.trim()
+            .takeIf { settingsStore.current.subGhzEnabled && it.isNotBlank() }
         esp32.start()
+        sdr.fixProvider = { _observer.value }
+        if (settingsStore.current.sdrEnabled) {
+            sdr.setCentre(settingsStore.current.sdrCenterMhz)
+            sdr.start()
+        }
         if (settingsStore.current.peerEnabled && !settingsStore.current.offlineMode) peer.start()
         airspace.start()
 
@@ -767,6 +819,7 @@ class Container(context: Context) {
         airspace.stop()
         mesh.stop()
         esp32.stop()
+        sdr.stop()
         peer.stop()
         voice.stop()
         rf.stopAll()

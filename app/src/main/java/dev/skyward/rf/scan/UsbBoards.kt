@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import dev.skyward.rf.core.CrashLog
+import dev.skyward.rf.sdr.SdrStream
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.util.concurrent.ConcurrentHashMap
@@ -223,6 +224,15 @@ class UsbBoards(private val context: Context) {
     @Volatile
     var onSweep: ((Esp32Console.Sweep) -> Unit)? = null
 
+    /**
+     * The sub-GHz receive command, or null when that radio is switched off.
+     *
+     * Pushed in from settings rather than read here: the poller has no business owning a
+     * preference, and the verb is the user's because firmware builds disagree about it.
+     */
+    @Volatile
+    var subGhzCommand: String? = null
+
     private val manager: UsbManager? by lazy {
         context.getSystemService(Context.USB_SERVICE) as? UsbManager
     }
@@ -406,6 +416,9 @@ class UsbBoards(private val context: Context) {
     // ---------------- probe ----------------
 
     private fun probe(device: UsbDevice) {
+        // An RTL-SDR is not a board: it is a raw I/Q receiver with no console, and opening it as
+        // a serial port would both mislabel it and take the cable from the SDR stream.
+        if (SdrStream.isDongle(device.vendorId, device.productId)) return
         val id = device.deviceId
         // A board that is already polled is left alone: sounding it again would send help and
         // version commands into the middle of its sweep for no reason.
@@ -544,7 +557,10 @@ class UsbBoards(private val context: Context) {
             conn = opened
             if (!opened.claimInterface(port.first, true)) return ""
             configure(opened, transportOf(device), port.first.id)
-            return exchange(opened, port.second, port.third, Esp32Console.commands(family))
+            // Only a board that reported a CC1101 is asked to sweep sub-GHz: sending the verb
+            // to a board without the radio is how a poll transcript fills with errors.
+            val subGhz = if (devices[device.deviceId]?.reading?.subGhz == true) subGhzCommand else null
+            return exchange(opened, port.second, port.third, Esp32Console.commandsFor(family, subGhz))
         } catch (t: Throwable) {
             return ""
         } finally {

@@ -25,6 +25,8 @@ object Esp32Console {
         val altM: Double? = null,
         /** True when the board has a GNSS module, false when it says it has none. */
         val gps: Boolean? = null,
+        /** True when the board reports a CC1101; null when it never said either way. */
+        val subGhz: Boolean? = null,
     ) {
         /** Nothing worth showing: the poll produced no numbers at all. */
         val isEmpty: Boolean
@@ -41,6 +43,7 @@ object Esp32Console {
             lon = other.lon ?: lon,
             altM = other.altM ?: altM,
             gps = other.gps ?: gps,
+            subGhz = other.subGhz ?: subGhz,
         )
     }
 
@@ -54,13 +57,24 @@ object Esp32Console {
      * The named half of a sweep. Counts alone only prove a radio worked; these are what put the
      * board's networks and advertisers on the map and into the drive record.
      */
+    /**
+     * One sub-GHz carrier: a frequency and a level, nothing else.
+     *
+     * A keyfob, a gate remote or a weather sensor has no address to sweep for, so the carrier
+     * itself is the identity. Two hits on the same frequency are one transmitter as far as this
+     * table can tell, which is why the strongest hearing is the one kept.
+     */
+    data class SubGhz(val freqMhz: Double, val rssi: Int, val label: String)
+
     data class Sweep(
         val aps: List<Ap> = emptyList(),
         val devices: List<Device> = emptyList(),
+        /** Sub-GHz carriers heard while the board's CC1101 was receiving. */
+        val subGhz: List<SubGhz> = emptyList(),
     ) {
-        val isEmpty: Boolean get() = aps.isEmpty() && devices.isEmpty()
+        val isEmpty: Boolean get() = aps.isEmpty() && devices.isEmpty() && subGhz.isEmpty()
 
-        val total: Int get() = aps.size + devices.size
+        val total: Int get() = aps.size + devices.size + subGhz.size
     }
 
     /**
@@ -76,6 +90,20 @@ object Esp32Console {
         BoardFamily.GHOSTESP -> listOf("stopscan\r\n", "gps\r\n", "scanap\r\n", "bledetect\r\n")
         BoardFamily.MARAUDER -> listOf("stopscan\r\n", "gps\r\n", "scanap\r\n", "blescan\r\n")
         BoardFamily.BISCUIT, BoardFamily.ESP32 -> emptyList()
+    }
+
+    /**
+     * The poll's command list, with the sub-GHz receive appended when that radio is in use.
+     *
+     * Appended last so the AP and BLE sweeps have already reported before the CC1101 is handed
+     * to a receive loop, and only when a command is configured: the verb differs between GhostESP
+     * builds and Marauder revisions, and a board that does not know it would print an error into
+     * the middle of a sweep transcript.
+     */
+    fun commandsFor(family: BoardFamily, subGhzCommand: String?): List<String> {
+        val base = commands(family)
+        if (base.isEmpty() || subGhzCommand.isNullOrBlank()) return base
+        return base + (subGhzCommand.trim() + "\r\n")
     }
 
     // ---------------- text fields ----------------
@@ -146,7 +174,11 @@ object Esp32Console {
                 else -> null
             },
         )
-        return out.merge(labelled)
+        // A board saying "cc1101" or printing a carrier frequency has the sub-GHz radio fitted.
+        // Silence leaves it null: not fitted and never mentioned are different answers.
+        val radio = SUBGHZ_WORDS.containsMatchIn(text) ||
+            text.lineSequence().any { subGhzOf(it) != null }
+        return out.merge(labelled.copy(subGhz = if (radio) true else null))
     }
 
     // ---------------- sweep listings ----------------
@@ -169,12 +201,41 @@ object Esp32Console {
      * anything: an address and a signal level. A line without both is boot noise and is skipped,
      * so a silent or partly-printed sweep adds nothing rather than inventing entries.
      */
+    /** A board that names a CC1101, or its own sub-GHz band, has the radio fitted. */
+    private val SUBGHZ_WORDS = Regex("""(?i)\b(?:cc1101|sub-?ghz|sub ghz)\b""")
+
+    /** A carrier frequency with its unit. 2400 MHz Wi-Fi and 2.4 GHz BLE are outside the band. */
+    private val FREQ_MHZ = Regex("""(?i)\b([3-9]\d{2}(?:[.,]\d{1,3})?)\s*mhz\b""")
+
+    /**
+     * A sub-GHz carrier on this line, if it has both a frequency and a level.
+     *
+     * Both are required, for the same reason a network needs an address and a level: a bare
+     * frequency in a help text or a firmware banner is not a transmission.
+     */
+    private fun subGhzOf(line: String): SubGhz? {
+        if (BLE_LINE.containsMatchIn(line)) return null
+        val mhz = FREQ_MHZ.find(line)?.groupValues?.getOrNull(1)
+            ?.replace(',', '.')?.toDoubleOrNull() ?: return null
+        if (mhz !in 280.0..960.0) return null
+        val rssi = rssiOf(line) ?: return null
+        return SubGhz(mhz, rssi, clean(line).take(24))
+    }
+
     fun parseScan(text: String): Sweep {
         val aps = LinkedHashMap<String, Ap>()
         val devices = LinkedHashMap<String, Device>()
+        val sub = LinkedHashMap<String, SubGhz>()
         for (raw in text.lineSequence()) {
             val line = raw.trim()
             if (line.isEmpty() || line.length > 240) continue
+            // A carrier line carries a frequency and a level but no address, so it is taken
+            // before the MAC test that would otherwise discard it.
+            subGhzOf(line)?.let { hit ->
+                val key = String.format(java.util.Locale.US, "%.2f", hit.freqMhz)
+                val prev = sub[key]
+                if (prev == null || hit.rssi > prev.rssi) sub[key] = hit
+            }
             val mac = MAC.find(line)?.groupValues?.getOrNull(1)?.uppercase() ?: continue
             val rssi = rssiOf(line) ?: continue
             val channel = CHANNEL.find(line)?.groupValues?.getOrNull(1)?.toIntOrNull()
@@ -186,7 +247,7 @@ object Esp32Console {
                 devices[mac] = Device(mac, nameOf(line, mac), rssi)
             }
         }
-        return Sweep(aps.values.toList(), devices.values.toList())
+        return Sweep(aps.values.toList(), devices.values.toList(), sub.values.toList())
     }
 
     /** Signal level: a labelled RSSI wins, otherwise the first negative number in range. */

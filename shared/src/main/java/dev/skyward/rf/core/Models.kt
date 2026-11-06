@@ -12,9 +12,15 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class LatLon(val lat: Double, val lon: Double)
 
-/** Which radio the observation came from. */
+/**
+ * Which radio the observation came from.
+ *
+ * SUBGHZ is a CC1101 on a wired GhostESP or Marauder rather than a phone radio: it hears
+ * keyfobs, sensors and gate remotes, which have no address to sweep for, so its identity is the
+ * frequency the carrier appeared on.
+ */
 @Serializable
-enum class RfKind { WIFI, BLE }
+enum class RfKind { WIFI, BLE, SUBGHZ }
 
 /** One Wi-Fi BSSID or BLE advertiser heard at a moment in time. */
 @Serializable
@@ -123,6 +129,10 @@ data class Esp32Node(
     val batteryPct: Int = -1,
     val wifiCount: Int = 0,
     val bleCount: Int = 0,
+    /** True when the board reports a CC1101: the sub-GHz radio is fitted, not just supported. */
+    val subGhz: Boolean = false,
+    /** Sub-GHz carriers the board's last sweep caught, not how many it has ever seen. */
+    val subGhzHits: Int = 0,
     val moving: Boolean = false,
     val firmware: String = "",
     /** Firmware family when the board identified itself, e.g. GhostESP or ESP32 Marauder. */

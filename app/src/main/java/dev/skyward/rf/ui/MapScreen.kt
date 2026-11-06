@@ -65,6 +65,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import dev.skyward.rf.Container
 import dev.skyward.rf.core.AircraftView
 import dev.skyward.rf.core.CellView
@@ -87,6 +88,7 @@ import dev.skyward.rf.core.WatchView
 import dev.skyward.rf.net.compassPoint
 import dev.skyward.rf.sky.AirspaceEngine
 import dev.skyward.rf.ui.theme.Sky
+import dev.skyward.rf.sdr.SdrCapture
 import dev.skyward.rf.wardrive.LoggedSignal
 import dev.skyward.rf.wardrive.WardrivePoint
 import dev.skyward.rf.wardrive.WardriveSession
@@ -184,6 +186,11 @@ private fun buildHardware(
                     "Firmware" to b.version.ifBlank { "\u2014" },
                     "Chip" to b.chip.ifBlank { String.format("%04x:%04x", b.vendorId, b.productId) },
                     "APs seen" to seen(n?.wifiCount ?: 0),
+                    "Sub-GHz" to when (r.subGhz) {
+                        true -> "CC1101 \u00b7 ${n?.subGhzHits ?: 0} carriers"
+                        false -> "no radio"
+                        null -> "\u2014"
+                    },
                     "BLE seen" to seen(n?.bleCount ?: 0),
                     // Only one wired board holds the cable at a time; the rest are listed but
                     // waiting, which is what stops two consoles fighting over one port.
@@ -553,6 +560,9 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
     // The signal dots are a second kind of thing to tap: they are their own card, because a
     // network is not a marker in any layer.
     var selectedSignal by remember { mutableStateOf<LoggedSignal?>(null) }
+    // A saved SDR capture is a third kind of pin: it belongs to the phone that recorded it, so
+    // it is drawn from the capture table rather than from any live sweep.
+    var selectedCapture by remember { mutableStateOf<SdrCapture?>(null) }
     // Offline tiles: a bounded save of the ground around the current centre, with the count
     // on screen because a silent download looks like a dead button.
     val tileScope = rememberCoroutineScope()
@@ -590,6 +600,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
     }
 
     val loggedSignals by c.signalLog.entries.collectAsState()
+    val captures by c.sdrLibrary.state.collectAsState()
     val signalDots = remember(loggedSignals) {
         loggedSignals.take(3000).mapNotNull { s ->
             val argb = runCatching { android.graphics.Color.parseColor(s.color) }.getOrNull()
@@ -627,16 +638,37 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 selected = it
                 // One card at a time: opening a marker closes a signal's card.
                 selectedSignal = null
+                selectedCapture = null
             },
             selectedSignalKey = selectedSignal?.let { "${it.kind.name}:${it.id}" },
             onSelectSignal = {
                 selectedSignal = it
                 if (it != null) selected = null
+                selectedCapture = null
+            },
+            sdrPins = captures,
+            selectedSdrId = selectedCapture?.id,
+            onSelectSdr = { id ->
+                selectedCapture = captures.firstOrNull { it.id == id }
+                selected = null
+                selectedSignal = null
             },
             spinSpeed = settings.globeSpin,
             satEntity = entityColor(settings.satEntityColor),
             offline = settings.offlineMode,
             modifier = Modifier.fillMaxSize(),
+        )
+
+        // The dongle's panel is anchored top centre, between the status column and the clock:
+        // it is a readout of one attached thing, not a layer, so it takes the free edge.
+        SdrPanel(
+            c,
+            Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 8.dp)
+                // Above the status column it overlaps: those cards are drawn after this one,
+                // and a drop-down that slid underneath them would be unreadable.
+                .zIndex(1f),
         )
 
         val peer by c.peer.state.collectAsState()
@@ -1150,6 +1182,16 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 onClose = { selectedSignal = null },
             )
         }
+
+        selectedCapture?.let { cap ->
+            SdrCard(
+                capture = cap,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 12.dp, start = 12.dp, end = 12.dp),
+                onClose = { selectedCapture = null },
+            )
+        }
     }
 }
 
@@ -1320,7 +1362,11 @@ private fun SignalCard(signal: LoggedSignal, modifier: Modifier = Modifier, onCl
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    if (signal.kind == RfKind.WIFI) "Logged Wi-Fi network" else "Logged Bluetooth device",
+                    when (signal.kind) {
+                        RfKind.WIFI -> "Logged Wi-Fi network"
+                        RfKind.BLE -> "Logged Bluetooth device"
+                        RfKind.SUBGHZ -> "Logged sub-GHz carrier"
+                    },
                     color = Sky.textDim,
                     fontSize = 11.sp,
                 )
@@ -1328,7 +1374,16 @@ private fun SignalCard(signal: LoggedSignal, modifier: Modifier = Modifier, onCl
             Text("✕", color = Sky.textDim, modifier = Modifier.clickable { onClose() })
         }
         Spacer(Modifier.height(8.dp))
-        KeyValueRow("Address", signal.id)
+        if (signal.kind == RfKind.SUBGHZ) {
+            // A carrier has no address: its identity is the frequency the CC1101 heard.
+            KeyValueRow(
+                "Frequency",
+                String.format(Locale.US, "%.3f MHz", signal.id.toDoubleOrNull() ?: 0.0),
+                color,
+            )
+        } else {
+            KeyValueRow("Address", signal.id)
+        }
         KeyValueRow("Signal", "${signal.rssi} dBm · score ${signal.score} · bin ${signal.bin}", color)
         if (signal.channel > 0) KeyValueRow("Channel", signal.channel.toString())
         KeyValueRow(
@@ -1364,6 +1419,10 @@ private fun TacticalMap(
     /** The tapped logged signal as "KIND:id", or null when none is open. */
     selectedSignalKey: String? = null,
     onSelectSignal: (LoggedSignal?) -> Unit = {},
+    /** Saved SDR captures: a pennant where each recording was started. */
+    sdrPins: List<SdrCapture> = emptyList(),
+    selectedSdrId: String? = null,
+    onSelectSdr: (String?) -> Unit = {},
     /** 0 off, 1 = 1x, 2 = 3x: how fast the ball turns on its own axis. */
     spinSpeed: Int,
     /** The entity colour a logged satellite is drawn in, from Settings.satEntityColor. */
@@ -1380,6 +1439,7 @@ private fun TacticalMap(
     // Same reason as the markers: the tap handler is keyed on Unit and would otherwise hold the
     // signal list from the first frame, when nothing had been logged yet.
     val latestSignals by rememberUpdatedState(signals)
+    val latestSdr by rememberUpdatedState(sdrPins)
     var tileVersion by remember { mutableStateOf(0) }
     // Paths and scratch buffers for the sphere, allocated once: rebuilding four Paths per
     // frame put a few hundred kilobytes an hour through the collector for no reason.
@@ -1525,10 +1585,26 @@ private fun TacticalMap(
                                 }
                             }
                         }
-                        if (bestSignal != null && bestSignalDist <= bestDist) {
-                            onSelectSignal(bestSignal)
-                        } else {
-                            onSelect(best)
+                        // A pennant is smaller than either of the others, so it is checked
+                        // last and only wins when the tap is nearer to it than to anything else.
+                        var bestSdr: SdrCapture? = null
+                        var bestSdrDist = 18f * density
+                        if (!globeModeNow) {
+                            val sink = ProjectedSink()
+                            for (cap in latestSdr) {
+                                vp.surfaceInto(cap.lat, cap.lon, sink)
+                                val d = sqrt((sink.x - tap.x).pow(2) + (sink.y - tap.y).pow(2))
+                                if (d < bestSdrDist) {
+                                    bestSdrDist = d
+                                    bestSdr = cap
+                                }
+                            }
+                        }
+                        when {
+                            bestSdr != null && bestSdrDist <= bestSignalDist && bestSdrDist <= bestDist ->
+                                onSelectSdr(bestSdr.id)
+                            bestSignal != null && bestSignalDist <= bestDist -> onSelectSignal(bestSignal)
+                            else -> onSelect(best)
                         }
                     }
                 },
@@ -1670,6 +1746,29 @@ private fun TacticalMap(
                     val sig = s.signal
                     if (sig != null && selectedSignalKey == sig.kind.name + ":" + sig.id) {
                         drawCircle(color = Sky.cyan, radius = 6.5f * density, center = p, style = ringStroke)
+                    }
+                }
+            }
+
+            // ---- saved SDR captures: a pennant on a mast, never a dot ----
+            if (sdrPins.isNotEmpty() && !globeMode) {
+                for (cap in sdrPins) {
+                    vp.surfaceInto(cap.lat, cap.lon, pa)
+                    val p = Offset(pa.x, pa.y)
+                    val mast = 10f * density
+                    drawLine(
+                        color = Sky.sdr,
+                        start = Offset(p.x, p.y),
+                        end = Offset(p.x, p.y - mast),
+                        strokeWidth = 1.3f * density,
+                    )
+                    drawRect(
+                        color = Sky.sdr.copy(alpha = 0.85f),
+                        topLeft = Offset(p.x, p.y - mast),
+                        size = androidx.compose.ui.geometry.Size(7f * density, 6f * density),
+                    )
+                    if (cap.id == selectedSdrId) {
+                        drawCircle(color = Sky.cyan, radius = 8f * density, center = p, style = ringStroke)
                     }
                 }
             }

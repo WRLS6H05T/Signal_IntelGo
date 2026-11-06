@@ -35,6 +35,12 @@ object Sky {
     val watchTracker = Color(0xFFA78BFA)
     val watchRouter = Color(0xFF2DD4BF)
     val watchRadio = Color(0xFFE879F9)
+
+    /** A CC1101 carrier: yellow, because it is a different band and a different kind of thing. */
+    val subGhz = Color(0xFFFDE047)
+
+    /** Saved SDR captures and the spectrum they carry. */
+    val sdr = Color(0xFF67E8F9)
 }
 
 private val scheme = darkColorScheme(

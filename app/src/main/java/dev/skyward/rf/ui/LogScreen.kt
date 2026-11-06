@@ -78,6 +78,7 @@ fun LogScreen(c: Container, modifier: Modifier = Modifier, onShowOnMap: () -> Un
                 KeyValueRow("Watch hits", logged.values.count { it.layer == Layer.WATCH }.toString(), Sky.watchFlock)
                 KeyValueRow("Wi-Fi networks", signals.count { it.kind == RfKind.WIFI }.toString(), Sky.logged)
                 KeyValueRow("Bluetooth devices", signals.count { it.kind == RfKind.BLE }.toString(), Sky.logged)
+                KeyValueRow("Sub-GHz hits", signals.count { it.kind == RfKind.SUBGHZ }.toString(), Sky.subGhz)
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SmallAction("EXPORT CSV") {

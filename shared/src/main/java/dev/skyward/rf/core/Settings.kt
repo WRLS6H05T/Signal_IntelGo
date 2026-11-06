@@ -86,6 +86,23 @@ data class Settings(
      * answers a 115200 probe with noise, which reads exactly like a board that will not scan.
      */
     val esp32Baud: Int = 115200,
+    /**
+     * Sub-GHz sweeps on a wired board whose firmware has a CC1101. Off, no sub-GHz command is
+     * sent and no carrier is logged; the board is otherwise polled exactly as before.
+     */
+    val subGhzEnabled: Boolean = true,
+    /**
+     * The sub-GHz sweep command, because the verb differs between GhostESP builds and Marauder
+     * revisions and there is no way to ask a firmware which one it wants.
+     */
+    val subGhzCommand: String = "subghz rx",
+    /**
+     * RTL-SDR dongle: the spectrum drop-down on the map, its recording and its pins. Off, the
+     * dongle is left alone - not opened, not recorded from, and no panel is drawn.
+     */
+    val sdrEnabled: Boolean = false,
+    /** Tuned centre for the dongle, in MHz. Ignored below 24 MHz or above 1766 MHz. */
+    val sdrCenterMhz: Double = 433.92,
     /** Which GPIO the board's GPS module transmits on, set from the in-app serial terminal. */
     val espGpsPin: Int = 4,
     /** The GPS module's own rate, which is not the console's: 9600 is the usual NMEA default. */
