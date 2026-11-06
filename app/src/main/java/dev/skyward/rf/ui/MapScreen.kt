@@ -273,6 +273,8 @@ private fun markerColor(m: MapMarker, satEntity: Color = Sky.logged): Color = wh
         WatchKind.FLOCK -> Sky.watchFlock
         WatchKind.AXON -> Sky.watchAxon
         WatchKind.TASER -> Sky.watchTaser
+        WatchKind.POLICE_ROUTER -> Sky.watchRouter
+        WatchKind.POLICE_RADIO -> Sky.watchRadio
         WatchKind.TRACKER -> Sky.watchTracker
         null -> Sky.watchFlock
     }
@@ -606,14 +608,15 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
             tileStore = tileStore,
             markers = markers,
             world = worldRings,
-            path = path,
-            signals = if (showSignals) signalDots else emptyList(),
+            path = if (settings.offlineMode) emptyList() else path,
+            signals = if (showSignals && !settings.offlineMode) signalDots else emptyList(),
             self = observer,
             accuracyM = null,
             selectedKey = selected?.key,
             onSelect = { selected = it },
             spinSpeed = settings.globeSpin,
             satEntity = entityColor(settings.satEntityColor),
+            offline = settings.offlineMode,
             modifier = Modifier.fillMaxSize(),
         )
 
@@ -855,6 +858,12 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                     Spacer(Modifier.width(6.dp))
                     Text("REC", color = Sky.warn, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
+                // Offline is a mode the map hides everything but the GPS constellation for, and
+                // an empty layer must not read as a dead feed.
+                if (settings.offlineMode) {
+                    Spacer(Modifier.width(6.dp))
+                    Text("OFFLINE", color = Sky.warn, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                }
                 Spacer(Modifier.weight(1f))
                 CrashPill()
                 Spacer(Modifier.width(6.dp))
@@ -1069,7 +1078,8 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
             }
             // Saves the ground around the current centre so the map still draws with no
             // network. Coarse zooms land first, so the area is readable even if stopped early.
-            if (!settings.useDeviceMap) {
+            // Hidden while offline: saving tiles is a download.
+            if (!settings.useDeviceMap && !settings.offlineMode) {
                 IconButton(
                     onClick = {
                         if (!offlineBusy) {
@@ -1266,6 +1276,8 @@ private fun TacticalMap(
     spinSpeed: Int,
     /** The entity colour a logged satellite is drawn in, from Settings.satEntityColor. */
     satEntity: Color = Sky.logged,
+    /** Offline mode: cached tiles only, nothing is downloaded. */
+    offline: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current.density
@@ -1331,7 +1343,9 @@ private fun TacticalMap(
             }
         }
 
-        LaunchedEffect(visible) {
+        LaunchedEffect(visible, offline) {
+            // Offline: the tiles already on the phone are drawn, and nothing is asked for.
+            if (offline) return@LaunchedEffect
             var loaded = false
             for (t in visible) {
                 if (tileStore.load(tileSource, t.z, t.x, t.y)) loaded = true
@@ -1626,10 +1640,11 @@ private fun TacticalMap(
                     }
                     // A camera and a TASER are different things to see on a street; the
                     // glyph, not just the colour, says which one this is.
-                    Layer.WATCH -> if (m.watch == WatchKind.TASER) {
-                        drawTaserIcon(p, r, color)
-                    } else {
-                        drawCameraIcon(p, r, color)
+                    Layer.WATCH -> when (m.watch) {
+                        WatchKind.TASER -> drawTaserIcon(p, r, color)
+                        WatchKind.POLICE_ROUTER -> drawRouterIcon(p, r, color)
+                        WatchKind.POLICE_RADIO -> drawRadioIcon(p, r, color)
+                        else -> drawCameraIcon(p, r, color)
                     }
                 }
                 if (m.key == selectedKey) {

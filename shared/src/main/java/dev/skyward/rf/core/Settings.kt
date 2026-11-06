@@ -31,6 +31,12 @@ data class Settings(
      * chip for fixes nothing reads. The map keeps the last position it had.
      */
     val gpsEnabled: Boolean = true,
+    /**
+     * Offline mode: the GPS constellation and nothing else, from the element sets and map tiles
+     * already on the phone. No satellite, aircraft, mesh, peer or weather request is made, so a
+     * drive out of signal shows a sky and a map instead of an empty screen.
+     */
+    val offlineMode: Boolean = false,
     val refreshSatMs: Long = 5_000,
     val refreshAircraftMs: Long = 12_000,
     val dropWeakDots: Boolean = false,

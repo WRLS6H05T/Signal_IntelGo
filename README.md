@@ -343,6 +343,22 @@ Saved tiles live in the app's `files/tiles_v2`, not `cacheDir`, so Android does 
 reclaim space; **CLEAR TILE CACHE** in Setup removes them. The tiles come from OpenStreetMap's
 volunteer servers, which is why the save is a neighbourhood rather than a country.
 
+### Offline mode
+
+Setup -> **Offline** is the switch for when there is no network at all. With it on, the globe and
+the map draw the **GPS constellation and nothing else**: no aircraft, drones, mesh nodes, cell
+towers, ESP32 boards, watch hits, logged signals or drive path. The element sets are the ones
+already cached and the basemap is the tiles already saved, so nothing is downloaded and no feed
+is polled - the aircraft, mesh, peer and weather clients are stopped when it goes on and started
+again when it goes off. The phone's own GPS keeps running, because the receiver is local.
+
+Only the GPS satellites are drawn, recognised by catalogue name (`GPS BIIR-2 (PRN 13)`,
+`NAVSTAR 71` and the rest of the gps-ops group), because the cache stores element sets rather
+than the group each one came from. The sky is only as full as that cache: with nothing saved,
+offline mode shows no satellites until it is switched off once with a connection. The INTEL
+header carries an `OFFLINE` flag so an empty layer is not mistaken for a dead feed, and the
+map's **⇩** save button is hidden while it is on, since saving tiles is a download.
+
 ## Getting around
 
 The tab bar is not a bar. Folded away nothing is reserved at all: the screen gets its full
@@ -416,7 +432,8 @@ commas, semicolons and dashes become full stops, and a long report is read as a 
 one idea per sentence. That is the honest limit of text-to-speech, not a clone of the performance.
 
 Whichever voice is chosen, the **glitched delivery** stays reserved for the watch list: a Flock
-camera, an Axon body camera, a TASER or a tracker is announced in the broken, slowed-down version
+camera, an Axon body camera, a TASER, a patrol-car router, a radio's access point or a tracker is
+announced in the broken, slowed-down version
 of that voice - once per device per five minutes, so a drive does not become a monologue. Everything uses
 the phone's own recogniser and text-to-speech engine: no audio is written to a file and nothing is
 sent anywhere. She listens while the app is open and the screen is on; a background listener would
@@ -433,8 +450,18 @@ ids raise confidence but never match on their own, or every phone in the street 
 
 The radios also look for surveillance hardware and pin a match where it was heard: **FLOCK**
 (Flock Safety ALPR cameras, including their `FS Ext Battery` packs and `Flock-XXXX` names),
-**AXON** (body cameras) and **TASER** (Axon conducted-energy devices). Each gets its own glyph
-and colour, a WATCH row in the INTEL table, and a marker card that says how the match was made.
+**AXON** (body cameras), **TASER** (Axon conducted-energy devices), **ROUTER** and **RADIO**.
+Each gets its own glyph and colour, a WATCH row in the INTEL table, and a marker card that says
+how the match was made.
+
+**ROUTER** is the car itself: the mobile router a patrol car carries - Cradlepoint, Sierra
+Wireless AirLink, WatchGuard, a rugged Toughbook or Getac acting as the MDT - or the department's
+own naming, `PD-MDT-7`, `SHERIFF 12`, `MOBILE-NET`. A vendor token marks the hit `router vendor
+name` and is the one to trust; a name that only says *police* is `name only`, because anybody can
+type SHERIFF into an SSID field.
+
+**RADIO** is the access point a Motorola MOTOTRBO or APX radio raises for programming, matched on
+`MOTOTRBO`, `TRBO-` or `APX-`. It is a radio, not a router, so it is announced as one.
 
 The signatures are name-based, plus the XUNTONG Bluetooth manufacturer id (`0x09C8`) that
 Flock's camera and battery hardware advertises. That is a lead, not proof: a camera that keeps

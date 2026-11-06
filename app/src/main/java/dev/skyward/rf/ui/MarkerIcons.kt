@@ -349,6 +349,84 @@ fun DrawScope.drawTaserIcon(at: Offset, r: Float, tint: Color) {
  * is for the ones that do not broadcast one. It is deliberately not a scaled-down aeroplane:
  * four rotors make a drone unmistakable at a glance, and no airliner has them.
  */
+/**
+ * Patrol-car router: a box with an antenna and its signal arcs, distinct from the mesh dish.
+ */
+fun DrawScope.drawRouterIcon(at: Offset, r: Float, tint: Color) {
+    drawRoundRect(
+        color = tint,
+        topLeft = Offset(at.x - r * 1.05f, at.y - r * 0.15f),
+        size = Size(r * 2.1f, r * 0.85f),
+        cornerRadius = CornerRadius(r * 0.16f),
+    )
+    // status lights along the front
+    for (i in 0..2) {
+        drawCircle(
+            color = tint.dim(0.4f),
+            radius = r * 0.1f,
+            center = Offset(at.x - r * 0.55f + i * r * 0.42f, at.y + r * 0.28f),
+        )
+    }
+    // antenna, then two arcs of whatever it is serving
+    drawLine(
+        color = tint.dim(0.9f),
+        start = Offset(at.x + r * 0.62f, at.y - r * 0.15f),
+        end = Offset(at.x + r * 0.62f, at.y - r * 1.15f),
+        strokeWidth = r * 0.16f,
+    )
+    drawCircle(color = tint.dim(0.7f), radius = r * 0.13f, center = Offset(at.x + r * 0.62f, at.y - r * 1.2f))
+    drawArc(
+        color = tint.dim(0.55f),
+        startAngle = -115f,
+        sweepAngle = 50f,
+        useCenter = false,
+        topLeft = Offset(at.x + r * 0.05f, at.y - r * 1.95f),
+        size = Size(r * 1.15f, r * 1.15f),
+        style = Stroke(width = r * 0.14f),
+    )
+    drawArc(
+        color = tint.dim(0.35f),
+        startAngle = -110f,
+        sweepAngle = 40f,
+        useCenter = false,
+        topLeft = Offset(at.x - r * 0.2f, at.y - r * 2.3f),
+        size = Size(r * 1.7f, r * 1.7f),
+        style = Stroke(width = r * 0.12f),
+    )
+}
+
+/**
+ * Handheld radio: a body with a stub antenna and a speaker grille, so a MOTOTRBO AP never reads
+ * as the TASER's grip-and-prongs.
+ */
+fun DrawScope.drawRadioIcon(at: Offset, r: Float, tint: Color) {
+    drawRoundRect(
+        color = tint,
+        topLeft = Offset(at.x - r * 0.42f, at.y - r * 0.6f),
+        size = Size(r * 0.84f, r * 1.6f),
+        cornerRadius = CornerRadius(r * 0.18f),
+    )
+    drawLine(
+        color = tint.dim(0.9f),
+        start = Offset(at.x + r * 0.2f, at.y - r * 0.6f),
+        end = Offset(at.x + r * 0.2f, at.y - r * 1.45f),
+        strokeWidth = r * 0.15f,
+    )
+    // speaker grille
+    drawRect(
+        color = tint.dim(0.4f),
+        topLeft = Offset(at.x - r * 0.24f, at.y - r * 0.38f),
+        size = Size(r * 0.48f, r * 0.34f),
+    )
+    // keypad line
+    drawLine(
+        color = tint.dim(0.35f),
+        start = Offset(at.x - r * 0.24f, at.y + r * 0.2f),
+        end = Offset(at.x + r * 0.24f, at.y + r * 0.2f),
+        strokeWidth = r * 0.12f,
+    )
+}
+
 fun DrawScope.drawDroneIcon(at: Offset, r: Float, tint: Color) {
     val arm = r * 0.95f
     val rotor = r * 0.4f

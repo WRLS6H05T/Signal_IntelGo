@@ -120,7 +120,8 @@ class AirspaceEngine(
             val obs = observer.value
 
             // Element sets: refresh at most every 15 minutes; the tracker caches for 6 h.
-            if (now - lastTleRefresh > 15 * 60_000L) {
+            // Offline mode never asks: it draws whatever sets are already on the phone.
+            if (!cfg.offlineMode && now - lastTleRefresh > 15 * 60_000L) {
                 lastTleRefresh = now
                 // Always keep the station group: the ISS is the one object everyone looks for.
                 sat.refresh((cfg.satGroups + "stations").distinct())
@@ -132,7 +133,7 @@ class AirspaceEngine(
             val satMs = if (sat.cachedCount() > 2_000) maxOf(cfg.refreshSatMs, 20_000L) else cfg.refreshSatMs
             if (now - lastSat >= satMs) {
                 lastSat = now
-                val sats = sat.positions(obs, now).map { s ->
+                val sats = sat.positions(obs, now, gpsOnly = cfg.offlineMode).map { s ->
                     s.copy(logged = logged.contains(Layer.SATELLITE, s.noradId))
                 }
                 // Inside 150 miles is an entity from the moment it is up, whether or not a drive
@@ -177,7 +178,7 @@ class AirspaceEngine(
         while (scope.isActive && started) {
             val cfg = settings.current
             val obs = observer.value
-            if (cfg.aircraftEnabled && obs != null) {
+            if (!cfg.offlineMode && cfg.aircraftEnabled && obs != null) {
                 // One fixed ring: 30 miles, the traffic that is actually overhead.
                 val result = aircraftSource.fetch(obs, cfg.aircraftEndpoint)
                 val merged = mergeAircraft(result.aircraft, 400)
@@ -206,7 +207,12 @@ class AirspaceEngine(
                 aircraftMemory.clear()
                 _state.value = _state.value.copy(
                     aircraft = emptyList(),
-                    acStatus = FeedStatus(false, "aircraft off", System.currentTimeMillis(), 0),
+                    acStatus = FeedStatus(
+                        false,
+                        if (cfg.offlineMode) "offline mode" else "aircraft off",
+                        System.currentTimeMillis(),
+                        0,
+                    ),
                 )
             }
             val interval = cfg.refreshAircraftMs.coerceAtLeast(5_000)
@@ -238,6 +244,20 @@ class AirspaceEngine(
     }
 
     private fun updateDronesAndMesh(now: Long) {
+        // Offline is a picture of the sky, not of the street: only the GPS constellation reaches
+        // the globe, so nothing else is published for the map to draw or count.
+        if (settings.current.offlineMode) {
+            _state.value = _state.value.copy(
+                drones = emptyList(),
+                mesh = emptyList(),
+                cells = emptyList(),
+                esp32 = emptyList(),
+                watch = emptyList(),
+                observer = observer.value,
+                lastTick = now,
+            )
+            return
+        }
         val snap = rf.snapshot()
         val obs = observer.value
 

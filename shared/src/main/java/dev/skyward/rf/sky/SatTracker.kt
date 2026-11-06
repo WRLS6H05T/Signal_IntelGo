@@ -61,6 +61,21 @@ class SatTracker(
             Birds("44330", "UGUISU", "Japan"),
         )
         val BIRDS3_IDS: Set<String> = BIRDS3.map { it.norad }.toSet()
+
+        /**
+         * The GPS constellation, recognised by catalogue name.
+         *
+         * CelesTrak's gps-ops group is named `GPS BIIR-2  (PRN 13)`, `GPS 71 (USA 260)`,
+         * `NAVSTAR 71` and so on, and the name is the one group marker that survives the cache:
+         * the app stores element sets, not the group each one came from. Offline mode plots
+         * these and nothing else.
+         */
+        fun isGpsName(name: String): Boolean {
+            val n = name.trim()
+            return n.equals("GPS", ignoreCase = true) ||
+                n.startsWith("GPS ", ignoreCase = true) ||
+                n.startsWith("NAVSTAR", ignoreCase = true)
+        }
     }
 
     @Serializable
@@ -234,12 +249,18 @@ class SatTracker(
      * of the catalogue - was missing from it. Elevation and the link score still tell you
      * whether a given satellite is actually workable from where you are.
      */
-    suspend fun positions(observer: LatLon?, nowMs: Long = System.currentTimeMillis()): List<SatView> =
+    suspend fun positions(
+        observer: LatLon?,
+        nowMs: Long = System.currentTimeMillis(),
+        /** Offline mode: the GPS constellation, and nothing else in the sky. */
+        gpsOnly: Boolean = false,
+    ): List<SatView> =
         withContext(Dispatchers.Default) {
             if (cache.sats.isEmpty()) return@withContext emptyList()
             val date = AbsoluteDate(Date(nowMs), TimeScalesFactory.getTAI())
             val out = ArrayList<SatView>(cache.sats.size)
             for (tle in cache.sats) {
+                if (gpsOnly && !isGpsName(tle.name)) continue
                 val prop = propagatorFor(tle) ?: continue
                 val pv = runCatching { prop.propagate(date) }.getOrNull() ?: continue
                 val pos = runCatching { pv.position }.getOrNull() ?: continue

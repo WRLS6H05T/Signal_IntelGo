@@ -33,6 +33,8 @@ object Sky {
     val watchAxon = Color(0xFF60A5FA)
     val watchTaser = Color(0xFFFBBF24)
     val watchTracker = Color(0xFFA78BFA)
+    val watchRouter = Color(0xFF2DD4BF)
+    val watchRadio = Color(0xFFE879F9)
 }
 
 private val scheme = darkColorScheme(

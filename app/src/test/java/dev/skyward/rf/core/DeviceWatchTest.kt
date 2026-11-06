@@ -1,6 +1,7 @@
 package dev.skyward.rf.core
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -90,5 +91,51 @@ class DeviceWatchTest {
         assertTrue(kotlin.math.abs(a.second - (-0.12)) < 0.001)
         // Two different addresses do not land on the same dot.
         assertTrue(a != DeviceWatch.place("AA:BB:CC:DD:EE:02", 51.5, -0.12))
+    }
+
+    @Test
+    fun `a patrol car router is recognised by vendor or by what it calls itself`() {
+        val cradle = DeviceWatch.assess(RfKind.WIFI, "Cradlepoint-4F21", "AA:BB:CC:DD:EE:20", 0)
+        assertEquals(WatchKind.POLICE_ROUTER, cradle?.kind)
+        assertEquals("router vendor name", cradle?.confidence)
+        assertTrue(cradle!!.strong)
+
+        assertEquals(
+            WatchKind.POLICE_ROUTER,
+            DeviceWatch.assess(RfKind.WIFI, "AirLink RV55", "AA:BB:CC:DD:EE:21", 0)?.kind,
+        )
+        assertEquals(
+            WatchKind.POLICE_ROUTER,
+            DeviceWatch.assess(RfKind.WIFI, "WatchGuard Mobile", "AA:BB:CC:DD:EE:22", 0)?.kind,
+        )
+
+        // A department's own naming is a lead, not a vendor match: anybody can type "SHERIFF".
+        val mdt = DeviceWatch.assess(RfKind.WIFI, "SHERIFF-MDT-12", "AA:BB:CC:DD:EE:23", 0)
+        assertEquals(WatchKind.POLICE_ROUTER, mdt?.kind)
+        assertEquals("name only", mdt?.confidence)
+        assertFalse(mdt!!.strong)
+        assertEquals(
+            WatchKind.POLICE_ROUTER,
+            DeviceWatch.assess(RfKind.WIFI, "PD-MDT-7", "AA:BB:CC:DD:EE:24", 0)?.kind,
+        )
+    }
+
+    @Test
+    fun `a radio's programming access point is a radio, not a router`() {
+        val trbo = DeviceWatch.assess(RfKind.WIFI, "MOTOTRBO 8400", "AA:BB:CC:DD:EE:25", 0)
+        assertEquals(WatchKind.POLICE_RADIO, trbo?.kind)
+        assertEquals("name only", trbo?.confidence)
+        assertFalse(trbo!!.strong)
+
+        assertEquals(
+            WatchKind.POLICE_RADIO,
+            DeviceWatch.assess(RfKind.WIFI, "TRBO-1188", "AA:BB:CC:DD:EE:26", 0)?.kind,
+        )
+    }
+
+    @Test
+    fun `a router that is only a router stays out`() {
+        // No vendor token and no department name: an unremarkable home access point.
+        assertNull(DeviceWatch.assess(RfKind.WIFI, "Home Router 5G", "AA:BB:CC:DD:EE:27", 0))
     }
 }

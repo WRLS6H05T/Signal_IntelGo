@@ -10,7 +10,8 @@ import kotlin.math.sin
  * A phone radio gives a name, an address and - for BLE - the manufacturer id the advertiser
  * puts in its payload. That is enough to recognise the families that broadcast a stable name:
  * Flock Safety ALPR cameras and their battery packs, Axon body-worn cameras and Axon's TASER
- * conducted-energy devices, and the Bluetooth item trackers that follow a person or a car
+ * conducted-energy devices, the in-car routers patrol cars carry and the access points radios
+ * raise for programming, and the Bluetooth item trackers that follow a person or a car
  * around - AirTag, Tile, SmartTag, Chipolo and their cousins. It is deliberately not claimed to
  * be more than that. A camera that keeps its name hidden, a tracker running Find My's encrypted
  * rotation, or any device whose address rotates every fifteen minutes, is indistinguishable from
@@ -28,6 +29,8 @@ enum class WatchKind(val label: String, val detail: String, val spoken: String) 
     FLOCK("FLOCK", "Flock Safety ALPR camera", "Flock camera"),
     TASER("TASER", "Axon TASER", "Taser"),
     AXON("AXON", "Axon body camera", "Axon camera"),
+    POLICE_ROUTER("ROUTER", "police vehicle router", "Police router"),
+    POLICE_RADIO("RADIO", "Motorola MOTOTRBO / APX radio", "Police radio"),
     TRACKER("TRACKER", "Bluetooth item tracker", "Bluetooth tracker"),
 }
 
@@ -76,6 +79,29 @@ object DeviceWatch {
     /** Old Tile tags broadcast the bare product name, which is an exact match, not a substring. */
     private val TRACKER_EXACT = Regex("^tile([-_ ].*)?$", RegexOption.IGNORE_CASE)
 
+    /**
+     * Router vendors whose gear turns up in patrol cars: Cradlepoint's IBR, Sierra Wireless's
+     * AirLink, WatchGuard's mobile APs, and the rugged laptops that are the MDT on the dash.
+     */
+    private val ROUTER_VENDORS = listOf(
+        "cradlepoint", "cradle point", "sierra wireless", "airlink", "air vantage",
+        "watchguard", "toughbook", "getac",
+    )
+
+    /**
+     * What a department calls its own network. "police" is a word a public hotspot has no reason
+     * to use, and an MDT is the mobile data terminal in the car, not a brand of anything.
+     */
+    private val POLICE_WORDS = listOf(
+        "police", "sheriff", "state patrol", "highway patrol", "constabulary", "gendarmerie",
+    )
+
+    private val POLICE_PREFIXES = listOf("pd-", "pd_", "mdt-", "mdt_", "patrol-")
+
+    /** Motorola's MOTOTRBO and APX radios bring up an AP named after the family. */
+    private val RADIO_WORDS = listOf("mototrbo", "moto trbo", "trbonet")
+    private val RADIO_PREFIXES = listOf("trbo", "apx-", "apx_")
+
     data class Verdict(val kind: WatchKind, val confidence: String, val strong: Boolean)
 
     /**
@@ -108,6 +134,26 @@ object DeviceWatch {
         }
         if (n.contains("axon")) {
             return Verdict(WatchKind.AXON, "name only", strong = false)
+        }
+
+        // A radio's own access point, tested before the patrol-car naming below: the name says
+        // which radio it is, which is more useful than "some police hardware".
+        if (n.isNotEmpty() && (RADIO_WORDS.any { n.contains(it) } || RADIO_PREFIXES.any { n.startsWith(it) })) {
+            return Verdict(WatchKind.POLICE_RADIO, "name only", strong = false)
+        }
+
+        // The car around the laptop: a patrol car's router, or the department's own naming -
+        // "PD-MDT", "SHERIFF 12", "MOBILE-NET". A vendor token names a product family; a
+        // department name is only what somebody typed into the SSID field.
+        val routerVendor = n.isNotEmpty() && ROUTER_VENDORS.any { n.contains(it) }
+        val routerName = routerVendor || (n.isNotEmpty() && POLICE_WORDS.any { n.contains(it) }) ||
+            POLICE_PREFIXES.any { n.startsWith(it) }
+        if (routerName) {
+            return Verdict(
+                WatchKind.POLICE_ROUTER,
+                if (routerVendor) "router vendor name" else "name only",
+                strong = routerVendor,
+            )
         }
 
         // Trackers: a name is the evidence. The manufacturer id only raises confidence, because

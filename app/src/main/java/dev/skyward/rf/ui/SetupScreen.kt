@@ -202,6 +202,37 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
         }
 
         item {
+            SectionCard(title = "Offline", trailing = if (settings.offlineMode) "on" else "off") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Offline mode", color = Sky.text, fontSize = 13.sp)
+                        Text(
+                            "GPS satellites only, from what is already on the phone",
+                            color = Sky.textDim,
+                            fontSize = 10.sp,
+                        )
+                    }
+                    Switch(
+                        checked = settings.offlineMode,
+                        onCheckedChange = { on -> c.settingsStore.update { it.copy(offlineMode = on) } },
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "On, the globe and the map draw the GPS constellation and nothing else - no " +
+                        "aircraft, drones, mesh nodes, cell towers, ESP32 boards, watch hits, " +
+                        "logged signals or drive path. The element sets are the ones already " +
+                        "saved and the basemap is the tiles already cached, so no feed is asked " +
+                        "for and it works with no signal at all. An empty sky means the " +
+                        "satellites have not been downloaded yet: switch this off once with a " +
+                        "network, then back on.",
+                    color = Sky.textDim,
+                    fontSize = 10.sp,
+                )
+            }
+        }
+
+        item {
             SectionCard(title = "Mesh nodes", trailing = if (c.mesh.isRunning()) "live" else "off") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {

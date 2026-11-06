@@ -395,6 +395,22 @@ class Container(context: Context) {
             }
         }
 
+        // Offline is a promise about the network, not only about what is drawn: the feeds that
+        // poll are stopped when it goes on and started again when it goes off. The radios and
+        // the receiver are local, so they carry on regardless.
+        scope.launch {
+            settingsStore.state.collect { cfg ->
+                if (!running) return@collect
+                if (cfg.offlineMode) {
+                    mesh.stop()
+                    if (peer.isRunning()) peer.stop()
+                } else {
+                    if (cfg.meshMqttEnabled) mesh.start()
+                    if (cfg.peerEnabled && !peer.isRunning()) peer.start()
+                }
+            }
+        }
+
         // The host's revision, bumped only when a shared setting actually moves. A follower
         // reads it to tell "the host just decided this" from "the host is repeating itself".
         scope.launch {
@@ -422,9 +438,9 @@ class Container(context: Context) {
             }
         }
 
-        // Watch alerts in the glitched voice: Flock, Axon, TASER and trackers alike, one per
-        // device per five minutes and never two inside eight seconds, so a busy street does not
-        // turn the drive into a monologue.
+        // Watch alerts in the glitched voice: every family alike - Flock, Axon, TASER, patrol-car
+        // routers, radio access points and trackers - one per device per five minutes and never
+        // two inside eight seconds, so a busy street does not turn the drive into a monologue.
         scope.launch {
             val announced = HashMap<String, Long>()
             var lastAlert = 0L
@@ -603,11 +619,11 @@ class Container(context: Context) {
 
         if (settingsStore.current.gpsEnabled) location.start()
         rf.startAll()
-        mesh.start()
+        if (!settingsStore.current.offlineMode) mesh.start()
         // The persisted rate has to be on the port before the first probe opens it.
         esp32Usb.setBaud(settingsStore.current.esp32Baud)
         esp32.start()
-        if (settingsStore.current.peerEnabled) peer.start()
+        if (settingsStore.current.peerEnabled && !settingsStore.current.offlineMode) peer.start()
         airspace.start()
 
         // Stamps every watch hit as it appears, so the timed update can report what is new. The
@@ -658,7 +674,7 @@ class Container(context: Context) {
                 )
                 // The clock's drop-down reads this. The feed throttles itself to one read per
                 // ten minutes and one per two kilometres, so a fix per second is harmless.
-                if (settingsStore.current.showLiveTime) {
+                if (settingsStore.current.showLiveTime && !settingsStore.current.offlineMode) {
                     launch { runCatching { weather.refresh(fix.lat, fix.lon) } }
                 }
                 if (wardrive.state.value.active) {
