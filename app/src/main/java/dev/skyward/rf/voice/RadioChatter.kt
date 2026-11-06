@@ -26,17 +26,24 @@ object Radio {
      * Wraps a line in a radio call.
      *
      * An alert opens with the call sign - "Watcher to operator" - because it is the Watcher
-     * hailing, and the timed intel update names itself in the same opening breath so the operator
-     * knows what is coming before the numbers start. A reply does not open at all, it is just the
-     * Watcher keying up. Everything closes on "Watcher out", the sign-off that ends a
+     * hailing, the timed intel update names itself in the same opening breath so the operator
+     * knows what is coming before the numbers start, and the intel report does the same so it is
+     * a transmission rather than the Watcher thinking aloud. A reply does not open at all, it is
+     * just the Watcher keying up. Everything closes on "Watcher out", the sign-off that ends a
      * transmission on the net.
      */
-    fun frame(text: String, alert: Boolean = false, intel: Boolean = false): String {
+    fun frame(
+        text: String,
+        alert: Boolean = false,
+        intel: Boolean = false,
+        /** An on-demand intel report: keyed up like an alert, but not spoken in the glitch. */
+        report: Boolean = false,
+    ): String {
         val body = text.trim()
         if (body.isEmpty()) return body
         val opener = when {
             intel -> "Watcher to operator. Intel update. "
-            alert -> "Watcher to operator. "
+            alert || report -> "Watcher to operator. "
             else -> ""
         }
         return "$opener$body Watcher out."

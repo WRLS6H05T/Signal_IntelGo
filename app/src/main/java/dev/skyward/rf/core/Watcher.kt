@@ -47,9 +47,32 @@ object Watcher {
         val logging: Boolean = false,
         val km: Double = 0.0,
         val unit: String = Units.KM,
+        /** What the log has caught, which is what the report is about. */
+        val logged: Logged = Logged(),
         /** Watch hits heard since the last timed update; the on-demand report ignores this. */
         val sightings: List<WatchView> = emptyList(),
     )
+
+    /**
+     * The Log tab's table, as counts the report can read out.
+     *
+     * Wi-Fi and Bluetooth are entities here as much as a satellite is: every network heard with
+     * a fix is one row in the table and one dot on the map, so the report must not leave them
+     * out of the total it announces.
+     */
+    data class Logged(
+        val sats: Int = 0,
+        val aircraft: Int = 0,
+        val drones: Int = 0,
+        val mesh: Int = 0,
+        val cells: Int = 0,
+        val esp32: Int = 0,
+        val watch: Int = 0,
+        val wifi: Int = 0,
+        val ble: Int = 0,
+    ) {
+        val total: Int get() = sats + aircraft + drones + mesh + cells + esp32 + watch + wifi + ble
+    }
 
     /**
      * Recognisers return "Watcher", "watchers," or a plausible mishearing: "wotcher", "watcha",
@@ -160,7 +183,10 @@ object Watcher {
 
     /**
      * The intel report, in the order it was asked for: what is connected and being watched first,
-     * then the radio picture, then whether anything is being recorded.
+     * then the radio picture, then what the log has caught.
+     *
+     * Whether recording is armed is not part of it. "Logging is off" three words before the
+     * sign-off was heard as a second goodbye, and what has been collected is the news anyway.
      */
     fun intelReport(r: ReportInput): String {
         // No name in the text: the voice pacing is the delivery, and the Watcher is the only one.
@@ -186,10 +212,24 @@ object Watcher {
         if (r.mesh > 0) sb.append(", ${count(r.mesh, "mesh node")}")
         sb.append(", ${count(r.sats, "satellite")} in range, ${count(r.aircraft, "aircraft")}. ")
         sb.append(if (r.gps) "GPS fix held. " else "No GPS fix. ")
-        sb.append(
-            if (r.logging) "Logging is on, ${Units.distance(r.km, r.unit, 1)} so far."
-            else "Logging is off.",
-        )
+        sb.append("Logged entities. ")
+        if (r.logged.total == 0) {
+            sb.append("Nothing logged yet.")
+        } else {
+            val caught = listOfNotNull(
+                r.logged.sats.takeIf { it > 0 }?.let { count(it, "satellite") },
+                r.logged.aircraft.takeIf { it > 0 }?.let { count(it, "aircraft", "aircraft") },
+                r.logged.drones.takeIf { it > 0 }?.let { count(it, "drone") },
+                r.logged.mesh.takeIf { it > 0 }?.let { count(it, "mesh node") },
+                r.logged.cells.takeIf { it > 0 }?.let { count(it, "cell tower") },
+                r.logged.esp32.takeIf { it > 0 }?.let { count(it, "ESP32 board") },
+                r.logged.watch.takeIf { it > 0 }?.let { count(it, "watch match", "watch matches") },
+                r.logged.wifi.takeIf { it > 0 }?.let { count(it, "Wi-Fi network") },
+                r.logged.ble.takeIf { it > 0 }?.let { count(it, "Bluetooth device") },
+            )
+            sb.append(count(r.logged.total, "entity", "entities")).append(". ")
+            sb.append("I have ${joinWords(caught)}.")
+        }
         return sb.toString()
     }
 

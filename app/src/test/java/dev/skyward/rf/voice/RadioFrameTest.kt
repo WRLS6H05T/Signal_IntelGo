@@ -22,6 +22,11 @@ class RadioFrameTest {
 
     @Test
     fun `an empty line is not framed into a call`() {
+        // The on-demand intel report is keyed up like an alert and signed off the same way.
+        assertEquals(
+            "Watcher to operator. Intel report. Watcher out.",
+            Radio.frame("Intel report.", report = true),
+        )
         assertEquals("", Radio.frame("   ", intel = true))
     }
 }

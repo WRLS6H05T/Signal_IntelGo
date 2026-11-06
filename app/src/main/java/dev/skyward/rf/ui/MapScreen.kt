@@ -87,6 +87,7 @@ import dev.skyward.rf.core.WatchView
 import dev.skyward.rf.net.compassPoint
 import dev.skyward.rf.sky.AirspaceEngine
 import dev.skyward.rf.ui.theme.Sky
+import dev.skyward.rf.wardrive.LoggedSignal
 import dev.skyward.rf.wardrive.WardrivePoint
 import dev.skyward.rf.wardrive.WardriveSession
 import kotlin.math.abs
@@ -124,9 +125,15 @@ data class MapMarker(
 
 /**
  * A logged signal, ready to draw. The colour is parsed once, when the table changes:
- * thousands of colour strings must not be decoded inside the draw loop.
+ * thousands of colour strings must not be decoded inside the draw loop. The signal itself is
+ * kept so a tap on the dot can open its card without a second lookup in the table.
  */
-data class SignalDot(val lat: Double, val lon: Double, val color: Color)
+data class SignalDot(
+    val lat: Double,
+    val lon: Double,
+    val color: Color,
+    val signal: LoggedSignal? = null,
+)
 
 /** One piece of attached hardware, listed in the top-right status panel. */
 private data class HwEntry(
@@ -543,6 +550,9 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
     var showSignals by remember { mutableStateOf(true) }
     var legendOpen by remember { mutableStateOf(true) }
     var selected by remember { mutableStateOf<MapMarker?>(null) }
+    // The signal dots are a second kind of thing to tap: they are their own card, because a
+    // network is not a marker in any layer.
+    var selectedSignal by remember { mutableStateOf<LoggedSignal?>(null) }
     // Offline tiles: a bounded save of the ground around the current centre, with the count
     // on screen because a silent download looks like a dead button.
     val tileScope = rememberCoroutineScope()
@@ -584,7 +594,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
         loggedSignals.take(3000).mapNotNull { s ->
             val argb = runCatching { android.graphics.Color.parseColor(s.color) }.getOrNull()
                 ?: return@mapNotNull null
-            SignalDot(s.lat, s.lon, Color(argb))
+            SignalDot(s.lat, s.lon, Color(argb), s)
         }
     }
 
@@ -613,7 +623,16 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
             self = observer,
             accuracyM = null,
             selectedKey = selected?.key,
-            onSelect = { selected = it },
+            onSelect = {
+                selected = it
+                // One card at a time: opening a marker closes a signal's card.
+                selectedSignal = null
+            },
+            selectedSignalKey = selectedSignal?.let { "${it.kind.name}:${it.id}" },
+            onSelectSignal = {
+                selectedSignal = it
+                if (it != null) selected = null
+            },
             spinSpeed = settings.globeSpin,
             satEntity = entityColor(settings.satEntityColor),
             offline = settings.offlineMode,
@@ -1121,6 +1140,16 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 onClose = { selected = null },
             )
         }
+
+        selectedSignal?.let { s ->
+            SignalCard(
+                signal = s,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 12.dp, start = 12.dp, end = 12.dp),
+                onClose = { selectedSignal = null },
+            )
+        }
     }
 }
 
@@ -1258,6 +1287,66 @@ private fun MarkerCard(
     }
 }
 
+/**
+ * What a tapped logged signal is.
+ *
+ * These dots are the one map object drawn from the signal table rather than the live sweep, so
+ * the card says which radio heard it and when as well as what it was: a network logged by the
+ * other phone belongs to the street that phone was on, not to this one.
+ */
+@Composable
+private fun SignalCard(signal: LoggedSignal, modifier: Modifier = Modifier, onClose: () -> Unit) {
+    val color = runCatching { android.graphics.Color.parseColor(signal.color) }.getOrNull()
+        ?.let { Color(it) } ?: Sky.logged
+    val heard = remember(signal.at) {
+        SimpleDateFormat("d MMM HH:mm:ss", Locale.US).format(Date(signal.at))
+    }
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Sky.surface)
+            .border(1.dp, color.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
+            .padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Dot(color, 9)
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    signal.name.ifBlank { signal.id },
+                    color = Sky.text,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    if (signal.kind == RfKind.WIFI) "Logged Wi-Fi network" else "Logged Bluetooth device",
+                    color = Sky.textDim,
+                    fontSize = 11.sp,
+                )
+            }
+            Text("✕", color = Sky.textDim, modifier = Modifier.clickable { onClose() })
+        }
+        Spacer(Modifier.height(8.dp))
+        KeyValueRow("Address", signal.id)
+        KeyValueRow("Signal", "${signal.rssi} dBm · score ${signal.score} · bin ${signal.bin}", color)
+        if (signal.channel > 0) KeyValueRow("Channel", signal.channel.toString())
+        KeyValueRow(
+            "Heard by",
+            when (signal.via) {
+                "peer" -> "the other phone"
+                "board" -> "a scanning board"
+                else -> "this phone"
+            },
+        )
+        KeyValueRow("Last heard", heard)
+        KeyValueRow(
+            "Position",
+            String.format(Locale.US, "%.5f, %.5f", signal.lat, signal.lon),
+        )
+    }
+}
+
 @Composable
 private fun TacticalMap(
     camera: MapCameraState,
@@ -1272,6 +1361,9 @@ private fun TacticalMap(
     accuracyM: Float?,
     selectedKey: String?,
     onSelect: (MapMarker?) -> Unit,
+    /** The tapped logged signal as "KIND:id", or null when none is open. */
+    selectedSignalKey: String? = null,
+    onSelectSignal: (LoggedSignal?) -> Unit = {},
     /** 0 off, 1 = 1x, 2 = 3x: how fast the ball turns on its own axis. */
     spinSpeed: Int,
     /** The entity colour a logged satellite is drawn in, from Settings.satEntityColor. */
@@ -1285,6 +1377,9 @@ private fun TacticalMap(
     // The tap detector must not be keyed on the marker list: it is rebuilt on every tick, and
     // restarting the pointer handler mid-gesture is what breaks a pinch half way out.
     val latestMarkers by rememberUpdatedState(markers)
+    // Same reason as the markers: the tap handler is keyed on Unit and would otherwise hold the
+    // signal list from the first frame, when nothing had been logged yet.
+    val latestSignals by rememberUpdatedState(signals)
     var tileVersion by remember { mutableStateOf(0) }
     // Paths and scratch buffers for the sphere, allocated once: rebuilding four Paths per
     // frame put a few hundred kilobytes an hour through the collector for no reason.
@@ -1414,7 +1509,27 @@ private fun TacticalMap(
                                 best = m
                             }
                         }
-                        onSelect(best)
+                        // A dot is a fraction of a marker's size, so it is hit-tested on its
+                        // own and only wins when it is nearer than any icon under the tap.
+                        var bestSignal: LoggedSignal? = null
+                        var bestSignalDist = 26f * density
+                        if (!globeModeNow) {
+                            val sink = ProjectedSink()
+                            for (s in latestSignals) {
+                                val sig = s.signal ?: continue
+                                vp.surfaceInto(s.lat, s.lon, sink)
+                                val d = sqrt((sink.x - tap.x).pow(2) + (sink.y - tap.y).pow(2))
+                                if (d < bestSignalDist) {
+                                    bestSignalDist = d
+                                    bestSignal = sig
+                                }
+                            }
+                        }
+                        if (bestSignal != null && bestSignalDist <= bestDist) {
+                            onSelectSignal(bestSignal)
+                        } else {
+                            onSelect(best)
+                        }
                     }
                 },
         ) {
@@ -1552,6 +1667,10 @@ private fun TacticalMap(
                     val p = Offset(pb.x, pb.y)
                     drawCircle(color = s.color.copy(alpha = 0.20f), radius = 3.6f * density, center = p)
                     drawCircle(color = s.color, radius = 1.7f * density, center = p)
+                    val sig = s.signal
+                    if (sig != null && selectedSignalKey == sig.kind.name + ":" + sig.id) {
+                        drawCircle(color = Sky.cyan, radius = 6.5f * density, center = p, style = ringStroke)
+                    }
                 }
             }
 

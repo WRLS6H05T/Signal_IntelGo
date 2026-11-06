@@ -3,6 +3,7 @@ package dev.skyward.rf
 import android.content.Context
 import dev.skyward.rf.core.FileStore
 import dev.skyward.rf.core.LatLon
+import dev.skyward.rf.core.Layer
 import dev.skyward.rf.core.RfKind
 import dev.skyward.rf.core.RfObservation
 import dev.skyward.rf.core.Watcher
@@ -511,7 +512,9 @@ class Container(context: Context) {
             peer.sendVoice(cmd.name)
         }
         when (cmd) {
-            Watcher.Command.REPORT -> voice.speak(voiceReport())
+            // Keyed up like an alert and signed off like one, but in the plain voice: it was
+            // asked for, so it is not the glitched delivery reserved for watch hits.
+            Watcher.Command.REPORT -> voice.speak(voiceReport(), report = true)
             Watcher.Command.HELP -> voice.speak(Watcher.help())
             Watcher.Command.MAP -> voice.nav.value = Watcher.Nav.Go(Watcher.Tab.MAP)
             Watcher.Command.DRIVE -> voice.nav.value = Watcher.Nav.Go(Watcher.Tab.DRIVE)
@@ -578,7 +581,28 @@ class Container(context: Context) {
                 logging = drive.active,
                 km = drive.km,
                 unit = settingsStore.current.distanceUnit,
+                logged = loggedCounts(),
             ),
+        )
+    }
+
+    /**
+     * The Log tab's table as counts: the recorded entities per layer, plus every Wi-Fi network
+     * and Bluetooth device, which the signal table holds separately because each one is stored
+     * at the fix where it was heard.
+     */
+    private fun loggedCounts(): Watcher.Logged {
+        val signals = signalLog.snapshot()
+        return Watcher.Logged(
+            sats = logged.count(Layer.SATELLITE),
+            aircraft = logged.count(Layer.AIRCRAFT),
+            drones = logged.count(Layer.DRONE),
+            mesh = logged.count(Layer.MESH),
+            cells = logged.count(Layer.CELL),
+            esp32 = logged.count(Layer.ESP32),
+            watch = logged.count(Layer.WATCH),
+            wifi = signals.count { it.kind == RfKind.WIFI },
+            ble = signals.count { it.kind == RfKind.BLE },
         )
     }
 

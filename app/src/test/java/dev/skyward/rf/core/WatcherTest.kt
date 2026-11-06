@@ -82,6 +82,13 @@ class WatcherTest {
                 logging = true,
                 km = 12.4,
                 unit = Units.MILES,
+                logged = Watcher.Logged(
+                    sats = 9,
+                    aircraft = 14,
+                    watch = 2,
+                    wifi = 91,
+                    ble = 42,
+                ),
             ),
         )
         assertTrue(report.indexOf("Connected devices") < report.indexOf("Signal intel"))
@@ -89,7 +96,16 @@ class WatcherTest {
         assertTrue(report.contains("91 Wi-Fi networks"))
         assertTrue(report.contains("3 cell towers"))
         assertTrue(report.contains("GPS fix held"))
-        assertTrue(report.endsWith("Logging is on, 7.7 mi so far."))
+        // The report ends on what was caught, not on whether recording is armed: "logging off"
+        // followed by the sign-off was heard as two goodbyes.
+        assertTrue(report.contains("158 entities"))
+        assertTrue(
+            report.endsWith(
+                "I have 9 satellites, 14 aircraft, 2 watch matches, 91 Wi-Fi networks and " +
+                    "42 Bluetooth devices.",
+            ),
+        )
+        assertFalse(report.contains("Logging is"))
     }
 
     @Test
@@ -97,7 +113,8 @@ class WatcherTest {
         val report = Watcher.intelReport(Watcher.ReportInput(gps = false))
         assertTrue(report.contains("Nothing matched"))
         assertTrue(report.contains("No GPS fix"))
-        assertTrue(report.contains("Logging is off"))
+        assertTrue(report.contains("Nothing logged yet"))
+        assertFalse(report.contains("Logging"))
     }
 
     @Test

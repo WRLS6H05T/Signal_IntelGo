@@ -122,7 +122,12 @@ class WatcherVoice(private val context: Context) {
         main.post { listen() }
     }
 
-    fun speak(text: String, glitch: Boolean = false, intel: Boolean = false) {
+    fun speak(
+        text: String,
+        glitch: Boolean = false,
+        intel: Boolean = false,
+        report: Boolean = false,
+    ) {
         if (text.isBlank()) return
         val engine = speaker
         if (!enabled || !audible || engine == null || !speakerReady) return
@@ -134,7 +139,7 @@ class WatcherVoice(private val context: Context) {
         // Every line goes out as a radio call, not a phone notification: the words are addressed
         // to the net and closed with "over", and a squelch opens the channel before the engine
         // starts and closes it afterwards.
-        val line = Radio.frame(voice.render(text, glitch), alert = glitch, intel = intel)
+        val line = Radio.frame(voice.render(text, glitch), alert = glitch, intel = intel, report = report)
 
         state.update { it.copy(speaking = true) }
         runCatching { recognizer?.cancel() }

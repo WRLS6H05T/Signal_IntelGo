@@ -406,11 +406,15 @@ Tap, then say *intel report*, *open map*, *drive*, *log*, *setup*, *open menu*, 
 recogniser actually returns are accepted - "Watcher", "Wotcher", "Watcha", and the two words
 "watch her".
 
-**"Watcher, intel report"** answers in two parts, in this order: the **connected devices** first -
-how many Flock cameras, Axon cameras, TASERs and trackers matched, and the nearest by name - and
-then the **signal intel**: Wi-Fi networks, Bluetooth devices, cell towers, mesh nodes, satellites
-and aircraft in range, whether a GPS fix is held, and whether a drive is being recorded and how
-far it has gone.
+**"Watcher, intel report"** opens as a call and answers in three parts, in this order: the
+**connected devices** first - how many Flock cameras, Axon cameras, TASERs, patrol-car routers,
+radio access points and trackers matched, and the nearest by name - then the **signal intel**:
+Wi-Fi networks, Bluetooth devices, cell towers, mesh nodes, satellites and aircraft in range and
+whether a GPS fix is held, and finally the **logged entities** the Log tab is counting -
+satellites, aircraft, drones, mesh nodes, cell towers, ESP32 boards, watch hits, Wi-Fi networks
+and Bluetooth devices. It closes on *Watcher out*. Whether recording is armed is not part of it:
+what has been collected is the report, and "logging is off" three words before the sign-off was
+heard as a second goodbye.
 
 ### Timed intel updates
 

@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.skyward.rf.Container
 import dev.skyward.rf.core.Layer
+import dev.skyward.rf.core.RfKind
 import dev.skyward.rf.core.SignalScale
 import dev.skyward.rf.core.Units
 import dev.skyward.rf.ui.theme.Sky
@@ -49,6 +50,9 @@ import java.util.Locale
 fun LogScreen(c: Container, modifier: Modifier = Modifier, onShowOnMap: () -> Unit) {
     val sessions by c.wardrive.sessions.collectAsState()
     val logged by c.logged.state.collectAsState()
+    // Wi-Fi and Bluetooth are entities too: each one is a row in this table and a dot the map
+    // can be asked about, so they are counted alongside the sky and the hardware.
+    val signals by c.signalLog.entries.collectAsState()
     val context = LocalContext.current
     val df = remember { SimpleDateFormat("MMM d · HH:mm", Locale.US) }
 
@@ -64,7 +68,7 @@ fun LogScreen(c: Container, modifier: Modifier = Modifier, onShowOnMap: () -> Un
         item { Spacer(Modifier.height(6.dp)) }
 
         item {
-            SectionCard(title = "Logged entities", trailing = "${logged.size} total") {
+            SectionCard(title = "Logged entities", trailing = "${logged.size + signals.size} total") {
                 KeyValueRow("Satellites", logged.values.count { it.layer == Layer.SATELLITE }.toString(), Sky.logged)
                 KeyValueRow("Aircraft", logged.values.count { it.layer == Layer.AIRCRAFT }.toString(), Sky.logged)
                 KeyValueRow("Drones", logged.values.count { it.layer == Layer.DRONE }.toString(), Sky.logged)
@@ -72,6 +76,8 @@ fun LogScreen(c: Container, modifier: Modifier = Modifier, onShowOnMap: () -> Un
                 KeyValueRow("Cell towers", logged.values.count { it.layer == Layer.CELL }.toString(), Sky.logged)
                 KeyValueRow("ESP32 nodes", logged.values.count { it.layer == Layer.ESP32 }.toString(), Sky.logged)
                 KeyValueRow("Watch hits", logged.values.count { it.layer == Layer.WATCH }.toString(), Sky.watchFlock)
+                KeyValueRow("Wi-Fi networks", signals.count { it.kind == RfKind.WIFI }.toString(), Sky.logged)
+                KeyValueRow("Bluetooth devices", signals.count { it.kind == RfKind.BLE }.toString(), Sky.logged)
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SmallAction("EXPORT CSV") {
@@ -89,7 +95,9 @@ fun LogScreen(c: Container, modifier: Modifier = Modifier, onShowOnMap: () -> Un
                 }
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Anything captured while recording is drawn in violet on the map.",
+                    "Anything captured while recording is drawn in violet on the map. Every " +
+                        "Wi-Fi network and Bluetooth device is a dot there as well: tap one for " +
+                        "its address, signal and where it was heard.",
                     color = Sky.textDim,
                     fontSize = 10.sp,
                 )
