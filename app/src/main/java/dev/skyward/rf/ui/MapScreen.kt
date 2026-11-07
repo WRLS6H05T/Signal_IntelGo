@@ -1047,28 +1047,34 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 Spacer(Modifier.height(8.dp))
                 // A plain table of counts. Tapping a row still switches that layer or radio;
                 // the number stays visible when a layer is off, so "hidden" is not "zero".
-                Text("LIVE", style = SkywardThemeLabel(), color = Sky.textDim)
-                IntelRow("SAT", sky.sats.size, showSats) { showSats = !showSats }
-                IntelRow("AIR", sky.aircraft.size, showAir) { showAir = !showAir }
-                IntelRow("UAV", sky.drones.size, showDrones) { showDrones = !showDrones }
-                IntelRow("MESH", sky.mesh.size, showMesh) { showMesh = !showMesh }
-                IntelRow("CELL", sky.cells.size, showCells) { showCells = !showCells }
+                // One table, two numbers: what is being heard now and what this drive has
+                // caught, in the same row. The LIVE and LOGGED tables this replaces printed
+                // every layer name twice and put the two counts a table apart.
+                IntelPairHeader()
+                IntelPairRow("SAT", sky.sats.size, sky.loggedSats, showSats) { showSats = !showSats }
+                IntelPairRow("AIR", sky.aircraft.size, sky.loggedAircraft, showAir) { showAir = !showAir }
+                IntelPairRow("UAV", sky.drones.size, sky.loggedDrones, showDrones) { showDrones = !showDrones }
+                IntelPairRow("MESH", sky.mesh.size, sky.loggedMesh, showMesh) { showMesh = !showMesh }
+                IntelPairRow("CELL", sky.cells.size, sky.loggedCells, showCells) { showCells = !showCells }
                 // Cameras and TASERs were heard, not triangulated: the row is still a count of
                 // matched advertisers, not of confirmed installations.
-                IntelRow("WATCH", sky.watch.size, showWatch) { showWatch = !showWatch }
+                IntelPairRow("WATCH", sky.watch.size, sky.loggedWatch, showWatch) { showWatch = !showWatch }
                 // One table for both phones, keyed by device: a network heard by either is a
                 // single row, so the two devices print the same numbers. Adding the peer's
                 // total to this phone's own counted every shared network twice, which is why
                 // the two tables never matched.
                 val shared = c.rf.totals()
-                IntelRow("WIFI", shared.wifi, wifiOn) { c.rf.setWifiEnabled(!wifiOn) }
-                IntelRow("BLE", shared.ble, bleOn) { c.rf.setBleEnabled(!bleOn) }
-                IntelRow("PATH", path.size, showPath) { showPath = !showPath }
+                IntelPairRow("WIFI", shared.wifi, caughtWifi, wifiOn) { c.rf.setWifiEnabled(!wifiOn) }
+                IntelPairRow("BLE", shared.ble, caughtBle, bleOn) { c.rf.setBleEnabled(!bleOn) }
+                // A carrier has no address, so nothing listens for one now: the live column
+                // shows a dash rather than claiming a zero.
+                IntelPairRow("SUB", null, caughtSub, true) { }
+                IntelPairRow("PATH", path.size, null, showPath) { showPath = !showPath }
                 // Individual networks, drawn at the fix where each was heard.
-                IntelRow("SIG", signalDots.size, showSignals) { showSignals = !showSignals }
+                IntelPairRow("SIG", signalDots.size, null, showSignals) { showSignals = !showSignals }
                 // What the other phone put *into* the shared table, not a second total that
                 // is already counted in WIFI and BLE above.
-                IntelRow("PEER", c.rf.peerCount(), peer.connected) { }
+                IntelPairRow("PEER", c.rf.peerCount(), null, peer.connected) { }
                 // The peer's own findings, posted into this table by name rather than merely
                 // counted, so the host shows what the other radio is hearing right now.
                 if (peer.connected) {
@@ -1095,7 +1101,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 // peer's rather than being invisible in the combined counts.
                 val espWifi = espNodes.sumOf { it.wifiCount }
                 val espBle = espNodes.sumOf { it.bleCount }
-                IntelRow("ESP", espWifi + espBle, espNodes.isNotEmpty()) { }
+                IntelPairRow("ESP", espWifi + espBle, sky.loggedEsp32, espNodes.isNotEmpty()) { }
                 // The board's own sweep, named like the peer's: a cable is a radio on this
                 // table, so what it heard belongs on the table and not only in a total.
                 c.rf.boardRows(limit = 3).forEach { o ->
@@ -1107,22 +1113,6 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                         maxLines = 1,
                     )
                 }
-                // The entity table, in the same box as the live counts: the rows above are
-                // what is being heard now, these are what the drive has caught. One place to
-                // read both, on the map and on the globe, instead of a second box that would
-                // cover the same corner.
-                Spacer(Modifier.height(8.dp))
-                Text("LOGGED", style = SkywardThemeLabel(), color = Sky.textDim)
-                IntelRow("SAT", sky.loggedSats, true) {}
-                IntelRow("AIR", sky.loggedAircraft, true) {}
-                IntelRow("UAV", sky.loggedDrones, true) {}
-                IntelRow("MESH", sky.loggedMesh, true) {}
-                IntelRow("CELL", sky.loggedCells, true) {}
-                IntelRow("ESP", sky.loggedEsp32, true) {}
-                IntelRow("WATCH", sky.loggedWatch, true) {}
-                IntelRow("WIFI", caughtWifi, true) {}
-                IntelRow("BLE", caughtBle, true) {}
-                IntelRow("SUB", caughtSub, true) {}
                 if (!wd.active) {
                     Spacer(Modifier.height(8.dp))
                     // The primary action lives in the box now, not in a floating button.

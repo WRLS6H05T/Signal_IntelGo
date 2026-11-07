@@ -174,18 +174,55 @@ fun ToggleChip(
 }
 
 /**
- * One line of the INTEL table: the category, a leader, and its number.
+ * Column titles for the INTEL table: the live count, then the logged count.
  *
- * A bar answers "which is biggest". This screen is read for "how many", and a number is the
- * honest way to say it - especially when one category is in the hundreds and another is two,
- * which no linear bar can show without lying about the small one. The row still toggles its
- * layer, and a switched-off layer dims its label while keeping the number visible, so "hidden"
- * never looks like "zero".
+ * The two numbers share a row in the table below, so they are named once at the top instead of
+ * a separate heading over each half.
  */
 @Composable
-fun IntelRow(
+fun IntelPairHeader() {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Spacer(Modifier.width(46.dp))
+        Box(Modifier.weight(1f))
+        Spacer(Modifier.width(8.dp))
+        Text(
+            "LIVE",
+            style = SkywardThemeLabel(),
+            fontSize = 8.sp,
+            color = Sky.textDim,
+            textAlign = TextAlign.End,
+            modifier = Modifier.width(40.dp),
+        )
+        Text(
+            "LOGGED",
+            style = SkywardThemeLabel(),
+            fontSize = 8.sp,
+            color = Sky.textDim,
+            textAlign = TextAlign.End,
+            modifier = Modifier.width(48.dp),
+        )
+    }
+}
+
+/**
+ * One row of the INTEL table: a one-word label and the two numbers that belong to it.
+ *
+ * A row used to belong to a LIVE table or a LOGGED table, so every layer name was printed twice
+ * and the count you were comparing sat a table away. One label and two numbers reads both states
+ * in one glance.
+ *
+ * A null count prints a dash: the track and the individual networks are not a logged entity in
+ * their own right, and a sub-GHz carrier has no live count to give. A switched-off layer dims its
+ * label but keeps both numbers, so "hidden" never looks like "zero".
+ */
+@Composable
+fun IntelPairRow(
     label: String,
-    value: Int,
+    live: Int?,
+    logged: Int?,
     on: Boolean,
     modifier: Modifier = Modifier,
     onToggle: () -> Unit,
@@ -213,13 +250,25 @@ fun IntelRow(
         )
         Spacer(Modifier.width(8.dp))
         Text(
-            value.toString(),
+            live?.toString() ?: DASH,
             fontFamily = FontFamily.Monospace,
             fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
-            color = if (on) Sky.cyan else Sky.textDim,
+            color = if (on && live != null) Sky.cyan else Sky.textDim,
+            textAlign = TextAlign.End,
+            modifier = Modifier.width(40.dp),
+        )
+        Text(
+            logged?.toString() ?: DASH,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (logged != null && logged > 0) Sky.logged else Sky.textDim,
             textAlign = TextAlign.End,
             modifier = Modifier.width(48.dp),
         )
     }
 }
+
+/** The missing half of a row: no count exists, which is not the same as a count of zero. */
+private const val DASH = "\u2014"
