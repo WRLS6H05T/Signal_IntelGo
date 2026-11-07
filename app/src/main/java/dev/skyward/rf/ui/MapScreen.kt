@@ -327,6 +327,20 @@ internal fun sampleSats(sats: List<SatView>, maxSats: Int): List<SatView> {
     return named + rest.filterIndexed { index, _ -> index % stride == 0 }.take(maxSats)
 }
 
+/**
+ * How far to step through a layer that is drawn at most `budget` times.
+ *
+ * A layer with more entries than the budget is sampled evenly rather than truncated: at these
+ * dot sizes the skipped points sit under their neighbours anyway. The stride is never zero - an
+ * empty layer strides by one - because `indices step 0` does not skip anything, it throws, and
+ * the draw loop catches its own failures to protect the frame, so the throw silently deleted
+ * every marker after the wardrive dots: all satellites, all aircraft, and the GPS pin.
+ */
+internal const val DotBudget = 900
+
+internal fun drawStride(count: Int, budget: Int): Int =
+    if (count <= budget) 1 else (count + budget - 1) / budget
+
 fun buildMarkers(
     sky: AirspaceEngine.SkyState,
     showSats: Boolean,
@@ -1809,7 +1823,7 @@ private fun TacticalMap(
             // fixes, each dot is under 3dp across, and past a thousand they are painting the
             // same few hundred pixels over and over: the skipped dots sit underneath the kept
             // ones, so nothing visible is lost and the frame stops paying for them.
-            val pathStep = (path.size + 899) / 900
+            val pathStep = drawStride(path.size, DotBudget)
             for (i in path.indices step pathStep) {
                 val p = path[i]
                 vp.surfaceInto(p.lat, p.lon, pa)
@@ -1829,7 +1843,7 @@ private fun TacticalMap(
                 // The same budget as the track, except while a dot is selected: its ring has
                 // to be drawn on the dot that was actually tapped.
                 val signalStep =
-                    if (selectedSignalKey != null) 1 else (signals.size + 899) / 900
+                    if (selectedSignalKey != null) 1 else drawStride(signals.size, DotBudget)
                 for (si in signals.indices step signalStep) {
                     val s = signals[si]
                     vp.surfaceInto(s.lat, s.lon, pb)
