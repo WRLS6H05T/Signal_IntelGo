@@ -136,6 +136,14 @@ The continent outline is Natural Earth 110m land, simplified to 0.01° and bundl
 | Wi-Fi | `WifiManager` scan table | BSSID/SSID/RSSI/channel/security. |
 | BLE | `BluetoothLeScanner` (low latency) | Address/name/RSSI, plus Remote ID payloads. |
 
+**WADAMESH direct transfer.** The Transfer app on a WADAMESH device serves its files on
+`http://<device>/files`, behind a six-digit session code shown on the device. Setup -> Mesh ->
+*WADAMESH direct transfer* takes the address and that code, lists the screenshots, crash
+reports, backups and uploads the device exposes, and pulls one to the system share sheet. The
+code is minted per session and is never written to settings. The session is plain HTTP on your
+own LAN, the device allows one file client at a time (a browser page will refuse the app and
+vice versa), and only the paths the firmware marks readable are offered.
+
 Signal modelling: aircraft scores come from a 1090 MHz link budget (60 dBm EIRP −
 free-space path loss), satellites from elevation above the horizon, mesh nodes from LoRa SNR
 (or BLE RSSI when only heard locally).
@@ -195,7 +203,8 @@ Unit tests (orbit math, Remote ID parser, colour scale, exports):
 3. **Log** — saved drives with distance/peak counts; show one on the map, or export
    **GeoJSON** (track + per-fix points with `score`/`bin`) and **CSV**. The logged-entity
    registry exports too.
-4. **Setup** — satellite groups, ADS-B radius, Meshtastic and MeshCore broker/topic, basemap
+4. **Setup** — satellite groups, ADS-B radius, Meshtastic and MeshCore broker/topic, WADAMESH
+direct transfer (address + session code), basemap
    (dark or streets, both keyless OSM), weak-dot filter, logging radius, permission status.
 
 Basemap tiles are cached on disk, so a drive area works again offline.

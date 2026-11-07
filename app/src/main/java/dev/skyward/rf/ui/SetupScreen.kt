@@ -26,6 +26,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,6 +35,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,10 +51,12 @@ import dev.skyward.rf.core.LOG_RADIUS_KM
 import dev.skyward.rf.core.Settings
 import dev.skyward.rf.core.Units
 import dev.skyward.rf.core.VoiceStyles
+import dev.skyward.rf.meshcore.WadaTransfer
 import dev.skyward.rf.peer.PeerProtocol
 import dev.skyward.rf.scan.UsbBoards
 import dev.skyward.rf.sky.AircraftSource
 import dev.skyward.rf.ui.theme.Sky
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -63,6 +67,11 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
     val voice by c.voice.state.collectAsState()
     val context = LocalContext.current
     val tileStore = remember { TileStore(context, c.http) }
+    // The WADAMESH session belongs to the screen, not to a list row: scrolling Setup past the
+    // mesh card would cancel the item's composition and close a device connection the user
+    // is still using.
+    val wada = remember { WadaTransfer() }
+    DisposableEffect(Unit) { onDispose { wada.close() } }
 
     // The microphone is asked for at the moment the switch is turned on, never at launch: an
     // app that opens a wardriving map should not be asking to record before it has drawn a map.
@@ -249,7 +258,7 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                     )
                 }
                 Spacer(Modifier.height(8.dp))
-                MeshConfig(c, settings)
+                MeshConfig(c, settings, wada)
             }
         }
 
@@ -942,23 +951,103 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
 }
 
 @Composable
-private fun MeshConfig(c: Container, settings: Settings) {
+private fun MeshConfig(c: Container, settings: Settings, transfer: WadaTransfer) {
     var broker by remember(settings.meshBroker) { mutableStateOf(settings.meshBroker) }
     var topic by remember(settings.meshTopic) { mutableStateOf(settings.meshTopic) }
     var user by remember(settings.meshUser) { mutableStateOf(settings.meshUser) }
     var pass by remember(settings.meshPass) { mutableStateOf(settings.meshPass) }
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        // MeshCore: WADAMESH firmware and the MQTT observer bridges publish node adverts as
-        // hex packets on their own broker, so this feed has its own switch and its own topic.
-        // A repeater that shares a location becomes a fixed point on the map and the globe.
+        // WADAMESH "Transfer": the device shows an address and a six-digit session code, and the
+        // browser page it asks you to open is only a shell around a WebSocket on /files. The app
+        // speaks that session itself, so the code is typed here rather than in a browser. It is
+        // minted per session, so it is never written to settings.
+        val scope = rememberCoroutineScope()
+        val context = LocalContext.current
+        val tfPhase by transfer.phase.collectAsState()
+        val tfStatus by transfer.status.collectAsState()
+        val tfFiles by transfer.files.collectAsState()
+        var wadaHost by remember(settings.wadaHost) { mutableStateOf(settings.wadaHost) }
+        var wadaPin by remember { mutableStateOf("") }
+
+        Text("WADAMESH DIRECT TRANSFER", color = Sky.meshCore, fontSize = 10.sp)
+        Text(
+            "Open Transfer on the device, then type the address and the six-digit code it shows.",
+            color = Sky.textDim,
+            fontSize = 10.sp,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedTextField(
+                value = wadaHost,
+                onValueChange = { wadaHost = it.trim().take(64) },
+                label = { Text("address", fontSize = 11.sp) },
+                placeholder = { Text("192.168.1.42", fontSize = 11.sp) },
+                singleLine = true,
+                modifier = Modifier.weight(1.4f),
+            )
+            OutlinedTextField(
+                value = wadaPin,
+                onValueChange = { wadaPin = it.filter { ch -> ch.isDigit() }.take(6) },
+                label = { Text("session pin", fontSize = 11.sp) },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            SmallAction(
+                if (tfPhase == WadaTransfer.Phase.CONNECTED) "DISCONNECT" else "CONNECT",
+                Sky.meshCore,
+            ) {
+                c.settingsStore.update { it.copy(wadaHost = wadaHost) }
+                if (tfPhase == WadaTransfer.Phase.CONNECTED) {
+                    transfer.close()
+                } else {
+                    scope.launch { transfer.connect(wadaHost, wadaPin) }
+                }
+            }
+            if (tfPhase == WadaTransfer.Phase.CONNECTED) {
+                SmallAction("REFRESH", Sky.textDim) { scope.launch { transfer.refresh() } }
+            }
+        }
+        Text(
+            tfStatus,
+            color = if (tfPhase == WadaTransfer.Phase.ERROR) Sky.danger else Sky.textDim,
+            fontSize = 9.sp,
+        )
+        tfFiles.take(6).forEach { entry ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    entry.path,
+                    color = Sky.text,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f),
+                )
+                SmallAction("GET", Sky.meshCore) {
+                    scope.launch {
+                        val got = transfer.download(entry.path) ?: return@launch
+                        shareBytes(context, got.name, mimeForName(got.name), got.bytes)
+                    }
+                }
+            }
+        }
+        if (tfFiles.size > 6) {
+            Text("+${tfFiles.size - 6} more files on the device", color = Sky.textDim, fontSize = 9.sp)
+        }
+
+        Spacer(Modifier.height(8.dp))
+        // The observer bridge is a different thing: hex adverts relayed by other people's
+        // bridges, which is where the repeaters on the map and globe come from.
         var coreBroker by remember(settings.meshCoreBroker) { mutableStateOf(settings.meshCoreBroker) }
         var coreTopic by remember(settings.meshCoreTopic) { mutableStateOf(settings.meshCoreTopic) }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("MeshCore (WADAMESH)", color = Sky.text, fontSize = 13.sp)
+                Text("OBSERVER BRIDGE (MQTT)", color = Sky.text, fontSize = 11.sp)
                 Text(
-                    "Repeater and room-server adverts from an observer bridge",
+                    "Repeater and room-server adverts from an observer",
                     color = Sky.textDim,
                     fontSize = 10.sp,
                 )

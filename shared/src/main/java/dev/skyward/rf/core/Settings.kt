@@ -25,6 +25,11 @@ data class Settings(
     /** Observer layout: `meshcore/{IATA}/{device}/packets`, where `raw` holds the hex packet. */
     val meshCoreTopic: String = "meshcore/+/+/packets",
     /**
+     * The device address typed for WADAMESH direct transfer. The session code is deliberately
+     * absent: it is minted per session, shown on the device, and worthless afterwards.
+     */
+    val wadaHost: String = "",
+    /**
      * "streets" (OpenStreetMap) or "dark" (OSM tiles darkened at draw time). OSM is the default: it is keyless and
      * serves full-detail tiles, and the canvas desaturates them anyway.
      */
