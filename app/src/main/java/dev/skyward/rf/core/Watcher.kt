@@ -237,23 +237,38 @@ object Watcher {
     }
 
     /**
-     * The timed intel update: the tab read down, then what has been sighted since the last one.
+     * The timed intel update: the entity table read down, then what has been sighted since the
+     * last one.
      *
      * The call - "Watcher to operator, intel update" - is radio framing rather than text, so this
-     * begins at the tab itself. Every row the INTEL box shows is spoken, because the point of the
-     * update is to hear what is on screen without looking at it, and the sightings are the part
-     * that has changed since the last time it spoke.
+     * begins at the table itself. It reads what has been *caught* - the logged entity table, per
+     * layer - rather than the live INTEL tab: an update that arrives on its own is the record of
+     * the drive, and the live counts are already on screen for anyone looking at it.
      */
     fun intelUpdate(
         r: ReportInput,
         windowMinutes: Int,
         sightings: List<WatchView> = r.sightings,
     ): String {
-        val sb = StringBuilder("Intel tab. ")
-        sb.append(count(r.watches.size, "watch match", "watch matches")).append(". ")
-        sb.append("Satellites ${r.sats}, aircraft ${r.aircraft}, drones ${r.drones}, ")
-        sb.append("mesh nodes ${r.mesh}, cell towers ${r.cells}. ")
-        sb.append("Wi-Fi networks ${r.wifi}, Bluetooth devices ${r.ble}. ")
+        val sb = StringBuilder("Entity table. ")
+        if (r.logged.total == 0) {
+            sb.append("Nothing caught yet. ")
+        } else {
+            val caught = listOfNotNull(
+                r.logged.sats.takeIf { it > 0 }?.let { count(it, "satellite") },
+                r.logged.aircraft.takeIf { it > 0 }?.let { count(it, "aircraft", "aircraft") },
+                r.logged.drones.takeIf { it > 0 }?.let { count(it, "drone") },
+                r.logged.mesh.takeIf { it > 0 }?.let { count(it, "mesh node") },
+                r.logged.cells.takeIf { it > 0 }?.let { count(it, "cell tower") },
+                r.logged.esp32.takeIf { it > 0 }?.let { count(it, "ESP32 board") },
+                r.logged.watch.takeIf { it > 0 }?.let { count(it, "watch match", "watch matches") },
+                r.logged.wifi.takeIf { it > 0 }?.let { count(it, "Wi-Fi network") },
+                r.logged.ble.takeIf { it > 0 }?.let { count(it, "Bluetooth device") },
+                r.logged.subGhz.takeIf { it > 0 }?.let { count(it, "sub-GHz hit") },
+            )
+            sb.append(count(r.logged.total, "entity", "entities")).append(". ")
+            sb.append("I have ${joinWords(caught)}. ")
+        }
         sb.append(if (r.gps) "GPS fix held. " else "No GPS fix. ")
         sb.append(
             if (r.logging) "Logging on, ${Units.distance(r.km, r.unit, 1)} so far. "

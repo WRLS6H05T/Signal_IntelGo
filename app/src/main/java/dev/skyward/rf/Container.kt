@@ -268,21 +268,27 @@ class Container(context: Context) {
         }
         // Recorded drives travel on request, not with every sweep: a long drive would hold the
         // pipe for a minute and stall the live picture both phones are watching.
+        // Drives are offered to your own devices only. A friend's phone gets the intel, not this
+        // phone's drive library: those files are the record of where you have been.
         peer.logProvider = {
-            wardrive.sessions.value.map {
-                PeerProtocol.LogInfo(
-                    id = it.id,
-                    name = it.name,
-                    at = it.startedAt,
-                    points = it.points,
-                    km = it.km,
-                    wifi = it.wifiAps,
-                    ble = it.bleDevices,
-                    best = it.bestScore,
-                )
+            if (sharingWithFriend()) {
+                emptyList()
+            } else {
+                wardrive.sessions.value.map {
+                    PeerProtocol.LogInfo(
+                        id = it.id,
+                        name = it.name,
+                        at = it.startedAt,
+                        points = it.points,
+                        km = it.km,
+                        wifi = it.wifiAps,
+                        ble = it.bleDevices,
+                        best = it.bestScore,
+                    )
+                }
             }
         }
-        peer.logSource = { id -> wardrive.sessionJson(id) }
+        peer.logSource = { id -> if (sharingWithFriend()) null else wardrive.sessionJson(id) }
 
         // The intel itself, not just the live sweep: what this phone has caught goes over the
         // link, so a friend's drive fills in a sky this one could not hear. Newest first, and
@@ -316,24 +322,28 @@ class Container(context: Context) {
             peerEntities.value = if (kept.size > ENTITY_KEEP) kept.takeLast(ENTITY_KEEP) else kept
         }
         peer.onPeerLogs = { list -> peerLogs.value = list }
-        peer.onPeerLog = { json, from -> wardrive.importSession(json, from) }
+        peer.onPeerLog = { json, from ->
+            if (!sharingWithFriend()) wardrive.importSession(json, from)
+        }
 
         // A drive is a shared act: whichever phone starts one, both record the same road. The
         // comparison is against what the other phone last said, not against this phone, so a
         // stop here is not undone by the other phone repeating an older snapshot.
         peer.recordingProvider = {
             val st = wardrive.state.value
-            st.active to st.name
+            // A friend's phone is not a second recorder: the drive library stays yours.
+            if (sharingWithFriend()) false to "" else st.active to st.name
         }
         peer.onPeerRecording = { active, name ->
-            if (active != lastPeerRecording) {
-                lastPeerRecording = active
+            val shared = !sharingWithFriend()
+            if (shared && active != lastPeerRecording) {
                 val drive = wardrive.state.value
                 when {
                     active && !drive.active -> wardrive.start(name.ifBlank { null })
                     !active && drive.active -> wardrive.stop()
                 }
             }
+            lastPeerRecording = active
         }
 
         // The other phone's board intel lands on this phone as the other phone's: it reaches
@@ -349,8 +359,11 @@ class Container(context: Context) {
 
         // The Watcher is one assistant across the pair: said to either phone, obeyed by both.
         peer.onPeerVoice = { name ->
-            runCatching { Watcher.Command.valueOf(name) }.getOrNull()?.let { cmd ->
-                runCatching { handleVoice(cmd, fromPeer = true) }
+            // A friend's phone cannot work this one by voice; a second device of yours can.
+            if (!sharingWithFriend()) {
+                runCatching { Watcher.Command.valueOf(name) }.getOrNull()?.let { cmd ->
+                    runCatching { handleVoice(cmd, fromPeer = true) }
+                }
             }
         }
 
@@ -458,6 +471,15 @@ class Container(context: Context) {
     }
 
     /**
+     * Whether the phone on the other end is a friend rather than a second device of yours.
+     *
+     * A friend's phone shares the radio picture and the entity table, and nothing that is about
+     * this phone: no drive library, no shared recording, no Watcher commands.
+     */
+    fun sharingWithFriend(): Boolean =
+        settingsStore.current.peerShareMode == PeerProtocol.SHARE_FRIEND
+
+    /**
      * Whether this phone speaks the Watcher's alerts for the pair.
      *
      * Not a host: the link has none. Both phones hold the same intel now, so an alert read out
@@ -499,7 +521,9 @@ class Container(context: Context) {
         // "miles" or "open menu" to one phone does it on the other. Answers and drives are
         // not forwarded: a report is spoken by the phone that was asked, and a drive already
         // travels as shared recording state.
-        if (!fromPeer && isHostPhone() && cmd in SHARED_COMMANDS && peer.isRunning()) {
+        if (!fromPeer && isHostPhone() && !sharingWithFriend() &&
+            cmd in SHARED_COMMANDS && peer.isRunning()
+        ) {
             peer.sendVoice(cmd.name)
         }
         when (cmd) {
@@ -623,6 +647,8 @@ class Container(context: Context) {
                 logging = drive.active,
                 km = drive.km,
                 unit = settingsStore.current.distanceUnit,
+                // The timed update reads the entity table, not the live INTEL tab.
+                logged = loggedCounts(),
             ),
             minutes,
             sightings = recentAlerts.filter { it.first >= since }.map { it.second },

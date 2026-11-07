@@ -118,21 +118,23 @@ class WatcherTest {
     }
 
     @Test
-    fun `the timed update reads the tab down and then the sightings`() {
+    fun `the timed update reads the entity table and then the sightings`() {
         val update = Watcher.intelUpdate(
             Watcher.ReportInput(
-                watches = listOf(hit(WatchKind.FLOCK, "Flock-1A2B")),
-                wifi = 91,
-                ble = 42,
-                cells = 3,
-                mesh = 1,
-                sats = 9,
-                aircraft = 14,
-                drones = 2,
                 gps = true,
                 logging = true,
                 km = 12.4,
                 unit = Units.KM,
+                logged = Watcher.Logged(
+                    sats = 9,
+                    aircraft = 14,
+                    drones = 2,
+                    mesh = 1,
+                    cells = 3,
+                    watch = 1,
+                    wifi = 91,
+                    ble = 42,
+                ),
                 sightings = listOf(
                     hit(WatchKind.FLOCK, "Flock-1A2B", -50),
                     hit(WatchKind.TRACKER, "Tile", -72),
@@ -140,10 +142,13 @@ class WatcherTest {
             ),
             5,
         )
-        assertTrue(update.startsWith("Intel tab."))
+        // What has been caught, not what the live tab happens to show right now.
+        assertTrue(update.startsWith("Entity table."))
+        assertTrue(update.contains("163 entities"))
+        assertTrue(update.contains("9 satellites"))
+        assertTrue(update.contains("2 drones"))
         assertTrue(update.contains("1 watch match"))
-        assertTrue(update.contains("drones 2"))
-        assertTrue(update.contains("Wi-Fi networks 91"))
+        assertTrue(update.contains("91 Wi-Fi networks"))
         assertTrue(update.contains("2 sightings in the last 5 minutes"))
         assertTrue(update.contains("Flock camera, strong"))
         assertTrue(update.contains("Bluetooth tracker, weak"))
@@ -156,7 +161,7 @@ class WatcherTest {
         val update = Watcher.intelUpdate(Watcher.ReportInput(gps = false), 30)
         assertTrue(update.contains("Nothing new in the last 30 minutes"))
         assertTrue(update.contains("No GPS fix"))
-        assertTrue(update.contains("0 watch matches"))
+        assertTrue(update.contains("Nothing caught yet"))
     }
 
     @Test

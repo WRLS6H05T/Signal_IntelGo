@@ -809,6 +809,16 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                         fontSize = 9.sp,
                         maxLines = 1,
                     )
+                    Text(
+                        if (settings.peerShareMode == PeerProtocol.SHARE_FRIEND) {
+                            "a friend \u00b7 intel only"
+                        } else {
+                            "own devices \u00b7 full share"
+                        },
+                        color = Sky.textDim,
+                        fontSize = 9.sp,
+                        maxLines = 1,
+                    )
                 }
             }
 

@@ -468,9 +468,10 @@ for I/Q instead of drawing an invented spectrum.
 
 Setup -> **Intel updates** has a switch and the interval: **3, 5, 7, 10 or 30 minutes**, and the
 switch off for never. Each transmission opens as a call - *Watcher to operator,
-intel update* - and then reads the **INTEL tab** down: the watch list, satellites, aircraft,
-drones, mesh nodes, cell towers, Wi-Fi and Bluetooth totals, the GPS fix, and whether a drive is
-running. It then reads the **alert sightings**: how many watch hits appeared since the last update
+intel update* - and then reads the **entity table** down: what has been caught, per layer -
+satellites, aircraft, drones, mesh nodes, cell towers, ESP32 boards, watch matches, Wi-Fi, Bluetooth
+and sub-GHz hits - plus the GPS fix and whether a drive is running. It then reads the **alert
+sightings**: how many watch hits appeared since the last update
 and the three strongest of them, by family and signal strength. It closes on *Watcher out*, like
 every other transmission, with the squelch either side and the tone from the same radio. The
 interval is read again at the end of each wait, so moving it in Setup takes effect without a
@@ -527,6 +528,10 @@ radio range", not a triangulated position.
 Setup -> **Two devices** links the phones over BLE. There is no host and no follower, and neither
 phone assigns the other a sweep or rewrites its settings: the screen-size split alone decides that
 the larger screen shows the globe and the smaller one the wardriving view.
+
+**Sharing with** says whose phone is on the other end. **MY OWN DEVICES** shares everything below;
+**A FRIEND** shares the radios, the fix, the board intel and the entity table both ways, and keeps
+the drive library, the shared drive recording and forwarded Watcher commands on your own devices.
 
 Six things travel, the same way in both directions:
 

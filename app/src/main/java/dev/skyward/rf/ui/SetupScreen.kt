@@ -665,7 +665,7 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                     Column(Modifier.weight(1f)) {
                         Text("Timed intel update", color = Sky.text, fontSize = 13.sp)
                         Text(
-                            "The Watcher reads the INTEL tab out on its own",
+                            "The Watcher reads the entity table out on its own",
                             color = Sky.textDim,
                             fontSize = 10.sp,
                         )
@@ -709,9 +709,10 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                         "Off. The Watcher only speaks when it is asked to."
                     } else {
                         "Every ${settings.intelUpdateMinutes} minutes it keys up with 'Watcher " +
-                            "to operator, intel update', reads the INTEL tab, then the watch " +
+                            "to operator, intel update', reads the entity table, then the watch " +
                             "sightings since the last update, and signs off 'Watcher out'. It " +
-                            "needs hands-free voice on; on a peer link only the host speaks it."
+                            "needs hands-free voice on; on a peer link only the larger screen " +
+                            "speaks it."
                     },
                     color = Sky.textDim,
                     fontSize = 10.sp,
@@ -793,6 +794,27 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                         },
                     )
                 }
+                Spacer(Modifier.height(10.dp))
+                Text("SHARING WITH", style = SkywardThemeLabel(), color = Sky.textDim)
+                Spacer(Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ShareChip("MY OWN DEVICES", PeerProtocol.SHARE_OWN, settings) { c.settingsStore.update(it) }
+                    ShareChip("A FRIEND", PeerProtocol.SHARE_FRIEND, settings) { c.settingsStore.update(it) }
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    if (settings.peerShareMode == PeerProtocol.SHARE_FRIEND) {
+                        "Intel only, both ways: radios, the fix, board intel and the entity table. " +
+                            "The drive library, the shared drive recording and forwarded Watcher " +
+                            "commands stay on your own devices."
+                    } else {
+                        "A second device of yours: everything above, plus drives, the same drive " +
+                            "recorded on both, and Watcher commands obeyed by both."
+                    },
+                    color = Sky.textDim,
+                    fontSize = 10.sp,
+                )
+
                 if (settings.peerEnabled) {
                     Spacer(Modifier.height(8.dp))
                     Text(
@@ -1127,6 +1149,23 @@ private fun Esp32Config(c: Container, settings: Settings) {
             fontSize = 9.sp,
         )
     }
+}
+
+@Composable
+private fun ShareChip(label: String, value: String, settings: Settings, onChange: ((Settings) -> Settings) -> Unit) {
+    val selected = settings.peerShareMode == value
+    FilterChip(
+        selected = selected,
+        onClick = { onChange { it.copy(peerShareMode = value) } },
+        label = { Text(label, fontSize = 9.sp, fontFamily = FontFamily.Monospace) },
+        shape = RoundedCornerShape(9.dp),
+        colors = FilterChipDefaults.filterChipColors(
+            containerColor = Sky.surfaceHigh,
+            labelColor = Sky.textDim,
+            selectedContainerColor = Sky.cyan.copy(alpha = 0.22f),
+            selectedLabelColor = Sky.cyan,
+        ),
+    )
 }
 
 @Composable

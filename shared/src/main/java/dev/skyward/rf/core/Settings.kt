@@ -82,7 +82,7 @@ data class Settings(
     val voiceAudio: Boolean = true,
     /**
      * Minutes between the Watcher's own intel updates: 0 off, otherwise 3, 5, 7, 10 or 30. The
-     * update is the INTEL tab read down, plus whatever has been sighted since the last one.
+     * update is the entity table read down, plus whatever has been sighted since the last one.
      */
     val intelUpdateMinutes: Int = 0,
     /** ESP32 sensor boards: BLE advertisements always, MQTT when a Wi-Fi board publishes. */
@@ -124,6 +124,12 @@ data class Settings(
     val peerEnabled: Boolean = false,
     /** Peer address to dial when broadcast discovery is blocked; blank means find it. */
     val peerHost: String = "",
+    /**
+     * Whose phone is on the other end: "own" for a second device of yours, "friend" for one
+     * someone else is holding. Both share radios, the fix and intel; only your own devices also
+     * share drives, record the same road and forward Watcher commands.
+     */
+    val peerShareMode: String = "own",
     /** Scan job per board, keyed by the board's id. See ScanPlan: the peer link assigns none. */
     val scanAssign: Map<String, String> = emptyMap(),
     /** WiGLE account API name and token, used only by the CSV upload button. */

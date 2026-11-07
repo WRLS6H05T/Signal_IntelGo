@@ -43,6 +43,10 @@ object PeerProtocol {
     /** Wardriving device: the smaller screen, which shows the drive readout. */
     const val SENSOR = "sensor"
 
+    /** Whose phone is on the other end: a second device of yours, or one a friend is holding. */
+    const val SHARE_OWN = "own"
+    const val SHARE_FRIEND = "friend"
+
     /** Discovery payloads. They are UDP datagrams, so they stay tiny and plain. */
     const val PROBE = "SKYWARD?"
     const val HERE = "SKYWARD!"
