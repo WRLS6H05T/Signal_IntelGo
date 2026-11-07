@@ -1718,43 +1718,21 @@ private fun TacticalMap(
             val pa = ProjectedSink()
             val pb = ProjectedSink()
 
-            // ---- wardrive path: 5-bin red -> green, weak to strong ----
-            if (path.size > 1) {
-                for (i in 1 until path.size) {
-                    vp.surfaceInto(path[i - 1].lat, path[i - 1].lon, pa)
-                    vp.surfaceInto(path[i].lat, path[i].lon, pb)
-                    if (cull && (pa.front <= 0.02f || pb.front <= 0.02f)) continue
-                    if (pa.x < -200f || pa.y < -200f || pa.x > size.width + 200f || pa.y > size.height + 200f) continue
-                    drawLine(
-                        color = Color.Black.copy(alpha = 0.55f),
-                        start = Offset(pa.x, pa.y),
-                        end = Offset(pb.x, pb.y),
-                        strokeWidth = 9f * density,
-                    )
-                }
-                for (i in 1 until path.size) {
-                    vp.surfaceInto(path[i - 1].lat, path[i - 1].lon, pa)
-                    vp.surfaceInto(path[i].lat, path[i].lon, pb)
-                    if (cull && (pa.front <= 0.02f || pb.front <= 0.02f)) continue
-                    if (pa.x < -200f || pa.y < -200f || pa.x > size.width + 200f || pa.y > size.height + 200f) continue
-                    drawLine(
-                        color = Color(SignalScale.colorOfScore(path[i].score)),
-                        start = Offset(pa.x, pa.y),
-                        end = Offset(pb.x, pb.y),
-                        strokeWidth = 5.5f * density,
-                    )
-                }
-                // dots make the bin colour readable at street zoom
-                if (camera.zoom >= 14.0) {
-                    for (p in path) {
-                        vp.surfaceInto(p.lat, p.lon, pa)
-                        drawCircle(
-                            color = Color(SignalScale.colorOfScore(p.score)),
-                            radius = 2.4f * density,
-                            center = Offset(pa.x, pa.y),
-                        )
-                    }
-                }
+            // ---- wardrive path: dots only, 5-bin red -> green, weak to strong ----
+            // The segments used to be painted as a continuous line. A line that wide covers the
+            // network dots along it and eats the taps meant for them, so the drive is shown as
+            // its own points instead: each fix is a dot, and nothing is painted between them.
+            // Drawn at every zoom now, because the dots are the whole track rather than an
+            // extra over the line.
+            for (p in path) {
+                vp.surfaceInto(p.lat, p.lon, pa)
+                if (cull && pa.front <= 0.02f) continue
+                if (pa.x < -20f || pa.y < -20f || pa.x > size.width + 20f || pa.y > size.height + 20f) continue
+                drawCircle(
+                    color = Color(SignalScale.colorOfScore(p.score)),
+                    radius = 2.4f * density,
+                    center = Offset(pa.x, pa.y),
+                )
             }
 
             // ---- logged signals: each network where it was actually heard ----
