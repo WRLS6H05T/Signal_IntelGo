@@ -36,6 +36,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -97,8 +98,10 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.pow
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.sqrt
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -666,32 +669,45 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
     // remembered value keyed on it, so a new share has to be part of the key.
     val peerIntel by c.peerEntities.collectAsState()
 
-    val markers = remember(
+    // Built off the frame thread. A sky tick lands about once a second, and the list formats the
+    // card text for every entity in it - several thousand markers on a full catalogue, most of
+    // them with a String.format or two. Doing that in composition put tens of milliseconds on the
+    // main thread once a second, which is the hitch that interrupted the globe's spin: the ball
+    // turns from the frame clock, so a blocked frame is a stopped ball. The markers are immutable
+    // data, so only the finished list crosses back.
+    val markers by produceState(
+        initialValue = emptyList<MapMarker>(),
         sky, showSats, showAir, showDrones, showMesh, showCells, showEsp32, showWatch,
         settings.aircraftEnabled, settings.dropWeakDots, settings.distanceUnit, peerIntel,
     ) {
-        buildMarkers(
-            sky = sky,
-            showSats = showSats,
-            showAir = showAir && settings.aircraftEnabled,
-            showDrones = showDrones,
-            showMesh = showMesh,
-            showCells = showCells,
-            showEsp32 = showEsp32,
-            showWatch = showWatch,
-            distanceUnit = settings.distanceUnit,
-            minScore = if (settings.dropWeakDots) 20 else 0,
-            peerEntities = peerIntel,
-        )
+        value = withContext(Dispatchers.Default) {
+            buildMarkers(
+                sky = sky,
+                showSats = showSats,
+                showAir = showAir && settings.aircraftEnabled,
+                showDrones = showDrones,
+                showMesh = showMesh,
+                showCells = showCells,
+                showEsp32 = showEsp32,
+                showWatch = showWatch,
+                distanceUnit = settings.distanceUnit,
+                minScore = if (settings.dropWeakDots) 20 else 0,
+                peerEntities = peerIntel,
+            )
+        }
     }
 
     val loggedSignals by c.signalLog.entries.collectAsState()
     val captures by c.sdrLibrary.state.collectAsState()
-    val signalDots = remember(loggedSignals) {
-        loggedSignals.take(3000).mapNotNull { s ->
-            val argb = runCatching { android.graphics.Color.parseColor(s.color) }.getOrNull()
-                ?: return@mapNotNull null
-            SignalDot(s.lat, s.lon, Color(argb), s)
+    // Same reason as the markers: the log can hold thousands of rows and each one decodes a
+    // colour string, and a sweep rewrites the table while it runs.
+    val signalDots by produceState(initialValue = emptyList<SignalDot>(), loggedSignals) {
+        value = withContext(Dispatchers.Default) {
+            loggedSignals.take(3000).mapNotNull { s ->
+                val argb = runCatching { android.graphics.Color.parseColor(s.color) }.getOrNull()
+                    ?: return@mapNotNull null
+                SignalDot(s.lat, s.lon, Color(argb), s)
+            }
         }
     }
 
