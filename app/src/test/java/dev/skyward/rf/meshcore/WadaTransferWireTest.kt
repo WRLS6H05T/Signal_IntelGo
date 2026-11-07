@@ -39,6 +39,10 @@ class WadaTransferWireTest {
         assertEquals("192.168.1.42" to 80, WadaWire.parseAddress("192.168.1.42"))
         assertEquals("192.168.1.42" to 80, WadaWire.parseAddress(" http://192.168.1.42/ "))
         assertEquals("mesh.local" to 8080, WadaWire.parseAddress("mesh.local:8080"))
+        // The page address the device prints, pasted whole: scheme, path and query go.
+        assertEquals("192.168.1.42" to 80, WadaWire.parseAddress("http://192.168.1.42/files"))
+        assertEquals("192.168.1.42" to 80, WadaWire.parseAddress(" 192.168.1.42/files/ "))
+        assertEquals("192.168.1.42" to 8080, WadaWire.parseAddress("ws://192.168.1.42:8080/files?x=1"))
         assertNull(WadaWire.parseAddress(""))
         assertNull(WadaWire.parseAddress("http://"))
         assertNull(WadaWire.parseAddress("host:no-port"))

@@ -100,54 +100,34 @@ fun DrawScope.drawStationIcon(at: Offset, r: Float, tint: Color) {
 /**
  * Aircraft glyphs, built once.
  *
- * These used to be created inside the draw call - two fresh `Path` objects per aircraft per
- * frame - which is what made a busy sky lock the UI up: a worldwide feed put thousands of
- * allocations and thousands of path fills through the renderer on every repaint. The geometry
- * is now unit-sized and reused, and the icon radius is applied with a scale transform.
+ * An aircraft is a triangle. A plane is drawn a handful of pixels wide, where the notched
+ * fuselage it used to carry was indistinguishable from a blob - but it cost a second path
+ * fill and a second tint per aircraft per frame, on the layer that has the most entries.
+ * The geometry is unit-sized and reused, with the radius applied as a scale, so a repaint
+ * allocates nothing.
  */
 private object PlaneGlyph {
-    val head: Path = Path().apply {
-        moveTo(0f, -1.55f)
-        lineTo(1.0f, 1.0f)
-        lineTo(0f, 0.4f)
-        lineTo(-1.0f, 1.0f)
-        close()
-    }
-    val tail: Path = Path().apply {
-        moveTo(0f, -0.05f)
-        lineTo(0.36f, 1.0f)
-        lineTo(-0.36f, 1.0f)
-        close()
-    }
-    /** Cheaper single-wedge silhouette for when the sky is too crowded for detail. */
-    val simple: Path = Path().apply {
-        moveTo(0f, -1.55f)
-        lineTo(1.15f, 0.9f)
-        lineTo(0f, 0.45f)
-        lineTo(-1.15f, 0.9f)
+    val triangle: Path = Path().apply {
+        moveTo(0f, -1.5f)
+        lineTo(1.1f, 1.0f)
+        lineTo(-1.1f, 1.0f)
         close()
     }
 }
 
-/** Aircraft: a filled arrow pointing along its track, with a notched tail. */
+/** Aircraft: a filled triangle whose apex points along the track. */
 fun DrawScope.drawPlaneArrow(
     at: Offset,
     headingDeg: Float,
     r: Float,
     tint: Color,
-    simple: Boolean = false,
 ) {
     withTransform({
         translate(at.x, at.y)
         rotate(headingDeg, Offset.Zero)
         scale(r, r, Offset.Zero)
     }) {
-        if (simple) {
-            drawPath(PlaneGlyph.simple, tint)
-        } else {
-            drawPath(PlaneGlyph.head, tint)
-            drawPath(PlaneGlyph.tail, tint.dim(0.65f))
-        }
+        drawPath(PlaneGlyph.triangle, tint)
     }
 }
 

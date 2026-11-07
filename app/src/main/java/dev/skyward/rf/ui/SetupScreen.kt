@@ -989,7 +989,7 @@ private fun MeshConfig(c: Container, settings: Settings, transfer: WadaTransfer)
 
         Text("WADAMESH DIRECT TRANSFER", color = Sky.meshCore, fontSize = 10.sp)
         Text(
-            "Open Transfer on the device, then type the address and the six-digit code it shows.",
+            "Open Transfer: type the http:// address the device shows and its six-digit code.",
             color = Sky.textDim,
             fontSize = 10.sp,
         )

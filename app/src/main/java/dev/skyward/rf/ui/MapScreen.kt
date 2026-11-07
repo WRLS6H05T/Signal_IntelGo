@@ -1631,12 +1631,6 @@ private fun TacticalMap(
             }
         }
 
-        // Counted when the marker list changes, not on every frame: a busy sky is the normal
-        // case, and the count cannot change between ticks anyway.
-        val denseAircraft = remember(markers) {
-            markers.count { it.layer == Layer.AIRCRAFT } > 300
-        }
-
         Canvas(
             Modifier
                 .fillMaxSize()
@@ -1944,7 +1938,7 @@ private fun TacticalMap(
                     drawCircle(color = IssGold.copy(alpha = 0.22f * a), radius = iconR * 1.8f, center = p)
                 }
                 when (m.layer) {
-                    Layer.AIRCRAFT -> drawPlaneArrow(p, m.headingDeg ?: 0f, r, color, simple = denseAircraft)
+                    Layer.AIRCRAFT -> drawPlaneArrow(p, m.headingDeg ?: 0f, r, color)
                     Layer.SATELLITE -> if (isIss(m)) drawStationIcon(p, iconR, color) else drawSatelliteIcon(p, r, color)
                     Layer.CELL -> drawTowerIcon(p, r, color)
                     // A repeater is fixed infrastructure, not a node in a pocket: the mast
@@ -1952,12 +1946,12 @@ private fun TacticalMap(
                     Layer.MESH -> if (m.meshRepeater) drawRepeaterIcon(p, r, color) else drawDishIcon(p, r, color)
                     Layer.ESP32 -> drawChipIcon(p, r, color)
                     Layer.DRONE -> {
-                        // A drone with a track is an arrow, but a smaller one than an airliner:
+                        // A drone with a track is a triangle, but a smaller one than an airliner:
                         // the two must not read as the same weight in the sky. Without a
                         // heading there is nothing to point, so it gets the quadcopter glyph.
                         val heading = m.headingDeg
                         if (heading != null) {
-                            drawPlaneArrow(p, heading, r * 0.62f, color, simple = true)
+                            drawPlaneArrow(p, heading, r * 0.62f, color)
                         } else {
                             drawDroneIcon(p, r * 0.8f, color)
                         }

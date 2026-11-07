@@ -233,15 +233,32 @@ internal object WadaWire {
     /** No file on the device is bigger than this in one frame. */
     private const val MAX_FRAME = 3 * 1024 * 1024
 
-    /** "192.168.1.42", "192.168.1.42:8080" and "http://host/" all mean the same thing. */
+    /**
+     * "192.168.1.42", "192.168.1.42:8080" and the whole page address the device prints
+     * ("http://192.168.1.42/files") all mean the same thing.
+     *
+     * The device shows its transfer page as a URL, so the field is routinely filled with the
+     * scheme, the path and a trailing slash. Only the authority reaches the socket: rejecting
+     * the rest made a correct address look like a missing one.
+     */
     fun parseAddress(raw: String): Pair<String, Int>? {
-        val text = raw.trim()
-            .removePrefix("http://")
-            .removePrefix("https://")
-            .trimEnd('/')
+        var text = raw.trim()
+        val scheme = text.indexOf("://")
+        if (scheme >= 0) text = text.substring(scheme + 3)
+        text = text.substringBefore('/').substringBefore('?').substringBefore('#').trimEnd('/')
         if (text.isEmpty()) return null
-        val host = text.substringBefore(':')
-        val port = if (text.contains(':')) text.substringAfter(':').toIntOrNull() ?: return null else 80
+        val host: String
+        val portText = if (text.startsWith("[")) {
+            // A bracketed IPv6 literal keeps its own colons; only what follows `]` is the port.
+            val close = text.indexOf(']')
+            if (close < 0) return null
+            host = text.substring(1, close)
+            text.substring(close + 1).takeIf { it.isNotEmpty() }?.removePrefix(":")
+        } else {
+            host = text.substringBefore(':')
+            if (text.contains(':')) text.substringAfter(':') else null
+        }
+        val port = if (portText == null) 80 else portText.toIntOrNull() ?: return null
         if (host.isEmpty() || port !in 1..65535) return null
         return host to port
     }
