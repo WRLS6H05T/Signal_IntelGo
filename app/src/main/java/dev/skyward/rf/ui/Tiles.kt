@@ -4,6 +4,8 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.LruCache
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -17,7 +19,19 @@ import kotlin.math.pow
 data class TileRef(val z: Int, val x: Int, val y: Int)
 
 /** A cached parent tile plus the sub-rectangle of it that covers the requested child. */
-data class TileFallback(val bitmap: Bitmap, val srcX: Int, val srcY: Int, val srcSize: Int)
+data class TileFallback(
+    val bitmap: Bitmap,
+    val srcX: Int,
+    val srcY: Int,
+    val srcSize: Int,
+    /** Where the parent sits in the cache, so its draw-ready wrapper can be looked up too. */
+    val z: Int = 0,
+    val x: Int = 0,
+    val y: Int = 0,
+)
+
+/** One cached tile, draw-ready: the image wrapper is kept so a frame never makes a new one. */
+data class TileImage(val image: ImageBitmap, val srcX: Int, val srcY: Int, val srcSize: Int)
 
 object TileSources {
     const val DARK = "dark"
@@ -53,6 +67,13 @@ class TileStore(
     }
     private val inFlight = ConcurrentHashMap.newKeySet<Long>()
 
+    // Drawing wraps each bitmap in an ImageBitmap, and doing that per tile per frame was one
+    // object a tile a frame - dozens of allocations a frame for pixels that had not changed.
+    // The wrappers are held beside the bitmaps, under the same key.
+    private val images = object : LruCache<Long, ImageBitmap>(96) {
+        override fun sizeOf(key: Long, value: ImageBitmap): Int = 1
+    }
+
     private fun key(z: Int, x: Int, y: Int): Long =
         (z.toLong() shl 40) or (x.toLong() shl 20) or y.toLong()
 
@@ -85,9 +106,27 @@ class TileStore(
             if (span < 1) continue
             val subX = x - (cx shl (z - cz))
             val subY = y - (cy shl (z - cz))
-            return TileFallback(bmp, subX * span, subY * span, span)
+            return TileFallback(bmp, subX * span, subY * span, span, cz, cx, cy)
         }
         return null
+    }
+
+    /** A tile ready for `drawImage`: [cached], with its image wrapper made once. */
+    fun cachedImage(z: Int, x: Int, y: Int): ImageBitmap? {
+        val k = key(z, x, y)
+        images.get(k)?.let { return it }
+        val bmp = cached(z, x, y) ?: return null
+        val image = bmp.asImageBitmap()
+        images.put(k, image)
+        return image
+    }
+
+    /** [ancestor], with the parent's image wrapper reused rather than rebuilt. */
+    fun ancestorImage(z: Int, x: Int, y: Int): TileImage? {
+        val fb = ancestor(z, x, y) ?: return null
+        val pk = key(fb.z, fb.x, fb.y)
+        val image = images.get(pk) ?: fb.bitmap.asImageBitmap().also { images.put(pk, it) }
+        return TileImage(image, fb.srcX, fb.srcY, fb.srcSize)
     }
 
     /** Loads one tile; returns true when new pixels became available. */
@@ -204,6 +243,7 @@ class TileStore(
 
     fun clear() {
         memory.evictAll()
+        images.evictAll()
         runCatching { dir.deleteRecursively() }
         dir.mkdirs()
     }

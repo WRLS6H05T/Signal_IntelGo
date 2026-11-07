@@ -57,6 +57,15 @@ class GlobeInk {
     internal var x: FloatArray = FloatArray(512)
     internal var y: FloatArray = FloatArray(512)
     internal var front: BooleanArray = BooleanArray(512)
+    /**
+     * sin/cos of every land vertex, four floats per point. The coastline does not move, so the
+     * sines are computed once and the frame only rotates the longitude: that takes every
+     * trigonometry call out of the per-point path, which is where a spinning globe spends its
+     * frame. [trigFor] is the ring array the table was built from, matched by identity so a
+     * different world rebuilds it.
+     */
+    internal var trigFor: Array<FloatArray>? = null
+    internal var trig: Array<FloatArray> = emptyArray()
 }
 
 object WorldOutline {
@@ -131,6 +140,28 @@ fun DrawScope.drawGlobeWorld(
     val lon0 = Math.toRadians(centerLon)
     val cosTilt = cos(Math.toRadians(tiltDeg))
     val sinTilt = sin(Math.toRadians(tiltDeg))
+
+    // Built once per world: see [GlobeInk.trig]. Rebuilding it every frame meant two sin/cos per
+    // vertex per frame for geometry that never changes.
+    if (ink.trigFor !== rings) {
+        ink.trig = Array(rings.size) { i ->
+            val ring = rings[i]
+            val n = ring.size / 2
+            val t = FloatArray(n * 4)
+            for (k in 0 until n) {
+                val la = Math.toRadians(ring[2 * k + 1].toDouble())
+                val lo = Math.toRadians(ring[2 * k].toDouble())
+                t[4 * k] = cos(la).toFloat()
+                t[4 * k + 1] = sin(la).toFloat()
+                t[4 * k + 2] = cos(lo).toFloat()
+                t[4 * k + 3] = sin(lo).toFloat()
+            }
+            t
+        }
+        ink.trigFor = rings
+    }
+    val lonCos0 = cos(lon0)
+    val lonSin0 = sin(lon0)
 
     // Single 3-slot buffer: x, y, facing. Projecting a point allocates nothing.
     val pt = FloatArray(3)
@@ -229,7 +260,25 @@ fun DrawScope.drawGlobeWorld(
         // edge from a crossing point stays within a pixel of the limb.
         val outside = radius * 1.02f
 
-        for (ring in rings) {
+        // The same maths as [project], with the sines taken from the cache and the longitude
+        // rotation folded into two constants. The ten thousand coastline vertices are the
+        // frame's real cost on the globe, so this is the one loop worth hand-optimising.
+        fun projectIndexed(t: FloatArray, k: Int) {
+            val i = k * 4
+            val cLat = t[i]
+            val sLat = t[i + 1]
+            val cosD = t[i + 2] * lonCos0 + t[i + 3] * lonSin0
+            val sinD = t[i + 3] * lonCos0 - t[i + 2] * lonSin0
+            val cosc = sinLat0 * sLat + cosLat0 * cLat * cosD
+            val y3 = cosLat0 * sLat - sinLat0 * cLat * cosD
+            pt[2] = (y3 * sinTilt + cosc * cosTilt).toFloat()
+            pt[0] = (center.x + radius * (cLat * sinD)).toFloat()
+            pt[1] = (center.y - radius * (y3 * cosTilt - cosc * sinTilt)).toFloat()
+        }
+
+        for (ri in rings.indices) {
+            val ring = rings[ri]
+            val tri = ink.trig[ri]
             val n = ring.size / 2
             if (n < 3) continue
             if (rx.size < n) {
@@ -243,7 +292,7 @@ fun DrawScope.drawGlobeWorld(
             var front = 0
             var lastAngle = 0.0
             for (k in 0 until n) {
-                project(ring[2 * k + 1].toDouble(), ring[2 * k].toDouble())
+                projectIndexed(tri, k)
                 val dx = pt[0] - center.x
                 val dy = pt[1] - center.y
                 val len = sqrt(dx * dx + dy * dy)

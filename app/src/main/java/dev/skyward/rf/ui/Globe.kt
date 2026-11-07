@@ -1,5 +1,6 @@
 package dev.skyward.rf.ui
 
+import dev.skyward.rf.core.Geo
 import kotlin.math.cos
 import kotlin.math.ln
 import kotlin.math.min
@@ -60,16 +61,29 @@ class ViewProjection(
     fun elevatedInto(lat: Double, lon: Double, altM: Double?, out: ProjectedSink) =
         projectInto(lat, lon, liftFor(altM), out)
 
+    /**
+     * [elevatedInto] with the marker's Mercator position already computed.
+     *
+     * The draw loop calls this for every entity on every frame, and a marker's normalised
+     * position never changes: re-deriving it per frame was a logarithm per icon per frame.
+     */
+    fun elevatedNormInto(lat: Double, nx: Double, ny: Double, altM: Double?, out: ProjectedSink) =
+        projectNormInto(lat, nx, ny, liftFor(altM), out)
+
     private fun project(lat: Double, lon: Double, lift: Double): Projected {
         val out = ProjectedSink()
         projectInto(lat, lon, lift, out)
         return Projected(out.x, out.y, out.front, out.lift)
     }
 
-    private fun projectInto(lat: Double, lon: Double, lift: Double, out: ProjectedSink) {
-        val la = Math.toRadians(lat.coerceIn(-89.9, 89.9))
-        val dLon = Math.toRadians(lon) - lon0
-        val m = flat.toScreen(lat, lon)
+    private fun projectInto(lat: Double, lon: Double, lift: Double, out: ProjectedSink) =
+        projectNormInto(lat, Geo.lonToNorm(lon), Geo.latToNorm(lat.coerceIn(-85.0, 85.0)), lift, out)
+
+    private fun projectNormInto(lat: Double, nx: Double, ny: Double, lift: Double, out: ProjectedSink) {
+        val m = flat.toScreenNorm(nx, ny)
+        // Flat map: no sphere geometry is needed, so none of its trigonometry is run. This used
+        // to be computed before the branch, which put a sin, a cos and two radian conversions
+        // on every marker on every street-level frame for nothing.
         if (t <= 0.001f) {
             out.x = m.x
             out.y = m.y
@@ -77,6 +91,8 @@ class ViewProjection(
             out.lift = 0f
             return
         }
+        val la = Math.toRadians(lat.coerceIn(-89.9, 89.9))
+        val dLon = Math.toRadians(nx * 360.0 - 180.0) - lon0
 
         val cosLat = cos(la)
         val cosc = sinLat0 * sin(la) + cosLat0 * cosLat * cos(dLon)

@@ -116,14 +116,20 @@ class Projection(
     private val cx = Geo.lonToNorm(centerLon) * world
     private val cy = Geo.latToNorm(centerLat) * world
 
-    fun toScreen(lat: Double, lon: Double): Offset {
-        val wx = Geo.lonToNorm(lon) * world
-        val wy = Geo.latToNorm(lat.coerceIn(-85.0, 85.0)) * world
-        return Offset(
-            (wx - cx + width / 2.0 + safeShift).toFloat(),
-            (wy - cy + height / 2.0).toFloat(),
-        )
-    }
+    fun toScreen(lat: Double, lon: Double): Offset =
+        toScreenNorm(Geo.lonToNorm(lon), Geo.latToNorm(lat.coerceIn(-85.0, 85.0)))
+
+    /**
+     * [toScreen] from Mercator coordinates that were computed once.
+     *
+     * Every marker is projected on every frame and its position does not change between them,
+     * so the latitude's logarithm - the expensive part of Web-Mercator - is worked out when the
+     * marker is built rather than sixty times a second.
+     */
+    fun toScreenNorm(nx: Double, ny: Double): Offset = Offset(
+        (nx * world - cx + width / 2.0 + safeShift).toFloat(),
+        (ny * world - cy + height / 2.0).toFloat(),
+    )
 
     fun toGeo(x: Float, y: Float): Pair<Double, Double> {
         val wx = cx + (x - width / 2f - safeShift)

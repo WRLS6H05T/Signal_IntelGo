@@ -52,7 +52,6 @@ import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
@@ -70,6 +69,7 @@ import dev.skyward.rf.Container
 import dev.skyward.rf.core.AircraftView
 import dev.skyward.rf.core.CellView
 import dev.skyward.rf.core.CrashLog
+import dev.skyward.rf.core.Geo
 import dev.skyward.rf.core.DroneView
 import dev.skyward.rf.core.Esp32Node
 import dev.skyward.rf.core.LatLon
@@ -128,6 +128,11 @@ data class MapMarker(
     val meshRepeater: Boolean = false,
     /** Caught by the linked phone rather than this one: drawn cyan and owned by neither sky. */
     val peer: Boolean = false,
+    /** The printed label, cut once here instead of sixty times a second in the draw loop. */
+    val short: String = title.take(18),
+    /** Mercator position, computed once: see [Projection.toScreenNorm]. */
+    val nx: Double = Geo.lonToNorm(lon),
+    val ny: Double = Geo.latToNorm(lat.coerceIn(-85.0, 85.0)),
 )
 
 /**
@@ -1604,6 +1609,10 @@ private fun TacticalMap(
         LaunchedEffect(visible, offline) {
             // Offline: the tiles already on the phone are drawn, and nothing is asked for.
             if (offline) return@LaunchedEffect
+            // A pan rewrites the visible list on every touch event, and each rewrite used to
+            // restart this loop mid-download. Waiting for the finger to settle keeps one load
+            // pass instead of one per frame of the gesture.
+            delay(150)
             var loaded = false
             for (t in visible) {
                 if (tileStore.load(tileSource, t.z, t.x, t.y)) loaded = true
@@ -1620,6 +1629,12 @@ private fun TacticalMap(
                 isAntiAlias = true
                 typeface = android.graphics.Typeface.MONOSPACE
             }
+        }
+
+        // Counted when the marker list changes, not on every frame: a busy sky is the normal
+        // case, and the count cannot change between ticks anyway.
+        val denseAircraft = remember(markers) {
+            markers.count { it.layer == Layer.AIRCRAFT } > 300
         }
 
         Canvas(
@@ -1731,12 +1746,12 @@ private fun TacticalMap(
                         val (sx, sy) = proj.tileOrigin(t.z, t.x, t.y)
                         val px = tileSize.roundToInt()
                         if (px <= 0) continue
-                        val exact = tileStore.cached(t.z, t.x, t.y)
                         val dst = IntOffset(sx.roundToInt(), sy.roundToInt())
                         val dstSize = IntSize(px + 1, px + 1)
+                        val exact = tileStore.cachedImage(t.z, t.x, t.y)
                         if (exact != null) {
                             drawImage(
-                                image = exact.asImageBitmap(),
+                                image = exact,
                                 srcOffset = IntOffset.Zero,
                                 srcSize = IntSize(exact.width, exact.height),
                                 dstOffset = dst,
@@ -1747,9 +1762,9 @@ private fun TacticalMap(
                         } else {
                             // Not downloaded yet for this zoom: stretch the nearest cached parent
                             // over the same ground, so zooming never leaves the map blank.
-                            val parent = tileStore.ancestor(t.z, t.x, t.y) ?: continue
+                            val parent = tileStore.ancestorImage(t.z, t.x, t.y) ?: continue
                             drawImage(
-                                image = parent.bitmap.asImageBitmap(),
+                                image = parent.image,
                                 srcOffset = IntOffset(parent.srcX, parent.srcY),
                                 srcSize = IntSize(parent.srcSize, parent.srcSize),
                                 dstOffset = dst,
@@ -1781,9 +1796,6 @@ private fun TacticalMap(
             val vp = viewProjection(camera, size.width, size.height, globeT)
             val cull = globeMode
             val labels = camera.zoom >= 9.0 && markers.size <= 60
-            // Above this the sky is too dense for detail: one wedge each, no tethers.
-            val plottedAircraft = markers.count { it.layer == Layer.AIRCRAFT }
-            val denseAircraft = plottedAircraft > 300
             // One of each per frame: a logged globe draws hundreds of rings, and a fresh
             // Stroke for every one of them was the same allocation problem as the projections.
             val ringStroke = Stroke(width = 1.2f * density)
@@ -1799,7 +1811,13 @@ private fun TacticalMap(
             // its own points instead: each fix is a dot, and nothing is painted between them.
             // Drawn at every zoom now, because the dots are the whole track rather than an
             // extra over the line.
-            for (p in path) {
+            // An even sample of the track once it is dense. A drive can hold thousands of
+            // fixes, each dot is under 3dp across, and past a thousand they are painting the
+            // same few hundred pixels over and over: the skipped dots sit underneath the kept
+            // ones, so nothing visible is lost and the frame stops paying for them.
+            val pathStep = (path.size + 899) / 900
+            for (i in path.indices step pathStep) {
+                val p = path[i]
                 vp.surfaceInto(p.lat, p.lon, pa)
                 if (cull && pa.front <= 0.02f) continue
                 if (pa.x < -20f || pa.y < -20f || pa.x > size.width + 20f || pa.y > size.height + 20f) continue
@@ -1814,7 +1832,12 @@ private fun TacticalMap(
             // Flat map only: on the ball a dot per network would be indistinguishable from
             // the logged-entity halos, and the sphere is for the sky, not the streets.
             if (signals.isNotEmpty() && !globeMode) {
-                for (s in signals) {
+                // The same budget as the track, except while a dot is selected: its ring has
+                // to be drawn on the dot that was actually tapped.
+                val signalStep =
+                    if (selectedSignalKey != null) 1 else (signals.size + 899) / 900
+                for (si in signals.indices step signalStep) {
+                    val s = signals[si]
                     vp.surfaceInto(s.lat, s.lon, pb)
                     if (pb.x < -20f || pb.y < -20f ||
                         pb.x > size.width + 20f || pb.y > size.height + 20f
@@ -1856,7 +1879,7 @@ private fun TacticalMap(
 
             // ---- entities: lifted off the globe by their own altitude ----
             for (m in markers) {
-                vp.elevatedInto(m.lat, m.lon, m.altM, pa)
+                vp.elevatedNormInto(m.lat, m.nx, m.ny, m.altM, pa)
                 // whatever has rotated round the back of the sphere is not drawn
                 if (cull && pa.front <= 0.02f) continue
                 if (pa.x < -80f || pa.y < -80f || pa.x > size.width + 80f || pa.y > size.height + 80f) continue
@@ -1959,7 +1982,7 @@ private fun TacticalMap(
                 if (labels && a > 0.6f) {
                     labelPaint.color = color.toArgb()
                     labelPaint.textSize = 9.5f * density
-                    drawContext.canvas.nativeCanvas.drawText(m.title.take(18), p.x + iconR * 2.2f, p.y - iconR, labelPaint)
+                    drawContext.canvas.nativeCanvas.drawText(m.short, p.x + iconR * 2.2f, p.y - iconR, labelPaint)
                 }
             }
 
