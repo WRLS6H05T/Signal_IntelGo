@@ -598,6 +598,8 @@ class Container(context: Context) {
                 unit = settingsStore.current.distanceUnit,
                 logged = loggedCounts(),
             ),
+            // The choice is read when it speaks, so a change in Setup is heard on the next one.
+            settingsStore.current.watcherReportStyle,
         )
     }
 
@@ -647,11 +649,12 @@ class Container(context: Context) {
                 logging = drive.active,
                 km = drive.km,
                 unit = settingsStore.current.distanceUnit,
-                // The timed update reads the entity table, not the live INTEL tab.
+                // Both tables are handed over; the style below decides which is spoken.
                 logged = loggedCounts(),
             ),
             minutes,
             sightings = recentAlerts.filter { it.first >= since }.map { it.second },
+            style = settingsStore.current.watcherReportStyle,
         )
     }
 

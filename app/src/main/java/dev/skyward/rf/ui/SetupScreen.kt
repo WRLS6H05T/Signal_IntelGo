@@ -51,6 +51,7 @@ import dev.skyward.rf.core.LOG_RADIUS_KM
 import dev.skyward.rf.core.Settings
 import dev.skyward.rf.core.Units
 import dev.skyward.rf.core.VoiceStyles
+import dev.skyward.rf.core.Watcher
 import dev.skyward.rf.meshcore.WadaTransfer
 import dev.skyward.rf.peer.PeerProtocol
 import dev.skyward.rf.scan.UsbBoards
@@ -665,7 +666,7 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                     Column(Modifier.weight(1f)) {
                         Text("Timed intel update", color = Sky.text, fontSize = 13.sp)
                         Text(
-                            "The Watcher reads the entity table out on its own",
+                            "The Watcher reads its table out on its own",
                             color = Sky.textDim,
                             fontSize = 10.sp,
                         )
@@ -680,6 +681,36 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                         },
                     )
                 }
+                Spacer(Modifier.height(10.dp))
+                Text("WATCHER READS", style = SkywardThemeLabel(), color = Sky.textDim)
+                Spacer(Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ModeChip("INTEL", settings.watcherReportStyle == Watcher.STYLE_INTEL) {
+                        c.settingsStore.update { it.copy(watcherReportStyle = Watcher.STYLE_INTEL) }
+                    }
+                    ModeChip("ENTITIES", settings.watcherReportStyle == Watcher.STYLE_ENTITIES) {
+                        c.settingsStore.update { it.copy(watcherReportStyle = Watcher.STYLE_ENTITIES) }
+                    }
+                    ModeChip("BOTH", settings.watcherReportStyle == Watcher.STYLE_BOTH) {
+                        c.settingsStore.update { it.copy(watcherReportStyle = Watcher.STYLE_BOTH) }
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    when (settings.watcherReportStyle) {
+                        Watcher.STYLE_INTEL ->
+                            "The live table only: connected devices, the radios' counts and the " +
+                                "fix. Nothing from the log."
+                        Watcher.STYLE_ENTITIES ->
+                            "The entity table only: what the drive has caught, per layer. No " +
+                                "live counts."
+                        else ->
+                            "The live table, then the entity table: what is overhead now and " +
+                                "what the drive has caught."
+                    },
+                    color = Sky.textDim,
+                    fontSize = 10.sp,
+                )
                 Spacer(Modifier.height(8.dp))
                 Text("MINUTES BETWEEN UPDATES", style = SkywardThemeLabel(), color = Sky.textDim)
                 Spacer(Modifier.height(4.dp))
@@ -709,10 +740,14 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                         "Off. The Watcher only speaks when it is asked to."
                     } else {
                         "Every ${settings.intelUpdateMinutes} minutes it keys up with 'Watcher " +
-                            "to operator, intel update', reads the entity table, then the watch " +
-                            "sightings since the last update, and signs off 'Watcher out'. It " +
-                            "needs hands-free voice on; on a peer link only the larger screen " +
-                            "speaks it."
+                            "to operator, intel update', reads " +
+                            (when (settings.watcherReportStyle) {
+                                Watcher.STYLE_INTEL -> "the live table"
+                                Watcher.STYLE_ENTITIES -> "the entity table"
+                                else -> "the live table then the entity table"
+                            }) + ", then the watch sightings since the last update, and signs " +
+                            "off 'Watcher out'. It needs hands-free voice on; on a peer link " +
+                            "only the larger screen speaks it."
                     },
                     color = Sky.textDim,
                     fontSize = 10.sp,
@@ -1153,10 +1188,15 @@ private fun Esp32Config(c: Container, settings: Settings) {
 
 @Composable
 private fun ShareChip(label: String, value: String, settings: Settings, onChange: ((Settings) -> Settings) -> Unit) {
-    val selected = settings.peerShareMode == value
+    ModeChip(label, settings.peerShareMode == value) { onChange { it.copy(peerShareMode = value) } }
+}
+
+/** One choice out of a short set: the peer audience, or what the Watcher reads out. */
+@Composable
+private fun ModeChip(label: String, selected: Boolean, onClick: () -> Unit) {
     FilterChip(
         selected = selected,
-        onClick = { onChange { it.copy(peerShareMode = value) } },
+        onClick = onClick,
         label = { Text(label, fontSize = 9.sp, fontFamily = FontFamily.Monospace) },
         shape = RoundedCornerShape(9.dp),
         colors = FilterChipDefaults.filterChipColors(

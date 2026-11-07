@@ -971,7 +971,14 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 .border(1.dp, Sky.outline, RoundedCornerShape(12.dp))
                 .padding(10.dp),
         ) {
-            // Header always shows the logged count; everything else lives behind the arrow.
+            // The header total is the whole logged table - the sky layers plus every network
+            // the signal log holds - so it matches the Log tab's total, not just the sky's.
+            val caughtWifi = loggedSignals.count { it.kind == RfKind.WIFI }
+            val caughtBle = loggedSignals.count { it.kind == RfKind.BLE }
+            val caughtSub = loggedSignals.count { it.kind == RfKind.SUBGHZ }
+            val caughtTotal = sky.loggedSats + sky.loggedAircraft + sky.loggedDrones +
+                sky.loggedMesh + sky.loggedCells + sky.loggedEsp32 + sky.loggedWatch +
+                caughtWifi + caughtBle + caughtSub
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -981,7 +988,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 Text("INTEL", style = SkywardThemeLabel(), color = Sky.textDim)
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    "${sky.loggedSats + sky.loggedAircraft + sky.loggedDrones + sky.loggedMesh + sky.loggedCells + sky.loggedEsp32 + sky.loggedWatch}",
+                    "$caughtTotal",
                     color = Sky.logged,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
@@ -1005,6 +1012,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 Spacer(Modifier.height(8.dp))
                 // A plain table of counts. Tapping a row still switches that layer or radio;
                 // the number stays visible when a layer is off, so "hidden" is not "zero".
+                Text("LIVE", style = SkywardThemeLabel(), color = Sky.textDim)
                 IntelRow("SAT", sky.sats.size, showSats) { showSats = !showSats }
                 IntelRow("AIR", sky.aircraft.size, showAir) { showAir = !showAir }
                 IntelRow("UAV", sky.drones.size, showDrones) { showDrones = !showDrones }
@@ -1064,6 +1072,22 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                         maxLines = 1,
                     )
                 }
+                // The entity table, in the same box as the live counts: the rows above are
+                // what is being heard now, these are what the drive has caught. One place to
+                // read both, on the map and on the globe, instead of a second box that would
+                // cover the same corner.
+                Spacer(Modifier.height(8.dp))
+                Text("LOGGED", style = SkywardThemeLabel(), color = Sky.textDim)
+                IntelRow("SAT", sky.loggedSats, true) {}
+                IntelRow("AIR", sky.loggedAircraft, true) {}
+                IntelRow("UAV", sky.loggedDrones, true) {}
+                IntelRow("MESH", sky.loggedMesh, true) {}
+                IntelRow("CELL", sky.loggedCells, true) {}
+                IntelRow("ESP", sky.loggedEsp32, true) {}
+                IntelRow("WATCH", sky.loggedWatch, true) {}
+                IntelRow("WIFI", caughtWifi, true) {}
+                IntelRow("BLE", caughtBle, true) {}
+                IntelRow("SUB", caughtSub, true) {}
                 if (!wd.active) {
                     Spacer(Modifier.height(8.dp))
                     // The primary action lives in the box now, not in a floating button.

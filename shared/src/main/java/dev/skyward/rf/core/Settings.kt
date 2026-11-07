@@ -85,6 +85,12 @@ data class Settings(
      * update is the entity table read down, plus whatever has been sighted since the last one.
      */
     val intelUpdateMinutes: Int = 0,
+    /**
+     * What the Watcher reads when it reports: "intel" (the live table), "entities" (what the
+     * log has caught) or "both", intel first. The asked-for report and the timed update read
+     * the same setting, so the two never describe different tables.
+     */
+    val watcherReportStyle: String = "both",
     /** ESP32 sensor boards: BLE advertisements always, MQTT when a Wi-Fi board publishes. */
     val esp32Enabled: Boolean = true,
     /** GhostESP, ESP32 Marauder, Biscuit and anything else ESP32 plugged into the USB port. */

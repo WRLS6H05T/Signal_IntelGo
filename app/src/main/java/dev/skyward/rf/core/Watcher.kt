@@ -184,15 +184,23 @@ object Watcher {
     }
 
     /**
-     * The intel report, in the order it was asked for: what is connected and being watched first,
-     * then the radio picture, then what the log has caught.
+     * What the Watcher reads out: the live table, the entity table, or one after the other.
      *
-     * Whether recording is armed is not part of it. "Logging is off" three words before the
-     * sign-off was heard as a second goodbye, and what has been collected is the news anyway.
+     * A driver watching the air wants what is overhead now; a drive in progress wants what has
+     * been caught. Both are true at different moments, so the choice is the operator's rather
+     * than a guess - and the asked-for report and the timed update obey the same setting, or
+     * the two voices would disagree about what the table holds.
      */
-    fun intelReport(r: ReportInput): String {
-        // No name in the text: the voice pacing is the delivery, and the Watcher is the only one.
-        val sb = StringBuilder("Intel report. ")
+    const val STYLE_INTEL = "intel"
+    const val STYLE_ENTITIES = "entities"
+    const val STYLE_BOTH = "both"
+
+    /** An unknown value - settings from before this choice - reads as both, not as silence. */
+    private fun wantsIntel(style: String): Boolean = style != STYLE_ENTITIES
+    private fun wantsEntities(style: String): Boolean = style != STYLE_INTEL
+
+    /** The live picture read down: what is being watched, then what the radios are hearing. */
+    private fun intelBlock(r: ReportInput, sb: StringBuilder) {
         val groups = WatchKind.values().mapNotNull { kind ->
             val n = r.watches.count { it.kind == kind }
             if (n == 0) null else count(n, kind.spoken)
@@ -213,61 +221,77 @@ object Watcher {
         if (r.cells > 0) sb.append(", ${count(r.cells, "cell tower")}")
         if (r.mesh > 0) sb.append(", ${count(r.mesh, "mesh node")}")
         sb.append(", ${count(r.sats, "satellite")} in range, ${count(r.aircraft, "aircraft")}. ")
-        sb.append(if (r.gps) "GPS fix held. " else "No GPS fix. ")
-        sb.append("Logged entities. ")
+    }
+
+    /** The entity table read down: what the log has caught, layer by layer. */
+    private fun entityBlock(r: ReportInput, sb: StringBuilder, heading: String, empty: String) {
+        sb.append(heading)
         if (r.logged.total == 0) {
-            sb.append("Nothing logged yet.")
-        } else {
-            val caught = listOfNotNull(
-                r.logged.sats.takeIf { it > 0 }?.let { count(it, "satellite") },
-                r.logged.aircraft.takeIf { it > 0 }?.let { count(it, "aircraft", "aircraft") },
-                r.logged.drones.takeIf { it > 0 }?.let { count(it, "drone") },
-                r.logged.mesh.takeIf { it > 0 }?.let { count(it, "mesh node") },
-                r.logged.cells.takeIf { it > 0 }?.let { count(it, "cell tower") },
-                r.logged.esp32.takeIf { it > 0 }?.let { count(it, "ESP32 board") },
-                r.logged.watch.takeIf { it > 0 }?.let { count(it, "watch match", "watch matches") },
-                r.logged.wifi.takeIf { it > 0 }?.let { count(it, "Wi-Fi network") },
-                r.logged.ble.takeIf { it > 0 }?.let { count(it, "Bluetooth device") },
-                r.logged.subGhz.takeIf { it > 0 }?.let { count(it, "sub-GHz hit") },
-            )
-            sb.append(count(r.logged.total, "entity", "entities")).append(". ")
-            sb.append("I have ${joinWords(caught)}.")
+            sb.append(empty)
+            return
         }
-        return sb.toString()
+        val caught = listOfNotNull(
+            r.logged.sats.takeIf { it > 0 }?.let { count(it, "satellite") },
+            r.logged.aircraft.takeIf { it > 0 }?.let { count(it, "aircraft", "aircraft") },
+            r.logged.drones.takeIf { it > 0 }?.let { count(it, "drone") },
+            r.logged.mesh.takeIf { it > 0 }?.let { count(it, "mesh node") },
+            r.logged.cells.takeIf { it > 0 }?.let { count(it, "cell tower") },
+            r.logged.esp32.takeIf { it > 0 }?.let { count(it, "ESP32 board") },
+            r.logged.watch.takeIf { it > 0 }?.let { count(it, "watch match", "watch matches") },
+            r.logged.wifi.takeIf { it > 0 }?.let { count(it, "Wi-Fi network") },
+            r.logged.ble.takeIf { it > 0 }?.let { count(it, "Bluetooth device") },
+            r.logged.subGhz.takeIf { it > 0 }?.let { count(it, "sub-GHz hit") },
+        )
+        sb.append(count(r.logged.total, "entity", "entities")).append(". ")
+        sb.append("I have ${joinWords(caught)}. ")
     }
 
     /**
-     * The timed intel update: the entity table read down, then what has been sighted since the
-     * last one.
+     * The intel report, in the order it was asked for: what is connected and being watched
+     * first, then the radio picture, then - when the style asks for it - what the log has
+     * caught.
      *
-     * The call - "Watcher to operator, intel update" - is radio framing rather than text, so this
-     * begins at the table itself. It reads what has been *caught* - the logged entity table, per
-     * layer - rather than the live INTEL tab: an update that arrives on its own is the record of
-     * the drive, and the live counts are already on screen for anyone looking at it.
+     * Whether recording is armed is not part of it. "Logging is off" three words before the
+     * sign-off was heard as a second goodbye, and what has been collected is the news anyway.
+     */
+    fun intelReport(r: ReportInput, style: String = STYLE_BOTH): String {
+        // No name in the text: the voice pacing is the delivery, and the Watcher is the only one.
+        val sb = StringBuilder("Intel report. ")
+        if (wantsIntel(style)) {
+            intelBlock(r, sb)
+            sb.append(if (r.gps) "GPS fix held. " else "No GPS fix. ")
+        }
+        if (wantsEntities(style)) entityBlock(r, sb, "Logged entities. ", "Nothing logged yet. ")
+        return sb.toString().trimEnd()
+    }
+
+    /**
+     * The timed intel update: the tables read down, then what has been sighted since the last
+     * one.
+     *
+     * The call - "Watcher to operator, intel update" - is radio framing rather than text, so
+     * this begins at the table itself. Which table is read is the operator's setting: the live
+     * counts are what is being heard, the entity table is what the drive has caught, and both
+     * is the whole picture in one go.
      */
     fun intelUpdate(
         r: ReportInput,
         windowMinutes: Int,
         sightings: List<WatchView> = r.sightings,
+        style: String = STYLE_BOTH,
     ): String {
-        val sb = StringBuilder("Entity table. ")
-        if (r.logged.total == 0) {
-            sb.append("Nothing caught yet. ")
-        } else {
-            val caught = listOfNotNull(
-                r.logged.sats.takeIf { it > 0 }?.let { count(it, "satellite") },
-                r.logged.aircraft.takeIf { it > 0 }?.let { count(it, "aircraft", "aircraft") },
-                r.logged.drones.takeIf { it > 0 }?.let { count(it, "drone") },
-                r.logged.mesh.takeIf { it > 0 }?.let { count(it, "mesh node") },
-                r.logged.cells.takeIf { it > 0 }?.let { count(it, "cell tower") },
-                r.logged.esp32.takeIf { it > 0 }?.let { count(it, "ESP32 board") },
-                r.logged.watch.takeIf { it > 0 }?.let { count(it, "watch match", "watch matches") },
-                r.logged.wifi.takeIf { it > 0 }?.let { count(it, "Wi-Fi network") },
-                r.logged.ble.takeIf { it > 0 }?.let { count(it, "Bluetooth device") },
-                r.logged.subGhz.takeIf { it > 0 }?.let { count(it, "sub-GHz hit") },
-            )
-            sb.append(count(r.logged.total, "entity", "entities")).append(". ")
-            sb.append("I have ${joinWords(caught)}. ")
+        val sb = StringBuilder()
+        when {
+            !wantsEntities(style) -> {
+                sb.append("Intel table. ")
+                intelBlock(r, sb)
+            }
+            !wantsIntel(style) -> entityBlock(r, sb, "Entity table. ", "Nothing caught yet. ")
+            else -> {
+                sb.append("Intel and entity tables. ")
+                intelBlock(r, sb)
+                entityBlock(r, sb, "Entity table. ", "Nothing caught yet. ")
+            }
         }
         sb.append(if (r.gps) "GPS fix held. " else "No GPS fix. ")
         sb.append(

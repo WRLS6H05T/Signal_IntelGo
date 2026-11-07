@@ -142,8 +142,9 @@ class WatcherTest {
             ),
             5,
         )
-        // What has been caught, not what the live tab happens to show right now.
-        assertTrue(update.startsWith("Entity table."))
+        // Both tables by default, live first, then what has been caught.
+        assertTrue(update.startsWith("Intel and entity tables."))
+        assertTrue(update.indexOf("Signal intel") < update.indexOf("Entity table."))
         assertTrue(update.contains("163 entities"))
         assertTrue(update.contains("9 satellites"))
         assertTrue(update.contains("2 drones"))
@@ -154,6 +155,39 @@ class WatcherTest {
         assertTrue(update.contains("Bluetooth tracker, weak"))
         // The call and the sign-off are the radio's, not the text's.
         assertFalse(update.contains("Watcher out"))
+    }
+
+    @Test
+    fun `the report style decides which table is read`() {
+        val input = Watcher.ReportInput(
+            wifi = 91,
+            ble = 42,
+            gps = true,
+            logged = Watcher.Logged(wifi = 91, ble = 42),
+        )
+        val intel = Watcher.intelReport(input, Watcher.STYLE_INTEL)
+        assertTrue(intel.contains("Signal intel"))
+        assertFalse(intel.contains("Logged entities"))
+
+        val entities = Watcher.intelReport(input, Watcher.STYLE_ENTITIES)
+        assertTrue(entities.contains("Logged entities"))
+        assertFalse(entities.contains("Signal intel"))
+        assertTrue(entities.contains("91 Wi-Fi networks and 42 Bluetooth devices"))
+
+        val both = Watcher.intelReport(input, Watcher.STYLE_BOTH)
+        assertTrue(both.indexOf("Signal intel") < both.indexOf("Logged entities"))
+        // A settings file written before this choice existed reads as both, not as silence.
+        assertEquals(both, Watcher.intelReport(input, "some future style"))
+
+        // The timed update obeys the same setting, and names the one table it read.
+        val live = Watcher.intelUpdate(input, 5, style = Watcher.STYLE_INTEL)
+        assertTrue(live.startsWith("Intel table."))
+        assertFalse(live.contains("Entity table"))
+
+        val caught = Watcher.intelUpdate(input, 5, style = Watcher.STYLE_ENTITIES)
+        assertTrue(caught.startsWith("Entity table."))
+        assertFalse(caught.contains("Signal intel"))
+        assertTrue(caught.contains("133 entities"))
     }
 
     @Test

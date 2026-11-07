@@ -21,7 +21,7 @@ scale** by how strong the best signal was at each fix.
 | Map | Map, panel collapsed |
 | --- | --- |
 | ![Map with the INTEL panel open](docs/screenshots/signal-intelgo-1.png) | ![Map with the INTEL panel collapsed](docs/screenshots/signal-intelgo-2.png) |
-| Everything at once: 408 satellite element sets loaded, the INTEL chart doubling as layer switches and live counts, and a greyscale basemap that leaves RF colour as the only colour meaning anything. | The panel folds down to its count when the map matters more than the numbers. |
+| Everything at once: 408 satellite element sets loaded, the INTEL box doubling as layer switches, live counts and the logged entity table, and a greyscale basemap that leaves RF colour as the only colour meaning anything. | The panel folds down to its count when the map matters more than the numbers. |
 
 | Globe | Setup |
 | --- | --- |
@@ -184,13 +184,16 @@ Unit tests (orbit math, Remote ID parser, colour scale, exports):
 
 ## Using it
 
-1. **Map** — the INTEL box is a bar chart, one row per category: **SAT**, **AIR**, **UAV**,
-   **MESH**, **CELL**, **WIFI**, **BLE**, **PATH**. Every bar is the same colour and its
-   length is the share of the largest category, so the shape of the sky is legible even when
-   one count is hundreds and another is two; a zero still gets a visible sliver. Tapping a
-   row shows or hides that layer, and the Wi-Fi and BLE rows switch those radios (their
-   tables clear, so the count drops to 0). A switched-off row keeps its bar drawn and dims
-   only its label, so "hidden" never looks like "nothing there". Tap any marker for altitude,
+1. **Map** — the INTEL box holds two tables in one card, drawn the same on the map and on the
+   globe. **LIVE** is one row per category - **SAT**, **AIR**, **UAV**, **MESH**, **CELL**,
+   **WIFI**, **BLE**, **PATH**, **SIG**, **PEER**, **ESP** - read as counts, because the screen
+   is read for "how many" and a number is the honest way to say it when one category is in the
+   hundreds and another is two. Tapping a row shows or hides that layer, and the Wi-Fi and BLE
+   rows switch those radios (their tables clear, so the count drops to 0). A switched-off row
+   keeps its number drawn and dims only its label, so "hidden" never looks like "nothing
+   there". **LOGGED** is the entity table underneath: what the drive has caught, per layer, from
+   the sky and from every Wi-Fi network, Bluetooth device and sub-GHz hit the signal log holds -
+   the same numbers as the Log tab, in the corner already being looked at. Tap any marker for altitude,
    range, RSSI/SNR, squawk, operator ID and so on. The `◎` button re-centres on you;
    `⊙` logs the current sky. Zooming out declutters automatically (see *Zoom behaviour*).
    `MAPS ↗` hands the current view to your phone's own map app (Google Maps and friends, via a
@@ -296,7 +299,7 @@ answered yet reads as an em dash, never as a confident zero, and a bridge with n
 to. The HARDWARE panel shows the live AP and BLE counts, satellite count, HDOP, the board position and
 the board's last console line. What a sweep names - BSSIDs, SSIDs, RSSI, channel and BLE
 advertisers - joins the same Wi-Fi and BLE tables the handset's radios fill, so a board's
-networks count on the map, in the INTEL chart and in the drive record like any other
+networks count on the map, in the INTEL table and in the drive record like any other
 observation, and age out on the same fifteen-second window.
 
 **GPS fallback.** While the phone has no fix of its own, a board reporting four or more
@@ -466,12 +469,15 @@ for I/Q instead of drawing an invented spectrum.
 
 ### Timed intel updates
 
-Setup -> **Intel updates** has a switch and the interval: **3, 5, 7, 10 or 30 minutes**, and the
-switch off for never. Each transmission opens as a call - *Watcher to operator,
-intel update* - and then reads the **entity table** down: what has been caught, per layer -
-satellites, aircraft, drones, mesh nodes, cell towers, ESP32 boards, watch matches, Wi-Fi, Bluetooth
-and sub-GHz hits - plus the GPS fix and whether a drive is running. It then reads the **alert
-sightings**: how many watch hits appeared since the last update
+Setup -> **Intel updates** has a switch, the interval - **3, 5, 7, 10 or 30 minutes**, the switch
+off for never - and **WATCHER READS**: **INTEL**, **ENTITIES** or **BOTH**. **INTEL** is the live
+table: the connected devices, the radios' counts and the fix. **ENTITIES** is the entity table:
+what has been caught, per layer - satellites, aircraft, drones, mesh nodes, cell towers, ESP32
+boards, watch matches, Wi-Fi, Bluetooth and sub-GHz hits. **BOTH** reads them in that order, which
+is the default. The same choice decides what the report asked for by voice reads, so the two never
+describe different tables. Each transmission opens as a call - *Watcher to operator,
+intel update* - then reads the chosen tables, the GPS fix and whether a drive is running. It then
+reads the **alert sightings**: how many watch hits appeared since the last update
 and the three strongest of them, by family and signal strength. It closes on *Watcher out*, like
 every other transmission, with the squelch either side and the tone from the same radio. The
 interval is read again at the end of each wait, so moving it in Setup takes effect without a
