@@ -128,7 +128,7 @@ The continent outline is Natural Earth 110m land, simplified to 0.01° and bundl
 
 | Layer | Source | Notes |
 | --- | --- | --- |
-| Satellites | CelesTrak `gp.php` element sets, propagated **on device** | Groups: stations, visual, weather, gps-ops, science, amateur. Cached 6 h on disk, so the map keeps moving offline. |
+| Satellites | CelesTrak `gp.php` element sets, propagated **on device** | Groups: stations, visual, weather, gps-ops, science, amateur. Cached 6 h on disk, so the map keeps moving offline. The ISS is always plotted, whatever the catalogue sampling does. |
 | Aircraft | `api.adsb.lol` point query around the observer | Free community feed, no API key. Radius configurable 10–250 nm. |
 | Drones | BLE ASTM F3411 **Remote ID** service data (`0xFFFA`) | Parsed locally: Basic ID, Location/Vector, System (operator position). Also flags Meshtastic advertisers. |
 | Mesh | Meshtastic JSON over MQTT (`ssl://mqtt.meshtastic.org:8883`) + BLE advertisers | Off by default; enable in Setup. Broker/topic/credentials are editable. |
@@ -474,8 +474,8 @@ running. It then reads the **alert sightings**: how many watch hits appeared sin
 and the three strongest of them, by family and signal strength. It closes on *Watcher out*, like
 every other transmission, with the squelch either side and the tone from the same radio. The
 interval is read again at the end of each wait, so moving it in Setup takes effect without a
-restart; a phone that is the follower on a peer link stays quiet, because the host holds the
-picture it would be reading.
+restart; on a linked pair the larger screen's phone speaks, so the same report is not read out
+twice.
 
 There are two machine voices, **WOMAN** and **MAN** - the same Watcher, Watch Dogs' ctOS, one
 pitched above the engine's natural voice and one well below it. A phone's text-to-speech engine has
@@ -522,27 +522,34 @@ MAC. A hit marked `name + manufacturer id` is the one to trust. A handset radio 
 bearing, so a hit sits at the phone's own fix with a small fixed offset - "somewhere within
 radio range", not a triangulated position.
 
-## Two phones: host, globe view and scan assignments
+## Two phones, one picture: peer to peer
 
-Setup -> **Two devices** -> **Link role** overrides the screen-size split:
+Setup -> **Two devices** links the phones over BLE. There is no host and no follower, and neither
+phone assigns the other a sweep or rewrites its settings: the screen-size split alone decides that
+the larger screen shows the globe and the smaller one the wardriving view.
 
-| Role | What it does |
+Six things travel, the same way in both directions:
+
+| What | Why |
 | --- | --- |
-| AUTO | the larger screen takes the globe, the smaller one the wardriving view |
-| HOST | shows the globe and pushes its settings to every linked device |
-| GLOBE VIEW | shows the globe and follows the host |
+| Wi-Fi and BLE sweeps | each phone's own radios, merged into both tables at the fix they were heard |
+| the GPS fix | the other phone's position while this one has none |
+| board intel | an ESP32 on one phone's cable is a radio on both |
+| logged entities | satellites, aircraft, drones, mesh nodes and watch hits, drawn cyan as the peer's catch |
+| drives | a drive started on either phone is recorded by both, and a finished one can be fetched |
+| Watcher commands | a command said to either phone is obeyed by both |
 
-The host sends its map style, weak-dot filter, aircraft switch, satellite groups, globe spin
-speed and scan assignments with every snapshot. A globe view applies them when **Follow host
-settings** is on; it never pushes anything back, so the two cannot fight over the same value.
+The **PEER** card names the other phone, its screen role, its Wi-Fi/BLE totals, its GPS and
+cellular state, its board and whether it is recording, and how many entities it has shared. Its
+catches join the map and the globe in the layer they belong to, coloured cyan and labelled
+`shared by the linked phone`, so the card never claims them as this phone's own.
 
-Every radio gets an assigned sweep. In the **PEER** card, and in each board's expanded **ESP32**
-card, a **SCAN** drop-down picks the band; **GPS** is a separate switch because it applies to any
-band. The choices follow what the device actually reports: 5 GHz is only offered on a dual-band
-board (an ESP32-C5), BLE only when the firmware has shown it sweeps BLE, and GPS only when a
-module has produced a fix or an HDOP. A single-band board says so instead of silently offering a
-band it cannot hear. The assignment is shown in the card and in the host's **INTEL** table as
-`peer scan · WI-FI 2.4+5 + GPS`.
+A board's sweep is the one thing still assigned by hand: in each board's expanded **ESP32** card a
+**SCAN** drop-down picks the band, and **GPS** is a separate switch because it applies to any band.
+The choices follow what the board reports: 5 GHz is only offered on dual-band silicon (an
+ESP32-C5), BLE only when the firmware has shown it sweeps BLE, and GPS only when a module has
+produced a fix or an HDOP. A single-band board says so instead of silently offering a band it
+cannot hear.
 
 The **MESH** card now appears only when there is at least one node; with nothing attached the
 space goes back to the INTEL table.
@@ -613,6 +620,10 @@ What the firmware does, on the same wire format the app already decodes:
   every two seconds, with the fix flag only set once the GPS has one;
 - sweeps Wi-Fi every fifteen seconds and BLE every twenty, printing the lines the app's console
   parser reads (address, RSSI, channel, SSID) so a board's networks join the same tables;
+- on an **ESP32-C5** sweeps **both** Wi-Fi bands: the radio is switched to 2.4 GHz and then to
+  5 GHz for each sweep, because `WiFi.scanNetworks()` only scans the band the radio is currently
+  in and the C5 defaults to 2.4 GHz. 5 GHz networks arrive with their own channel numbers (36
+  and up). A C3 has no 5 GHz radio, so it sweeps 2.4 GHz only, as before;
 - reads NMEA on the GPS pin and prints `APs found:`, `BLE devices:`, `GPS: fix 3D, Sats:`,
   `HDOP:`, `Lat:`, `Lon:` and `Alt:` in the shapes `Esp32Console` parses.
 

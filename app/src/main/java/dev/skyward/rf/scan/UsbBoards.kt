@@ -184,6 +184,27 @@ class UsbBoards(private val context: Context) {
     ) {
         val key: String get() = "usb:$deviceId"
 
+        /**
+         * The Wi-Fi silicon, read out of the console or the USB strings.
+         *
+         * A C5 (and a C6) hear 5 GHz where a classic ESP32 and an S3 do not, and the only
+         * place the chip names itself is the boot banner: `ESP.getChipModel()` prints
+         * "ESP32-C5" and the ROM prints `ESP-ROM:esp32c5-...`. [chip] is the USB product
+         * string, which on these boards is the bridge or the JTAG unit, so searching it alone
+         * classified every C5 as single band.
+         */
+        val silicon: String
+            get() {
+                val text = chip + " " + raw + " " + label
+                return when {
+                    Regex("(?i)esp32[- _]?c5\\b|\\bc5[- _]?mini\\b").containsMatchIn(text) -> "ESP32-C5"
+                    Regex("(?i)esp32[- _]?c6\\b").containsMatchIn(text) -> "ESP32-C6"
+                    Regex("(?i)esp32[- _]?s3\\b").containsMatchIn(text) -> "ESP32-S3"
+                    Regex("(?i)esp32[- _]?c3\\b").containsMatchIn(text) -> "ESP32-C3"
+                    else -> ""
+                }
+            }
+
         val familyLabel: String
             get() = when (family) {
                 BoardFamily.MARAUDER -> "ESP32 Marauder"

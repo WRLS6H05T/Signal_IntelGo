@@ -126,6 +126,8 @@ data class MapMarker(
     val watch: WatchKind? = null,
     /** A MeshCore repeater: infrastructure gets its own glyph, not another dish. */
     val meshRepeater: Boolean = false,
+    /** Caught by the linked phone rather than this one: drawn cyan and owned by neither sky. */
+    val peer: Boolean = false,
 )
 
 /**
@@ -279,6 +281,8 @@ private fun isIss(m: MapMarker): Boolean = m.station
 
 private fun markerColor(m: MapMarker, satEntity: Color = Sky.logged): Color = when {
     isIss(m) -> IssGold
+    // The peer's catch is not this phone's logged purple: it is someone else's intel.
+    m.peer -> Sky.cyan
     m.birds3 && m.logged -> BirdsGold
     m.logged && m.layer == Layer.SATELLITE -> satEntity
     m.logged -> Sky.logged
@@ -297,6 +301,25 @@ private fun markerColor(m: MapMarker, satEntity: Color = Sky.logged): Color = wh
     }
     m.layer == Layer.MESH && m.meshRepeater -> Sky.meshCore
     else -> Sky.mesh
+}
+
+/**
+ * The satellites the map actually draws.
+ *
+ * The catalogue is sampled with an even stride, so a shell of thousands of objects does not cost
+ * a frame and every orbit is still represented. The station and the BIRDS-3 set are outside that
+ * arithmetic: they are named objects rather than a sample of a shell, and the stride used to drop
+ * the ISS whenever the catalogue was large enough to need one.
+ */
+internal fun sampleSats(sats: List<SatView>, maxSats: Int): List<SatView> {
+    val named = sats.filter {
+        it.noradId == SatTracker.ISS_NORAD || it.noradId in SatTracker.BIRDS3_IDS
+    }
+    val rest = sats.filterNot {
+        it.noradId == SatTracker.ISS_NORAD || it.noradId in SatTracker.BIRDS3_IDS
+    }
+    val stride = if (rest.size > maxSats) (rest.size + maxSats - 1) / maxSats else 1
+    return named + rest.filterIndexed { index, _ -> index % stride == 0 }.take(maxSats)
 }
 
 fun buildMarkers(
@@ -319,6 +342,8 @@ fun buildMarkers(
      * to see the shell, and the table still holds every one of them.
      */
     maxSats: Int = 1_500,
+    /** The other phone's logged entities: the intel half of the link. */
+    peerEntities: List<dev.skyward.rf.peer.PeerProtocol.Entity> = emptyList(),
 ): List<MapMarker> {
     val out = ArrayList<MapMarker>(sky.sats.size + sky.aircraft.size + sky.drones.size + sky.mesh.size)
     // Satellites are the one layer the score must not filter. Their score is elevation above
@@ -326,12 +351,35 @@ fun buildMarkers(
     // showed a knot of icons at the GPS pin instead of a sky. Truncating from the top of the
     // list is the same knot again, because the list arrives elevation-sorted: the cap is taken
     // as an even stride across the catalogue instead, which keeps every orbit and inclination.
-    val plottedSats: List<SatView> = if (showSats) {
-        val sats = sky.sats
-        val stride = if (sats.size > maxSats) (sats.size + maxSats - 1) / maxSats else 1
-        sats.filterIndexed { index, _ -> index % stride == 0 }.take(maxSats)
-    } else {
-        emptyList()
+    //
+    // The station and the BIRDS-3 set are outside that arithmetic. They are named objects, not
+    // a sample of a shell, and the stride was dropping them: with the Starlink catalogues on,
+    // NORAD 25544 is one index in ten thousand, so whether it survived depended on the stride.
+    // The ISS is the one object everyone looks for, so it is always plotted.
+    val plottedSats: List<SatView> = if (showSats) sampleSats(sky.sats, maxSats) else emptyList()
+    // What the other phone caught, where it caught it. Drawn in the layer the entity belongs
+    // to, so a friend's aircraft is a plane and their satellite is a satellite, but coloured
+    // cyan and labelled as theirs: it is not this phone's catch.
+    for (e in peerEntities) {
+        val layer = runCatching { Layer.valueOf(e.layer) }.getOrNull() ?: continue
+        out.add(
+            MapMarker(
+                key = "PEER:" + e.key,
+                layer = layer,
+                lat = e.lat,
+                lon = e.lon,
+                title = e.name.ifBlank { e.id },
+                subtitle = "shared by the linked phone",
+                score = 0,
+                logged = false,
+                peer = true,
+                lines = listOf(
+                    "Layer" to layer.name.lowercase(),
+                    "Caught by" to "the linked phone",
+                    "Id" to e.id,
+                ),
+            ),
+        )
     }
     plottedSats.forEach { s: SatView ->
         out.add(
@@ -595,9 +643,13 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
         }
     }
 
+    // The other phone's intel, read before the marker list is built: the markers are a
+    // remembered value keyed on it, so a new share has to be part of the key.
+    val peerIntel by c.peerEntities.collectAsState()
+
     val markers = remember(
         sky, showSats, showAir, showDrones, showMesh, showCells, showEsp32, showWatch,
-        settings.aircraftEnabled, settings.dropWeakDots, settings.distanceUnit,
+        settings.aircraftEnabled, settings.dropWeakDots, settings.distanceUnit, peerIntel,
     ) {
         buildMarkers(
             sky = sky,
@@ -610,6 +662,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
             showWatch = showWatch,
             distanceUnit = settings.distanceUnit,
             minScore = if (settings.dropWeakDots) 20 else 0,
+            peerEntities = peerIntel,
         )
     }
 
@@ -693,11 +746,6 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
         }
         var espOpen by remember { mutableStateOf(false) }
         var meshOpen by remember { mutableStateOf(false) }
-        // The sweep assigned to the other phone. The host owns this value; the status card
-        // and the INTEL table both read it, so they cannot disagree.
-        val peerAssign = settings.scanAssign[ScanPlan.PEER_KEY].orEmpty()
-            .ifBlank { ScanPlan.phoneDefault() }
-
         // ---- status stack: top left, PEER then ESP32 then MESH ----
         // One column, so the right edge stays free for the map's own buttons and the eye can
         // read down a single list of what is attached. INTEL is drawn after this, which is why
@@ -754,17 +802,12 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                     if (peer.peerRecording) {
                         Text("peer recording", color = Sky.cyan, fontSize = 9.sp, maxLines = 1)
                     }
-                    Spacer(Modifier.height(4.dp))
-                    // What this phone has assigned the other one to sweep.
-                    ScanLine(
-                        code = peerAssign,
-                        options = ScanPlan.phoneOptions(ble = true),
-                        gpsAvailable = peer.peerGps,
-                        onPick = { code ->
-                            c.settingsStore.update {
-                                it.copy(scanAssign = it.scanAssign + (ScanPlan.PEER_KEY to code))
-                            }
-                        },
+                    // The intel the other phone has shared, which is the point of the link.
+                    Text(
+                        "intel " + peer.peerEntityTotal + " entities",
+                        color = Sky.cyan,
+                        fontSize = 9.sp,
+                        maxLines = 1,
                     )
                 }
             }
@@ -976,8 +1019,8 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 // The peer's own findings, posted into this table by name rather than merely
                 // counted, so the host shows what the other radio is hearing right now.
                 if (peer.connected) {
-                    // What the other phone's radios heard, by name and with its own RSSI, so the
-                    // host reads the link's findings rather than just a count of them.
+                    // What the other phone's radios heard, by name and with its own RSSI, so
+                    // this phone reads the link's findings rather than just a count of them.
                     c.rf.peerRows(limit = 4).forEach { o ->
                         Text(
                             "\u203a " + (if (o.kind == RfKind.WIFI) "wifi " else "ble  ") +
@@ -988,11 +1031,9 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                         )
                     }
                 }
-                // The host's table carries the assignment too, so the whole picture is
-                // readable without opening the peer card.
+                // The shared intel, so the whole picture is readable without opening the card.
                 Text(
-                    "peer scan · " + ScanPlan.label(peerAssign) +
-                        (if (peer.peerScan.isNotBlank()) " · reports " + ScanPlan.label(peer.peerScan) else ""),
+                    "peer intel · " + peer.peerEntityTotal + " entities",
                     color = Sky.textDim,
                     fontSize = 9.sp,
                     maxLines = 1,

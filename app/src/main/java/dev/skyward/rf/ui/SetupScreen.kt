@@ -777,9 +777,10 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Share scans and GPS over BLE", color = Sky.text, fontSize = 13.sp)
+                        Text("Share scans, intel and drives over BLE", color = Sky.text, fontSize = 13.sp)
                         Text(
-                            "Both phones keep wardriving on their own. The larger screen takes the globe, the smaller one the wardriving view.",
+                            "Two of your own devices, or a friend's, peer to peer: each keeps " +
+                                "wardriving on its own and both end up with the other's findings.",
                             color = Sky.textDim,
                             fontSize = 10.sp,
                         )
@@ -823,62 +824,21 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                         fontSize = 10.sp,
                     )
                     Spacer(Modifier.height(10.dp))
-                    Text("Link role", style = SkywardThemeLabel(), color = Sky.textDim)
-                    Spacer(Modifier.height(4.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        RoleChip("AUTO", PeerProtocol.MODE_AUTO, settings) { c.settingsStore.update(it) }
-                        RoleChip("HOST", PeerProtocol.MODE_HOST, settings) { c.settingsStore.update(it) }
-                        RoleChip("GLOBE VIEW", PeerProtocol.MODE_GLOBE, settings) { c.settingsStore.update(it) }
-                    }
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        when (settings.peerRoleMode) {
-                            PeerProtocol.MODE_HOST ->
-                                "This phone shows the globe and pushes its scan, map and layer " +
-                                    "settings to every linked device."
-                            PeerProtocol.MODE_GLOBE ->
-                                "This phone shows the globe and takes its settings from the " +
-                                    "host. Assigning a role here overrides the screen-size split."
-                            else ->
-                                "Auto: the larger screen takes the globe, the smaller one the " +
-                                    "wardriving view."
-                        },
-                        color = Sky.textDim,
-                        fontSize = 10.sp,
-                    )
-                    if (settings.peerRoleMode != PeerProtocol.MODE_HOST) {
-                        Spacer(Modifier.height(8.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text("Follow host settings", color = Sky.text, fontSize = 13.sp)
-                                Text(
-                                    "Take the host's map, clock, units and scan assignments as " +
-                                        "it changes them; a value you change here stays until " +
-                                        "the host changes something again",
-                                    color = Sky.textDim,
-                                    fontSize = 10.sp,
-                                )
-                            }
-                            Switch(
-                                checked = settings.followHost,
-                                onCheckedChange = { on -> c.settingsStore.update { it.copy(followHost = on) } },
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(6.dp))
                     Text(
                         "A drive is shared: start one here and the other phone starts its own " +
-                            "for the same stretch of road. The host holds the intel and controls " +
-                            "the Watcher: its INTEL tab carries what the peer posts, and a command " +
-                            "said to the host is obeyed by both phones.",
+                            "for the same stretch of road. Each phone shares what it has caught " +
+                            "- satellites, aircraft, drones, mesh nodes and watch hits - so both " +
+                            "maps carry both skies, and a Watcher command said to either phone " +
+                            "is obeyed by both.",
                         color = Sky.textDim,
                         fontSize = 10.sp,
                     )
                     Text(
-                        if (c.isHostPhone()) {
-                            "This phone is the host: the peer's findings are posted in the INTEL tab"
+                        if (peer.connected) {
+                            "Sharing intel with " + peer.peerName.ifBlank { "the other phone" } +
+                                ": " + peer.peerEntityTotal + " entities from it"
                         } else {
-                            "This phone posts its findings to the host's INTEL tab"
+                            "Nothing shared yet: link the phones to exchange intel"
                         },
                         color = Sky.cyan,
                         fontSize = 10.sp,
@@ -1167,23 +1127,6 @@ private fun Esp32Config(c: Container, settings: Settings) {
             fontSize = 9.sp,
         )
     }
-}
-
-@Composable
-private fun RoleChip(label: String, value: String, settings: Settings, onChange: ((Settings) -> Settings) -> Unit) {
-    val selected = settings.peerRoleMode == value
-    FilterChip(
-        selected = selected,
-        onClick = { onChange { it.copy(peerRoleMode = value) } },
-        label = { Text(label, fontSize = 9.sp, fontFamily = FontFamily.Monospace) },
-        shape = RoundedCornerShape(9.dp),
-        colors = FilterChipDefaults.filterChipColors(
-            containerColor = Sky.surfaceHigh,
-            labelColor = Sky.textDim,
-            selectedContainerColor = Sky.cyan.copy(alpha = 0.22f),
-            selectedLabelColor = Sky.cyan,
-        ),
-    )
 }
 
 @Composable

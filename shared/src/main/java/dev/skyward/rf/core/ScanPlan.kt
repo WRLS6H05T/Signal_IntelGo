@@ -8,12 +8,10 @@ package dev.skyward.rf.core
  * phone is dual-band by default. The code is one small string - band, plus a `+gps` suffix -
  * so it survives the BLE link, the settings file and a display label without a dozen enums.
  *
- * The host of a peer link assigns these; the device shows what it was told to do.
+ * These belong to a board on the cable, and to nothing else: a peer link does not assign work
+ * to another phone - both ends sweep with their own radios and share what they find.
  */
 object ScanPlan {
-
-    /** Assignment key for the other phone. Boards use their own id. */
-    const val PEER_KEY = "peer"
 
     const val W24 = "w24"
     const val DUAL = "dual"
@@ -62,9 +60,4 @@ object ScanPlan {
         ble -> BLE
         else -> W24
     }
-
-    /** A phone's Wi-Fi is dual-band; the peer's own radios decide what is offered to it. */
-    fun phoneOptions(ble: Boolean): List<String> = bandOptions(dualBand = true, ble = ble)
-
-    fun phoneDefault(): String = DUAL
 }

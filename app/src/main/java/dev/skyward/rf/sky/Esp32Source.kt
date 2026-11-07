@@ -200,6 +200,9 @@ class Esp32Source(
                 name = b.label,
                 board = b.familyLabel,
                 chip = b.chip,
+                // The silicon, not the USB product string: a C5 is dual band and must be
+                // offered 5 GHz in its card.
+                silicon = b.silicon,
                 firmware = b.version.ifBlank { existing?.firmware.orEmpty() },
                 // The console poll is the only position source a wired board has. Whatever it
                 // last reported is kept until it reports a newer fix.

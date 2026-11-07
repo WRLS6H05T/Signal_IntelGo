@@ -73,13 +73,9 @@ fun AppRoot(c: Container) {
     // every message, so after that it leaves the user's own tab choice alone.
     val peer by c.peer.state.collectAsState()
     val settings by c.settingsStore.state.collectAsState()
-    LaunchedEffect(peer.connected, peer.role, settings.peerRoleMode) {
-        // A hand-picked globe view or host always shows the map; "auto" keeps the screen-size
-        // split, and an unlinked phone is left on whichever tab the user chose.
-        if (PeerProtocol.isGlobeMode(settings.peerRoleMode)) {
-            tab = 0
-            return@LaunchedEffect
-        }
+    LaunchedEffect(peer.connected, peer.role) {
+        // The screen-size split, and nothing else: the link has no hand-picked role to override
+        // it, and an unlinked phone is left on whichever tab the user chose.
         if (!peer.connected) return@LaunchedEffect
         when (peer.role) {
             PeerProtocol.DISPLAY -> tab = 0

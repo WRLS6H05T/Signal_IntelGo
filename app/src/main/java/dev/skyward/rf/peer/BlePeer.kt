@@ -67,9 +67,9 @@ class BlePeer(private val context: Context) {
         /**
          * Items per radio in one snapshot, and per board.
          *
-         * Sized against [MAX_MESSAGE] rather than against the tables: a host sends its whole
-         * merged table, and a follower sends its own sweep plus its board's, and both have to
-         * fit one message or the sweep is dropped whole. The totals carry the full size.
+         * Sized against [MAX_MESSAGE] rather than against the tables: each phone sends its own
+         * sweep plus its own board's intel, and they have to fit one message or the sweep is
+         * dropped whole. The totals carry the full size.
          */
         private const val MAX_ITEMS = 20
         private const val NAME_CHARS = 20
@@ -83,6 +83,9 @@ class BlePeer(private val context: Context) {
 
         /** Board intel is the smaller half of a snapshot: the cable holds one board, not a city. */
         private const val BOARD_ITEMS = 10
+
+        /** Logged entities per snapshot: a sample of the table, newest first. */
+        private const val ENTITY_ITEMS = 8
     }
 
     /** What this device offers the other one. */
@@ -113,9 +116,9 @@ class BlePeer(private val context: Context) {
         val role: String = "",
         /** What the other device is showing, from its own side of the size comparison. */
         val peerRole: String = "",
-        /** The role the other phone was given by hand, and the sweep it was assigned. */
-        val peerMode: String = "",
-        val peerScan: String = "",
+        /** How many entities the other phone has logged, and how many arrived last time. */
+        val peerEntities: Int = 0,
+        val peerEntityTotal: Int = 0,
         val peerWifiTotal: Int = 0,
         val peerBleTotal: Int = 0,
         /** The other phone's own answer to whether it is using GPS and cellular. */
@@ -178,21 +181,13 @@ class BlePeer(private val context: Context) {
     @Volatile
     var recordingProvider: (() -> Pair<Boolean, String>)? = null
 
-    /** The role chosen by hand on this phone: auto, host or globe. */
+    /** The entities this phone has logged, newest first: the intel half of the link. */
     @Volatile
-    var modeProvider: (() -> String)? = null
+    var entityProvider: (() -> List<PeerProtocol.Entity>)? = null
 
-    /** What this phone has been assigned to sweep, as a ScanPlan code. */
+    /** The other phone's logged entities, as they arrive. */
     @Volatile
-    var scanProvider: (() -> String)? = null
-
-    /** Host only: the settings blob pushed with every snapshot. */
-    @Volatile
-    var settingsProvider: (() -> PeerProtocol.HostSettings?)? = null
-
-    /** A host's settings arrived on a follower. */
-    @Volatile
-    var onHostSettings: ((PeerProtocol.HostSettings) -> Unit)? = null
+    var onPeerEntities: ((List<PeerProtocol.Entity>) -> Unit)? = null
 
     @Volatile
     private var running = false
@@ -202,10 +197,6 @@ class BlePeer(private val context: Context) {
 
     @Volatile
     private var peerDiagIn = 0f
-
-    /** The other phone's hand-picked role, as last reported. */
-    @Volatile
-    private var peerMode = ""
 
     /** The other phone's id, as last reported on the link. */
     @Volatile
@@ -263,23 +254,19 @@ class BlePeer(private val context: Context) {
         return hypot(dm.widthPixels.toFloat(), dm.heightPixels.toFloat()) / dm.densityDpi
     }
 
-    fun role(): String = PeerProtocol.roleForMode(
-        modeProvider?.invoke().orEmpty(),
-        diagonalInches(),
-        peerDiagIn,
-    )
+    fun role(): String = PeerProtocol.roleFor(diagonalInches(), peerDiagIn)
 
     /** The other phone's screen, as it sees itself: the roles are complementary. */
-    fun peerRole(): String = PeerProtocol.roleForMode(peerMode, peerDiagIn, diagonalInches())
+    fun peerRole(): String = PeerProtocol.roleFor(peerDiagIn, diagonalInches())
 
     fun isRunning(): Boolean = running
 
     /**
      * Whether this phone sorts first in the link.
      *
-     * The only thing that can break a tie in the automatic role split: two phones of the same
-     * size get no role from the size comparison, and the pair still needs one host. The smaller
-     * id wins, which is the same rule the link already uses to decide which phone dials.
+     * The only thing that can break a tie in the screen split: two phones of the same size get
+     * no role from the size comparison, and the pair still needs one of them to speak. The
+     * smaller id wins, which is the same rule the link already uses to decide which phone dials.
      */
     fun firstOnLink(): Boolean = peerId.isNotBlank() && id < peerId
 
@@ -452,8 +439,6 @@ class BlePeer(private val context: Context) {
                     peerWifiTotal = 0,
                     peerBleTotal = 0,
                     peerRole = "",
-                    peerMode = "",
-                    peerScan = "",
                     peerGps = false,
                     peerCell = false,
                     detail = if (running) "waiting for the other device" else "off",
@@ -559,8 +544,6 @@ class BlePeer(private val context: Context) {
                     peerWifiTotal = 0,
                     peerBleTotal = 0,
                     peerRole = "",
-                    peerMode = "",
-                    peerScan = "",
                     peerGps = false,
                     peerCell = false,
                     detail = if (running) "searching" else "off",
@@ -614,7 +597,6 @@ class BlePeer(private val context: Context) {
         val decoded = PeerProtocol.decode(String(message, Charsets.UTF_8)) ?: return
         received++
         if (decoded.diagIn > 0f) peerDiagIn = decoded.diagIn
-        if (decoded.mode.isNotBlank()) peerMode = decoded.mode
         if (decoded.id.isNotBlank()) peerId = decoded.id
         // Local copies: the message type is compiled in :shared now, and a smart cast does not
         // cross a module boundary, so the null check has to be on the same values it guards.
@@ -627,8 +609,8 @@ class BlePeer(private val context: Context) {
             role = role(),
             received = received,
             peerRole = peerRole(),
-            peerMode = peerMode,
-            peerScan = decoded.scan,
+            peerEntities = decoded.entities.size,
+            peerEntityTotal = if (decoded.entityTotal > 0) decoded.entityTotal else decoded.entities.size,
             peerWifi = decoded.wifi.size,
             peerBle = decoded.ble.size,
             // The totals are what the other phone actually holds, not just what got sent.
@@ -649,12 +631,9 @@ class BlePeer(private val context: Context) {
         if (decoded.boardWifi.isNotEmpty() || decoded.boardBle.isNotEmpty()) {
             onPeerBoard?.invoke(decoded.boardWifi, decoded.boardBle)
         }
+        if (decoded.entities.isNotEmpty()) onPeerEntities?.invoke(decoded.entities)
         if (decoded.wantList) sendLogList()
         if (decoded.want.isNotBlank()) startSending(decoded.want)
-        // Only a host's blob is applied; a follower cannot quietly rewrite the other phone.
-        if (decoded.mode == PeerProtocol.MODE_HOST) {
-            decoded.hostSettings?.let { onHostSettings?.invoke(it) }
-        }
         decoded.part?.let { takePart(it) }
         if (decoded.wifi.isNotEmpty() || decoded.ble.isNotEmpty() || fix != null) {
             onRemote?.invoke(decoded.wifi, decoded.ble, fix)
@@ -696,6 +675,7 @@ class BlePeer(private val context: Context) {
         if (synchronized(lock) { outParts.isNotEmpty() }) return
         val snapshot = snapshotProvider?.invoke() ?: return
         val drive = recordingProvider?.invoke()
+        val intel = entityProvider?.invoke().orEmpty()
         val message = PeerProtocol.Message(
             kind = PeerProtocol.KIND_SKY,
             id = id,
@@ -719,13 +699,10 @@ class BlePeer(private val context: Context) {
                 .map { it.copy(name = it.name.take(NAME_CHARS)) },
             boardWifiTotal = if (snapshot.boardWifiTotal > 0) snapshot.boardWifiTotal else snapshot.boardWifi.size,
             boardBleTotal = if (snapshot.boardBleTotal > 0) snapshot.boardBleTotal else snapshot.boardBle.size,
-            mode = modeProvider?.invoke().orEmpty(),
-            scan = scanProvider?.invoke().orEmpty(),
-            hostSettings = if (modeProvider?.invoke() == PeerProtocol.MODE_HOST) {
-                settingsProvider?.invoke()
-            } else {
-                null
-            },
+            // The intel, not the sweep: the entities this phone has caught, newest first. The
+            // total carries the size of the whole table so the card can show both numbers.
+            entities = intel.take(ENTITY_ITEMS).map { it.copy(name = it.name.take(NAME_CHARS)) },
+            entityTotal = intel.size,
         )
         val bytes = PeerProtocol.encode(message).toByteArray(Charsets.UTF_8)
         // Too big for the pipe means too big: dropping it whole is honest, truncating it would

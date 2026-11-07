@@ -47,7 +47,7 @@ class PeerProtocolTest {
 
     @Test
     fun `another protocol version is refused rather than misread`() {
-        val json = PeerProtocol.encode(sample).replace("\"v\":1", "\"v\":2")
+        val json = PeerProtocol.encode(sample).replace("\"v\":2", "\"v\":1")
         assertNull(PeerProtocol.decode(json))
     }
 
@@ -115,30 +115,34 @@ class PeerProtocolTest {
     }
 
     @Test
-    fun `host settings carry their revision and the shared dashboard`() {
-        val hs = PeerProtocol.HostSettings(
-            rev = 3,
-            clockSeconds = false,
-            distanceUnit = "mi",
-            tempUnit = "f",
-            showLiveTime = false,
-        )
+    fun `logged entities travel so the other phone holds the same intel`() {
         val back = PeerProtocol.decode(
-            PeerProtocol.encode(sample.copy(mode = PeerProtocol.MODE_HOST, hostSettings = hs)),
+            PeerProtocol.encode(
+                sample.copy(
+                    entities = listOf(
+                        PeerProtocol.Entity("SATELLITE", "25544", "ISS (ZARYA)", 51.6, -0.12),
+                        PeerProtocol.Entity("AIRCRAFT", "3c6444", "DLH441", 48.1, 11.5),
+                    ),
+                    entityTotal = 240,
+                ),
+            ),
         )
         assertNotNull(back)
-        assertEquals(3, back!!.hostSettings!!.rev)
-        assertFalse(back.hostSettings!!.clockSeconds)
-        assertFalse(back.hostSettings!!.showLiveTime)
-        assertEquals("mi", back.hostSettings!!.distanceUnit)
-        assertEquals("f", back.hostSettings!!.tempUnit)
+        assertEquals(2, back!!.entities.size)
+        assertEquals("SATELLITE:25544", back.entities[0].key)
+        assertEquals(51.6, back.entities[0].lat, 0.0001)
+        assertEquals("DLH441", back.entities[1].name)
+        assertEquals(240, back.entityTotal)
     }
 
     @Test
-    fun `a host blob is applied once per revision`() {
-        assertTrue(PeerProtocol.shouldApplyHost(rev = 4, applied = 3))
-        assertFalse("a repeated snapshot must not undo a local change", PeerProtocol.shouldApplyHost(4, 4))
-        assertFalse(PeerProtocol.shouldApplyHost(3, 4))
+    fun `the link carries no host role and no scan assignment`() {
+        val json = PeerProtocol.encode(
+            sample.copy(entities = listOf(PeerProtocol.Entity("MESH", "!ab12", "Roof", 51.0, -0.1))),
+        )
+        assertFalse("no host blob" , json.contains("hostSettings"))
+        assertFalse("no hand-picked role", json.contains("\"mode\""))
+        assertFalse("no assigned sweep", json.contains("\"scan\""))
     }
 
     @Test

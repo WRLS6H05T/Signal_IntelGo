@@ -130,6 +130,19 @@ class Container(context: Context) {
     /** The drives the other phone says it has, as last offered over the link. */
     val peerLogs = MutableStateFlow<List<PeerProtocol.LogInfo>>(emptyList())
 
+    /**
+     * What the other phone has caught, merged by layer and id.
+     *
+     * Bounded: a friend's table can be thousands of entities, and a map does not need every
+     * one of them to show that the link is carrying intel. Newest last, so the map draws the
+     * most recently shared over the older ones when two land on the same place.
+     */
+    val peerEntities = MutableStateFlow<List<PeerProtocol.Entity>>(emptyList())
+
+    /** Entities offered in one snapshot, and how many the merge keeps before dropping the old. */
+    private val ENTITY_SHARE = 8
+    private val ENTITY_KEEP = 400
+
     /** Uploads, lists and searches the user's own WiGLE account. */
     val wigle = WigleApi(http)
 
@@ -211,16 +224,6 @@ class Container(context: Context) {
     @Volatile
     private var running = false
 
-    /**
-     * The host's settings revision, and the follower's memory of what it has taken.
-     *
-     * A revision goes up only when one of the shared settings actually changes, so the blob the
-     * host repeats with every snapshot can be told apart from a fresh decision.
-     */
-    private val hostRev = java.util.concurrent.atomic.AtomicInteger(1)
-    private var lastHostSig: String? = null
-    private var lastHostRev = 0
-
     /** The drive state the other phone last reported, so a repeat is not a new instruction. */
     @Volatile
     private var lastPeerRecording = false
@@ -238,13 +241,11 @@ class Container(context: Context) {
             val snap = rf.snapshot(limit = 80)
             val totals = rf.totals()
             val boards = rf.boardIntel()
-            // The host holds the one table and sends back everything it has, including what
-            // the peer posted, so the follower sees the same road. A follower sends only what
-            // its own radios heard: echoing the host's rows back would bounce the same devices
-            // around the link for ever.
-            val host = isHostPhone()
-            val wifiRows = if (host) snap.wifi else snap.wifi.filter { it.source == "local" }
-            val bleRows = if (host) snap.ble else snap.ble.filter { it.source == "local" }
+            // Each side sends only what its own radios heard. Both ends keep the same merged
+            // table, so echoing back the rows a phone received would bounce the same devices
+            // around the link for ever and count them twice on both.
+            val wifiRows = snap.wifi.filter { it.source == "local" }
+            val bleRows = snap.ble.filter { it.source == "local" }
             BlePeer.Snapshot(
                 fix = phoneFix ?: _observer.value,
                 sats = 0,
@@ -257,13 +258,10 @@ class Container(context: Context) {
                 gpsUsed = (phoneFix ?: _observer.value) != null,
                 // Cellular counts as in use once towers are actually being heard.
                 cellUsed = cell.count() > 0,
-                // A follower's cable intel, which the host has no way of hearing for itself.
-                // The host's own board rows already travel in the merged table above, so they
-                // are sent once and only their totals are repeated here.
-                boardWifi = if (host) emptyList()
-                else boards.wifi.map { PeerProtocol.Ap(it.id, it.name, it.rssi, it.channel) },
-                boardBle = if (host) emptyList()
-                else boards.ble.map { PeerProtocol.Device(it.id, it.name, it.rssi) },
+                // This phone's own boards, always: the cable is the one radio the other phone
+                // cannot hear for itself.
+                boardWifi = boards.wifi.map { PeerProtocol.Ap(it.id, it.name, it.rssi, it.channel) },
+                boardBle = boards.ble.map { PeerProtocol.Device(it.id, it.name, it.rssi) },
                 boardWifiTotal = boards.wifiTotal,
                 boardBleTotal = boards.bleTotal,
             )
@@ -285,6 +283,38 @@ class Container(context: Context) {
             }
         }
         peer.logSource = { id -> wardrive.sessionJson(id) }
+
+        // The intel itself, not just the live sweep: what this phone has caught goes over the
+        // link, so a friend's drive fills in a sky this one could not hear. Newest first, and
+        // only what has a real position - an entity with no fix is not intel.
+        peer.entityProvider = {
+            logged.all()
+                .sortedByDescending { it.lastSeen }
+                .take(ENTITY_SHARE)
+                .mapNotNull { e ->
+                    if (!e.lat.isFinite() || !e.lon.isFinite() || e.name.isBlank()) {
+                        null
+                    } else {
+                        PeerProtocol.Entity(
+                            layer = e.layer.name,
+                            id = e.key.substringAfter(':'),
+                            name = e.name,
+                            lat = e.lat,
+                            lon = e.lon,
+                        )
+                    }
+                }
+        }
+        peer.onPeerEntities = { incoming ->
+            val merged = LinkedHashMap<String, PeerProtocol.Entity>()
+            for (e in peerEntities.value) merged[e.key] = e
+            for (e in incoming) {
+                if (!e.lat.isFinite() || !e.lon.isFinite() || e.id.isBlank()) continue
+                merged[e.key] = e
+            }
+            val kept = merged.values.toList()
+            peerEntities.value = if (kept.size > ENTITY_KEEP) kept.takeLast(ENTITY_KEEP) else kept
+        }
         peer.onPeerLogs = { list -> peerLogs.value = list }
         peer.onPeerLog = { json, from -> wardrive.importSession(json, from) }
 
@@ -321,58 +351,6 @@ class Container(context: Context) {
         peer.onPeerVoice = { name ->
             runCatching { Watcher.Command.valueOf(name) }.getOrNull()?.let { cmd ->
                 runCatching { handleVoice(cmd, fromPeer = true) }
-            }
-        }
-
-        // The hand-picked role, this phone's assigned sweep, and - on a host - the settings
-        // every linked device should be using.
-        peer.modeProvider = { settingsStore.current.peerRoleMode }
-        peer.scanProvider = { settingsStore.current.scanAssign[dev.skyward.rf.core.ScanPlan.PEER_KEY].orEmpty() }
-        peer.settingsProvider = {
-            val cfg = settingsStore.current
-            if (cfg.peerRoleMode != PeerProtocol.MODE_HOST) {
-                null
-            } else {
-                PeerProtocol.HostSettings(
-                    rev = hostRev.get(),
-                    tileSource = cfg.tileSource,
-                    dropWeakDots = cfg.dropWeakDots,
-                    aircraftEnabled = cfg.aircraftEnabled,
-                    satGroups = cfg.satGroups,
-                    globeSpin = cfg.globeSpin.coerceIn(0, 2),
-                    scanAssign = cfg.scanAssign,
-                    showLiveTime = cfg.showLiveTime,
-                    clockSeconds = cfg.clockSeconds,
-                    distanceUnit = cfg.distanceUnit,
-                    tempUnit = cfg.tempUnit,
-                )
-            }
-        }
-        // Every phone that is not the host follows it, because the settings that matter while
-        // driving - the map, the clock, the units, what each radio sweeps - are one decision,
-        // not two. A host is never rewritten by the phones it drives, and taking a blob only
-        // once per revision is what lets a change made here stick: the host repeats itself every
-        // five seconds, and only a fresh revision from the host wins the value back.
-        peer.onHostSettings = { hs ->
-            val cfg = settingsStore.current
-            val follows = cfg.peerRoleMode != PeerProtocol.MODE_HOST && cfg.followHost
-            if (follows && PeerProtocol.shouldApplyHost(hs.rev, lastHostRev)) {
-                lastHostRev = hs.rev
-                val next = cfg.copy(
-                    tileSource = hs.tileSource,
-                    dropWeakDots = hs.dropWeakDots,
-                    aircraftEnabled = hs.aircraftEnabled,
-                    satGroups = if (hs.satGroups.isEmpty()) cfg.satGroups else hs.satGroups,
-                    globeSpin = hs.globeSpin.coerceIn(0, 2),
-                    scanAssign = cfg.scanAssign + hs.scanAssign,
-                    showLiveTime = hs.showLiveTime,
-                    clockSeconds = hs.clockSeconds,
-                    distanceUnit = hs.distanceUnit,
-                    tempUnit = hs.tempUnit,
-                )
-                // The host repeats its blob with every snapshot; writing the file on each one
-                // would be a disk write every five seconds for a picture that has not moved.
-                if (next != cfg) settingsStore.update { next }
             }
         }
 
@@ -455,33 +433,6 @@ class Container(context: Context) {
             }
         }
 
-        // The host's revision, bumped only when a shared setting actually moves. A follower
-        // reads it to tell "the host just decided this" from "the host is repeating itself".
-        scope.launch {
-            settingsStore.state.collect { cfg ->
-                if (cfg.peerRoleMode != PeerProtocol.MODE_HOST) {
-                    lastHostSig = null
-                    return@collect
-                }
-                val sig = listOf(
-                    cfg.tileSource,
-                    cfg.dropWeakDots,
-                    cfg.aircraftEnabled,
-                    cfg.satGroups.joinToString(","),
-                    cfg.globeSpin,
-                    cfg.scanAssign.toSortedMap().toString(),
-                    cfg.showLiveTime,
-                    cfg.clockSeconds,
-                    cfg.distanceUnit,
-                    cfg.tempUnit,
-                ).joinToString("|")
-                if (sig != lastHostSig) {
-                    lastHostSig = sig
-                    hostRev.incrementAndGet()
-                }
-            }
-        }
-
         // Watch alerts in the glitched voice: every family alike - Flock, Axon, TASER, patrol-car
         // routers, radio access points and trackers - one per device per five minutes and never
         // two inside eight seconds, so a busy street does not turn the drive into a monologue.
@@ -507,18 +458,15 @@ class Container(context: Context) {
     }
 
     /**
-     * Whether this phone is the host of the pair.
+     * Whether this phone speaks the Watcher's alerts for the pair.
      *
-     * The host holds the intel and drives the Watcher. It is the phone set to host, or - in the
-     * automatic split - the larger screen, which is the device the roles already give the globe.
-     * A phone set to globe view is the follower; an unlinked phone hosts itself.
+     * Not a host: the link has none. Both phones hold the same intel now, so an alert read out
+     * on each of them would be the same sentence twice. The larger screen speaks, which is the
+     * device the screen split already gives the globe; a tie is broken by the smaller id, and an
+     * unlinked phone speaks for itself.
      */
-    fun isHostPhone(): Boolean = when (settingsStore.current.peerRoleMode) {
-        PeerProtocol.MODE_HOST -> true
-        PeerProtocol.MODE_GLOBE -> false
-        else -> !peer.isRunning() || peer.role() == PeerProtocol.DISPLAY ||
-            (peer.role() == "" && peer.firstOnLink())
-    }
+    fun isHostPhone(): Boolean = !peer.isRunning() || peer.role() == PeerProtocol.DISPLAY ||
+        (peer.role() == "" && peer.firstOnLink())
 
     /**
      * Commands that describe what both phones should be doing, not what one should say.

@@ -145,6 +145,15 @@ data class Esp32Node(
     val board: String = "",
     /** USB product string or bridge chip, when the board is plugged in. */
     val chip: String = "",
+    /**
+     * The radio silicon, when the console named it: "ESP32-C5", "ESP32-S3" and so on.
+     *
+     * Kept apart from [chip] because those are different strings on a dev board: the USB
+     * product name is the bridge or the USB-Serial/JTAG unit ("USB JTAG/serial debug unit"),
+     * while the chip only appears in the boot banner the console prints. Reading the wrong one
+     * is why a dual-band C5 was offered 2.4 GHz and BLE only.
+     */
+    val silicon: String = "",
     val uptimeS: Long = 0L,
     val rssi: Int? = null,
     /** "ble" when heard directly, "mqtt" when it published over Wi-Fi, "usb" when wired. */
@@ -160,7 +169,7 @@ data class Esp32Node(
      * the C5 is the one that hears 5 GHz, and a board that says so is offered the choice.
      */
     val dualBand: Boolean
-        get() = listOf(chip, board, firmware).any {
+        get() = listOf(silicon, chip, board, firmware).any {
             it.contains("C5", ignoreCase = true) ||
                 it.contains("dual", ignoreCase = true) ||
                 it.contains("5GHz", ignoreCase = true) ||
@@ -171,7 +180,8 @@ data class Esp32Node(
     val hasGps: Boolean get() = sats > 0 || hdop != null
 
     /** BLE sweeping is only offered when the firmware has shown it sweeps BLE at all. */
-    val hasBle: Boolean get() = bleCount > 0 || board.isNotBlank() || firmware.isNotBlank()
+    val hasBle: Boolean get() = bleCount > 0 || board.isNotBlank() || firmware.isNotBlank() ||
+        silicon.isNotBlank()
 }
 
 data class CellView(

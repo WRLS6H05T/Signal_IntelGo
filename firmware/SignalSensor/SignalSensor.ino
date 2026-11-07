@@ -29,7 +29,7 @@
 #include <Preferences.h>
 #include <HardwareSerial.h>
 
-static const char *FW_VERSION = "1.0.0";
+static const char *FW_VERSION = "1.1.0";
 static const char *NVS_NAMESPACE = "sig-sensor";
 
 static Preferences prefs;
@@ -136,13 +136,11 @@ static void gpsPump() {
 
 // ---------------------------------------------------------------- radio
 
-/** Prints a sweep in the shape the app's console parser reads: a MAC, an RSSI and a channel. */
-static int wifiSweep(bool print) {
+/** One band's sweep, printed in the shape the app's console parser reads: MAC, RSSI, channel. */
+static int wifiSweepBand(bool print) {
   int found = WiFi.scanNetworks(false, false);
   if (found < 0) found = 0;
-  wifiCount = found;
   if (print) {
-    Serial.printf("APs found: %d\r\n", found);
     for (int i = 0; i < found; i++) {
       String ssid = WiFi.SSID(i);
       if (ssid.length() == 0) ssid = "<hidden>";
@@ -151,6 +149,32 @@ static int wifiSweep(bool print) {
     }
   }
   WiFi.scanDelete();
+  return found;
+}
+
+/**
+ * A sweep, over both bands when the chip has two.
+ *
+ * `WiFi.scanNetworks()` scans the band the radio is currently in, and on a C5 that is 2.4 GHz
+ * unless the band mode is changed. That is why a C5 board reported 2.4 GHz networks and BLE
+ * and nothing else, while the same sketch on a C3 was correct: the C3 has no 5 GHz radio to
+ * miss. Both bands are swept here and the counts added, so a 5 GHz access point arrives with
+ * its own channel number (36 and up) and the advert carries the combined total.
+ */
+static int wifiSweep(bool print) {
+#if defined(CONFIG_SOC_WIFI_SUPPORT_5G) && defined(ESP_IDF_VERSION) && \
+    (ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 4, 2))
+  WiFi.setBandMode(WIFI_BAND_MODE_2G_ONLY);
+  int found = wifiSweepBand(print);
+  WiFi.setBandMode(WIFI_BAND_MODE_5G_ONLY);
+  found += wifiSweepBand(print);
+  // Back to both, so a later scan or connection is not left pinned to one band.
+  WiFi.setBandMode(WIFI_BAND_MODE_AUTO);
+#else
+  int found = wifiSweepBand(print);
+#endif
+  wifiCount = found;
+  if (print) Serial.printf("APs found: %d\r\n", found);
   return found;
 }
 

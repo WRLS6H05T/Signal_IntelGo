@@ -124,14 +124,7 @@ data class Settings(
     val peerEnabled: Boolean = false,
     /** Peer address to dial when broadcast discovery is blocked; blank means find it. */
     val peerHost: String = "",
-    /**
-     * Link role: "auto" lets screen size decide, "host" takes the globe and pushes its
-     * settings to every linked device, "globe" is a view-only globe that follows the host.
-     */
-    val peerRoleMode: String = "auto",
-    /** While this phone is a globe view, apply the host's settings as they arrive. */
-    val followHost: Boolean = true,
-    /** Scan job per radio: keyed by ScanPlan.PEER_KEY or a board id. See ScanPlan. */
+    /** Scan job per board, keyed by the board's id. See ScanPlan: the peer link assigns none. */
     val scanAssign: Map<String, String> = emptyMap(),
     /** WiGLE account API name and token, used only by the CSV upload button. */
     val wigleName: String = "",

@@ -7,6 +7,12 @@ import kotlin.math.abs
 /**
  * Wire format for the two-device link.
  *
+ * Both ends are the same kind of peer. There is no host and no follower: neither phone assigns
+ * the other a scan, rewrites its settings or speaks for it. What travels is what each side has
+ * to offer - the networks and advertisers its own radios heard, its fix, its boards, the
+ * entities it has logged and the drives it has recorded - so your own two devices, or two
+ * friends' phones, end up holding the same intel without either of them being in charge.
+ *
  * Kept free of Android and of the app's own models on purpose: this is the one part of the
  * feature that can be tested on the JVM, and a protocol that drifts silently between two phones
  * is exactly the kind of fault no build catches.
@@ -16,7 +22,13 @@ import kotlin.math.abs
  */
 object PeerProtocol {
 
-    const val VERSION = 1
+    /**
+     * Bumped when the link stops being what the old one was: this version carries entities and
+     * no longer carries a mode or a scan assignment, so an older build is refused rather than
+     * read as a peer that has simply gone quiet.
+     */
+    const val VERSION = 2
+
     const val KIND_SKY = "sky"
 
     /** Messages about recorded drives, as opposed to live sweeps. */
@@ -31,11 +43,6 @@ object PeerProtocol {
     /** Wardriving device: the smaller screen, which shows the drive readout. */
     const val SENSOR = "sensor"
 
-    /** Roles chosen by hand, instead of by screen size. */
-    const val MODE_AUTO = "auto"
-    const val MODE_HOST = "host"
-    const val MODE_GLOBE = "globe"
-
     /** Discovery payloads. They are UDP datagrams, so they stay tiny and plain. */
     const val PROBE = "SKYWARD?"
     const val HERE = "SKYWARD!"
@@ -45,6 +52,24 @@ object PeerProtocol {
 
     @Serializable
     data class Device(val id: String, val name: String, val rssi: Int)
+
+    /**
+     * One entity this phone has logged, offered to the other one.
+     *
+     * [layer] is the Layer name, so a satellite arrives as a satellite and an aircraft as an
+     * aircraft: the receiving phone plots it in the same layer it would have plotted its own
+     * catch, tagged as the peer's. The position is where it was caught, not where it is now.
+     */
+    @Serializable
+    data class Entity(
+        val layer: String,
+        val id: String,
+        val name: String,
+        val lat: Double,
+        val lon: Double,
+    ) {
+        val key: String get() = "$layer:$id"
+    }
 
     /** One recorded drive this phone is offering, as the other one sees it in its list. */
     @Serializable
@@ -62,35 +87,6 @@ object PeerProtocol {
     /** One slice of a drive being sent; [total] must agree on every slice. */
     @Serializable
     data class LogPart(val id: String, val idx: Int, val total: Int, val data: String)
-
-    /**
-     * The settings a host is responsible for, pushed to every linked device.
-     *
-     * Deliberately a bounded, display-and-scan set: the follower is not told to re-flash a
-     * board or change a broker, because a bad value there would take the other phone off the
-     * air with no way back except picking up the handset.
-     *
-     * [rev] goes up whenever the host changes one of these. A follower applies a blob once per
-     * revision, which is what lets both rules hold at the same time: a host toggle lands on the
-     * other phone, and a value changed on the other phone for itself stays put while the host
-     * merely repeats what it already said.
-     */
-    @Serializable
-    data class HostSettings(
-        val rev: Int = 0,
-        val tileSource: String = "streets",
-        val dropWeakDots: Boolean = false,
-        val aircraftEnabled: Boolean = true,
-        val satGroups: List<String> = emptyList(),
-        val globeSpin: Int = 1,
-        /** Band assigned to each radio, keyed ScanPlan.PEER_KEY or a board id. */
-        val scanAssign: Map<String, String> = emptyMap(),
-        /** The clock and the units: the shared dashboard, not the radio. */
-        val showLiveTime: Boolean = true,
-        val clockSeconds: Boolean = true,
-        val distanceUnit: String = "km",
-        val tempUnit: String = "c",
-    )
 
     @Serializable
     data class Message(
@@ -120,10 +116,6 @@ object PeerProtocol {
         val want: String = "",
         /** One slice of a drive on its way over. */
         val part: LogPart? = null,
-        /** The role this phone was given by hand: auto, host or globe. */
-        val mode: String = "",
-        /** What this phone has been assigned to sweep, as a ScanPlan code. */
-        val scan: String = "",
         /** Whether this phone is recording a drive right now, and what it called that drive. */
         val recording: Boolean = false,
         val recordName: String = "",
@@ -137,8 +129,9 @@ object PeerProtocol {
         val boardBle: List<Device> = emptyList(),
         val boardWifiTotal: Int = 0,
         val boardBleTotal: Int = 0,
-        /** Present only from a host, and only on a host's snapshot. */
-        val hostSettings: HostSettings? = null,
+        /** Entities this phone has logged; [entityTotal] is the table it was sampled from. */
+        val entities: List<Entity> = emptyList(),
+        val entityTotal: Int = 0,
     )
 
     private val json = Json {
@@ -176,32 +169,9 @@ object PeerProtocol {
         else -> SENSOR
     }
 
-    /** An explicit role wins over the screen-size comparison; "auto" falls back to it. */
-    fun roleForMode(mode: String, mineInches: Float, peerInches: Float): String = when (mode) {
-        MODE_HOST, MODE_GLOBE -> DISPLAY
-        else -> roleFor(mineInches, peerInches)
-    }
-
     fun roleLabel(role: String): String = when (role) {
         DISPLAY -> "globe"
         SENSOR -> "wardrive"
         else -> "shared"
     }
-
-    fun modeLabel(mode: String): String = when (mode) {
-        MODE_HOST -> "host"
-        MODE_GLOBE -> "globe view"
-        else -> "auto"
-    }
-
-    fun isGlobeMode(mode: String): Boolean = mode == MODE_HOST || mode == MODE_GLOBE
-
-    /**
-     * Whether a follower should take a host blob.
-     *
-     * Once per revision is the whole rule. The host resends its settings with every snapshot,
-     * so applying repeats unconditionally would undo every change made here seconds later;
-     * applying nothing would ignore the next thing the host does.
-     */
-    fun shouldApplyHost(rev: Int, applied: Int): Boolean = rev > applied
 }
