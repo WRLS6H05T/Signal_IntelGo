@@ -448,8 +448,11 @@ fun buildMarkers(
                 subtitle = listOf(a.type, a.reg).filter { it.isNotBlank() }.joinToString(" · "),
                 score = a.score,
                 logged = a.logged,
-                headingDeg = a.trackDeg.toFloat(),
-                altM = a.altFt?.let { it * 0.3048 },
+                // A feed that publishes a blank track sends NaN, and a NaN angle poisons the
+                // whole draw transform for that frame: the pin and everything drawn after it
+                // go missing, which is what a layer that "glitches" looks like.
+                headingDeg = a.trackDeg.toFloat().takeIf { it.isFinite() },
+                altM = a.altFt?.let { it * 0.3048 }?.takeIf { d -> d.isFinite() },
                 lines = listOf(
                     "Altitude" to (a.altFt?.let { "$it ft" } ?: "—"),
                     "Ground speed" to String.format("%.0f kt", a.groundSpeedKt),
@@ -490,8 +493,14 @@ fun buildMarkers(
         )
     }
     if (showMesh) sky.mesh.forEach { n: MeshNode ->
-        val lat = n.lat
-        val lon = n.lon
+        // A node that shares no position is still a node, and there are a lot of them: a
+        // Meshtastic handheld and a repeater with its location switch off are both counted in
+        // MESH while having nowhere to be drawn, which reads as pins that vanish. Plotted at
+        // this phone's fix - the one place it was certainly heard from - it is at least
+        // findable, and the card says that is where it is, exactly as a watch hit is placed.
+        val placed = n.lat == null || n.lon == null
+        val lat = n.lat ?: sky.observer?.lat
+        val lon = n.lon ?: sky.observer?.lon
         if (lat == null || lon == null) return@forEach
         // The weak-dot filter is for layers holding thousands of entries. A node is one piece
         // of infrastructure, and dropping it because its last advert arrived faint made the
@@ -505,17 +514,19 @@ fun buildMarkers(
                 lon = lon,
                 title = n.name.ifBlank { n.id },
                 // MeshCore says what a node is; Meshtastic does not, and the source is all
-                // that can be claimed about it.
-                subtitle = if (n.role == MeshCore.Role.UNKNOWN) {
-                    "Meshtastic · ${n.source.uppercase()}"
-                } else {
-                    "MeshCore · ${n.role.label}"
+                // that can be claimed about it. A node with no position says so, so the pin
+                // is never mistaken for a located one.
+                subtitle = when {
+                    placed -> "no shared position · at your fix"
+                    n.role == MeshCore.Role.UNKNOWN -> "Meshtastic · ${n.source.uppercase()}"
+                    else -> "MeshCore · ${n.role.label}"
                 },
                 score = n.score,
                 logged = n.logged,
                 altM = n.altitudeM.toDouble(),
                 meshRepeater = n.role == MeshCore.Role.REPEATER,
                 lines = listOfNotNull(
+                    if (placed) "Position" to "not shared - plotted at your fix" else null,
                     if (n.role != MeshCore.Role.UNKNOWN) "Role" to n.role.label else null,
                     "SNR" to String.format("%.1f dB", n.snr),
                     n.rssi?.let { "RSSI" to "$it dBm" },
@@ -612,7 +623,9 @@ fun buildMarkers(
             ),
         )
     }
-    return out
+    // One non-finite coordinate would poison the frame's transform and take every marker
+    // after it with it, so a bad fix is dropped here rather than in the draw loop.
+    return out.filter { it.lat.isFinite() && it.lon.isFinite() }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -958,9 +971,12 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
             // infrastructure, and its count is the part of the mesh worth watching.
             val meshCore = sky.mesh.count { it.role != MeshCore.Role.UNKNOWN }
             val meshRpt = sky.mesh.count { it.role == MeshCore.Role.REPEATER }
-            // No attached node, no card: an empty box of zeros was only taking the space the
-            // INTEL table needs.
-            if (sky.mesh.isNotEmpty()) StatusCard(
+            // Still no card for a feed that is switched off and empty - an empty box of zeros
+            // only takes the space the INTEL table needs. A feed that is on does get one even
+            // with nothing in it, because "connected and silent" must not look like "off".
+            val meshFeedOn = sky.mesh.isNotEmpty() ||
+                settings.meshMqttEnabled || settings.meshCoreEnabled
+            if (meshFeedOn) StatusCard(
                 title = "MESH",
                 accent = Sky.mesh,
                 trailing = sky.mesh.size.toString(),
@@ -975,6 +991,25 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                     fontSize = 9.sp,
                     maxLines = 1,
                 )
+                // The address itself. "Broker on" says nothing about what it is on, and the
+                // topic is only half of what had to be typed to get here: a broker one letter
+                // wrong looks exactly like a broker that is working.
+                if (settings.meshMqttEnabled) {
+                    Text(
+                        "mqtt " + settings.meshBroker + "  " + settings.meshTopic,
+                        color = Sky.textDim,
+                        fontSize = 9.sp,
+                        maxLines = 1,
+                    )
+                }
+                if (settings.meshCoreEnabled) {
+                    Text(
+                        "core " + settings.meshCoreBroker + "  " + settings.meshCoreTopic,
+                        color = Sky.textDim,
+                        fontSize = 9.sp,
+                        maxLines = 1,
+                    )
+                }
                 sky.mesh.take(if (meshOpen) 6 else 2).forEach { n ->
                     // The role tag is what tells a repeater apart from a handheld in a list
                     // that has no room for a glyph.

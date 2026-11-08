@@ -116,7 +116,14 @@ class MeshSource(private val settings: () -> dev.skyward.rf.core.Settings) {
             c.connect(opts)
             c.subscribe(cfg.meshTopic.trim(), 0)
             client = c
-            _status.value = FeedStatus(true, "mesh live · ${cfg.meshTopic}", System.currentTimeMillis(), nodes.size)
+            // The address is part of the status: "live" on its own does not say which broker
+            // this is on, and the topic is only half of what had to be configured to get here.
+            _status.value = FeedStatus(
+                true,
+                "mesh live · ${hostOf(broker)} · ${cfg.meshTopic}",
+                System.currentTimeMillis(),
+                nodes.size,
+            )
         }.onFailure {
             client = null
             _status.value = FeedStatus(false, it.message ?: "mqtt failed", System.currentTimeMillis(), nodes.size)
@@ -184,7 +191,7 @@ class MeshSource(private val settings: () -> dev.skyward.rf.core.Settings) {
             coreClient = c
             _status.value = FeedStatus(
                 true,
-                "meshcore live · ${cfg.meshCoreTopic}",
+                "meshcore live · ${hostOf(broker)} · ${cfg.meshCoreTopic}",
                 System.currentTimeMillis(),
                 nodes.size,
             )
@@ -193,6 +200,15 @@ class MeshSource(private val settings: () -> dev.skyward.rf.core.Settings) {
             _status.value = FeedStatus(false, it.message ?: "meshcore failed", System.currentTimeMillis(), nodes.size)
         }
     }
+
+    /** The broker without its scheme or port: what "live" is actually connected to. */
+    private fun hostOf(broker: String): String =
+        broker.trim()
+            .removePrefix("ssl://")
+            .removePrefix("tcp://")
+            .removePrefix("ws://")
+            .removePrefix("wss://")
+            .substringBefore('/')
 
     private fun stopMeshCore() {
         runCatching {
