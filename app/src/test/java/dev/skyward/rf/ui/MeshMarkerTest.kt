@@ -1,9 +1,12 @@
 package dev.skyward.rf.ui
 
+import dev.skyward.rf.core.LatLon
 import dev.skyward.rf.core.Layer
+import dev.skyward.rf.core.LoggedEntity
 import dev.skyward.rf.core.MeshNode
 import dev.skyward.rf.sky.AirspaceEngine
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -12,15 +15,18 @@ import org.junit.Test
  *
  * A node is one piece of infrastructure, not a dot in a crowded layer: it must survive the
  * weak-dot filter and it must be plotted in the MESH layer. A node without a position has
- * nowhere to be drawn and is the only thing the map may leave out.
+ * nowhere to be drawn and is the only thing the map may leave out - what it must never do is
+ * invent a position for it, which is what pinning it at this phone's fix was.
  */
 class MeshMarkerTest {
 
     private fun markers(
         nodes: List<MeshNode>,
         minScore: Int = 20,
+        observer: LatLon? = null,
+        loggedMesh: List<LoggedEntity> = emptyList(),
     ): List<MapMarker> = buildMarkers(
-        sky = AirspaceEngine.SkyState(mesh = nodes),
+        sky = AirspaceEngine.SkyState(mesh = nodes, observer = observer),
         showSats = false,
         showAir = false,
         showDrones = false,
@@ -30,6 +36,7 @@ class MeshMarkerTest {
         showWatch = false,
         distanceUnit = "km",
         minScore = minScore,
+        loggedMesh = loggedMesh,
     )
 
     private fun node(id: String, lat: Double?, lon: Double?, score: Int) = MeshNode(
@@ -38,6 +45,17 @@ class MeshMarkerTest {
         lat = lat,
         lon = lon,
         score = score,
+    )
+
+    private fun logged(id: String, lat: Double, lon: Double) = LoggedEntity(
+        key = "MESH:$id",
+        layer = Layer.MESH,
+        name = "Roof $id",
+        lat = lat,
+        lon = lon,
+        firstSeen = 1_000L,
+        lastSeen = 2_000L,
+        sightings = 3,
     )
 
     @Test
@@ -62,10 +80,30 @@ class MeshMarkerTest {
     }
 
     @Test
-    fun `a node with no position has nowhere to be drawn`() {
-        // Meshtastic and MeshCore both allow a node that shares no location; the MESH card
-        // lists it, the map cannot place it.
-        val out = markers(listOf(node("!nofix", null, null, score = 80)))
+    fun `a node with no position is not pinned at your fix`() {
+        // Known no position, observer known: the node must stay off the map rather than appear
+        // on the street the phone is standing on. That was a confident, wrong position.
+        val out = markers(listOf(node("!nofix", null, null, score = 80)), observer = LatLon(51.5, -0.1))
         assertEquals(0, out.size)
+    }
+
+    @Test
+    fun `a logged node stays after the feed drops it`() {
+        val out = markers(emptyList(), loggedMesh = listOf(logged("!gone", 51.4, -0.3)))
+        assertEquals(1, out.size)
+        assertEquals("MESH:!gone", out[0].key)
+        assertTrue(out[0].logged)
+        assertEquals(51.4, out[0].lat, 1e-9)
+    }
+
+    @Test
+    fun `a node that is live and logged is drawn once`() {
+        val out = markers(
+            listOf(node("!gone", 51.4, -0.3, score = 50)),
+            loggedMesh = listOf(logged("!gone", 51.4, -0.3)),
+        )
+        assertEquals(1, out.size)
+        // The live marker is the one drawn: its card carries the radio detail, not the tombstone.
+        assertFalse(out[0].subtitle.startsWith("logged"))
     }
 }

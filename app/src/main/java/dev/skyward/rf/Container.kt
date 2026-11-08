@@ -12,6 +12,7 @@ import dev.skyward.rf.core.Units
 import dev.skyward.rf.core.VoiceStyles
 import dev.skyward.rf.voice.WatcherVoice
 import dev.skyward.rf.location.LocationTracker
+import dev.skyward.rf.net.IssCrew
 import dev.skyward.rf.net.WeatherFeed
 import dev.skyward.rf.net.WigleApi
 import dev.skyward.rf.peer.BlePeer
@@ -148,6 +149,9 @@ class Container(context: Context) {
 
     /** Current conditions at the fix, keyless via Open-Meteo; only asked while the clock is on. */
     val weather = WeatherFeed(http)
+
+    /** Who is aboard the station: keyless roster, cached on disk for a day. */
+    val issCrew = IssCrew(http, FileStore(File(rootData, "iss").apply { mkdirs() }))
 
     /** Hands-free Watcher: one wake word, the phone's own recogniser and speaker. */
     val voice = WatcherVoice(appContext)
@@ -678,6 +682,12 @@ class Container(context: Context) {
         }
         if (settingsStore.current.peerEnabled && !settingsStore.current.offlineMode) peer.start()
         airspace.start()
+
+        // One roster read at launch when the cached answer is a day old; the station card also
+        // asks on tap. Offline means offline: the cache answers, the network is not touched.
+        if (!settingsStore.current.offlineMode) {
+            scope.launch { runCatching { issCrew.refreshIfStale() } }
+        }
 
         // Stamps every watch hit as it appears, so the timed update can report what is new. The
         // list is trimmed to an hour: nothing older than the longest interval is ever asked for.

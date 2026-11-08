@@ -78,6 +78,7 @@ import dev.skyward.rf.peer.PeerProtocol
 import dev.skyward.rf.scan.UsbBoards
 import dev.skyward.rf.sky.SatTracker
 import dev.skyward.rf.core.Layer
+import dev.skyward.rf.core.LoggedEntity
 import dev.skyward.rf.core.MeshNode
 import dev.skyward.rf.meshcore.MeshCore
 import dev.skyward.rf.core.SatView
@@ -87,6 +88,7 @@ import dev.skyward.rf.core.SignalScale
 import dev.skyward.rf.core.Units
 import dev.skyward.rf.core.WatchKind
 import dev.skyward.rf.core.WatchView
+import dev.skyward.rf.net.IssCrew
 import dev.skyward.rf.net.compassPoint
 import dev.skyward.rf.sky.AirspaceEngine
 import dev.skyward.rf.ui.theme.Sky
@@ -367,6 +369,14 @@ fun buildMarkers(
     maxSats: Int = 1_500,
     /** The other phone's logged entities: the intel half of the link. */
     peerEntities: List<dev.skyward.rf.peer.PeerProtocol.Entity> = emptyList(),
+    /**
+     * Mesh entities the registry holds but the live feed no longer lists. A node with a
+     * position becomes an entity the moment it is heard, so the map keeps drawing it after a
+     * restart, a broker restart, or the feed being switched off.
+     */
+    loggedMesh: List<LoggedEntity> = emptyList(),
+    /** Crew aboard the station, from the roster feed; null until it answers. */
+    issCrew: IssCrew.Crew? = null,
 ): List<MapMarker> {
     val out = ArrayList<MapMarker>(sky.sats.size + sky.aircraft.size + sky.drones.size + sky.mesh.size)
     // Satellites are the one layer the score must not filter. Their score is elevation above
@@ -424,6 +434,9 @@ fun buildMarkers(
                 altM = s.altKm * 1000.0,
                 lines = listOfNotNull(
                     if (s.noradId == SatTracker.ISS_NORAD) "Catalog" to SatTracker.ISS_DESIGNATOR else null,
+                    // The one fact the element sets cannot give. A dash until the roster answers,
+                    // never a zero: "nobody aboard" is a claim, "not known" is not.
+                    if (s.noradId == SatTracker.ISS_NORAD) "Crew aboard" to (issCrew?.label ?: "—") else null,
                     if (s.noradId in SatTracker.BIRDS3_IDS) "Deployed" to "ISS, 17 Jun 2019" else null,
                     "Elevation" to String.format("%.1f°", s.elevation),
                     "Azimuth" to String.format("%.1f°", s.azimuth),
@@ -493,15 +506,12 @@ fun buildMarkers(
         )
     }
     if (showMesh) sky.mesh.forEach { n: MeshNode ->
-        // A node that shares no position is still a node, and there are a lot of them: a
-        // Meshtastic handheld and a repeater with its location switch off are both counted in
-        // MESH while having nowhere to be drawn, which reads as pins that vanish. Plotted at
-        // this phone's fix - the one place it was certainly heard from - it is at least
-        // findable, and the card says that is where it is, exactly as a watch hit is placed.
-        val placed = n.lat == null || n.lon == null
-        val lat = n.lat ?: sky.observer?.lat
-        val lon = n.lon ?: sky.observer?.lon
-        if (lat == null || lon == null) return@forEach
+        // A node's own position, or no pin. Drawing a node that shares no location at this
+        // phone's fix put fixed infrastructure on whatever street the phone was on - a
+        // confident answer that was simply wrong. The MESH card counts those nodes instead, so
+        // "under the map" and "never heard" stop looking the same.
+        val lat = n.lat ?: return@forEach
+        val lon = n.lon ?: return@forEach
         // The weak-dot filter is for layers holding thousands of entries. A node is one piece
         // of infrastructure, and dropping it because its last advert arrived faint made the
         // marker disappear while the MESH count still listed it, which reads as a node that
@@ -514,19 +524,17 @@ fun buildMarkers(
                 lon = lon,
                 title = n.name.ifBlank { n.id },
                 // MeshCore says what a node is; Meshtastic does not, and the source is all
-                // that can be claimed about it. A node with no position says so, so the pin
-                // is never mistaken for a located one.
-                subtitle = when {
-                    placed -> "no shared position · at your fix"
-                    n.role == MeshCore.Role.UNKNOWN -> "Meshtastic · ${n.source.uppercase()}"
-                    else -> "MeshCore · ${n.role.label}"
+                // that can be claimed about it.
+                subtitle = if (n.role == MeshCore.Role.UNKNOWN) {
+                    "Meshtastic · ${n.source.uppercase()}"
+                } else {
+                    "MeshCore · ${n.role.label}"
                 },
                 score = n.score,
                 logged = n.logged,
                 altM = n.altitudeM.toDouble(),
                 meshRepeater = n.role == MeshCore.Role.REPEATER,
                 lines = listOfNotNull(
-                    if (placed) "Position" to "not shared - plotted at your fix" else null,
                     if (n.role != MeshCore.Role.UNKNOWN) "Role" to n.role.label else null,
                     "SNR" to String.format("%.1f dB", n.snr),
                     n.rssi?.let { "RSSI" to "$it dBm" },
@@ -539,6 +547,38 @@ fun buildMarkers(
                 ),
             ),
         )
+    }
+    // A node with a position is an entity from the moment it is heard, so the registry is
+    // drawn as well: a restart, a broker that dropped the node, or a feed switched off must not
+    // take a node off the map this phone has already found. A node the live feed still lists is
+    // drawn once, by the loop above.
+    if (showMesh) {
+        val live = sky.mesh.mapTo(HashSet()) { it.id }
+        loggedMesh.forEach { e: LoggedEntity ->
+            // The registry keys an entity by "LAYER:id"; the marker is keyed by the same
+            // string, so the live feed and the registry can never both draw one node.
+            val id = e.key.substringAfter(':')
+            if (e.layer != Layer.MESH || id in live) return@forEach
+            if (!e.lat.isFinite() || !e.lon.isFinite()) return@forEach
+            out.add(
+                MapMarker(
+                    key = e.key,
+                    layer = Layer.MESH,
+                    lat = e.lat,
+                    lon = e.lon,
+                    title = e.name.ifBlank { id },
+                    subtitle = "logged · not heard now",
+                    score = 0,
+                    logged = true,
+                    lines = listOf(
+                        "Status" to "logged entity, kept after the feed",
+                        "Node id" to id,
+                        "Position" to String.format(Locale.US, "%.5f, %.5f", e.lat, e.lon),
+                        "Sightings" to e.sightings.toString(),
+                    ),
+                ),
+            )
+        }
     }
     if (showEsp32) sky.esp32.forEach { b ->
         val lat = b.lat
@@ -685,6 +725,13 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
     // The other phone's intel, read before the marker list is built: the markers are a
     // remembered value keyed on it, so a new share has to be part of the key.
     val peerIntel by c.peerEntities.collectAsState()
+    // Who is aboard the station, for the ISS card; refreshed when the roster is a day old.
+    val crew by c.issCrew.state.collectAsState()
+    // The registry is the map's memory for mesh: an entity outlives the feed that found it.
+    val loggedEntities by c.logged.state.collectAsState()
+    val loggedMesh = remember(loggedEntities) {
+        loggedEntities.values.filter { it.layer == Layer.MESH }
+    }
 
     // Built off the frame thread. A sky tick lands about once a second, and the list formats the
     // card text for every entity in it - several thousand markers on a full catalogue, most of
@@ -696,6 +743,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
         initialValue = emptyList<MapMarker>(),
         sky, showSats, showAir, showDrones, showMesh, showCells, showEsp32, showWatch,
         settings.aircraftEnabled, settings.dropWeakDots, settings.distanceUnit, peerIntel,
+        crew, loggedMesh,
     ) {
         value = withContext(Dispatchers.Default) {
             buildMarkers(
@@ -710,6 +758,8 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 distanceUnit = settings.distanceUnit,
                 minScore = if (settings.dropWeakDots) 20 else 0,
                 peerEntities = peerIntel,
+                loggedMesh = loggedMesh,
+                issCrew = crew,
             )
         }
     }
@@ -758,6 +808,11 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 // One card at a time: opening a marker closes a signal's card.
                 selectedSignal = null
                 selectedCapture = null
+                if (it?.station == true) {
+                    // Tapping the station asks the roster, which goes to the network only when
+                    // the cached answer is a day old: the crew changes at a launch, not a tap.
+                    tileScope.launch { runCatching { c.issCrew.refreshIfStale() } }
+                }
             },
             selectedSignalKey = selectedSignal?.let { "${it.kind.name}:${it.id}" },
             onSelectSignal = {
@@ -971,6 +1026,9 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
             // infrastructure, and its count is the part of the mesh worth watching.
             val meshCore = sky.mesh.count { it.role != MeshCore.Role.UNKNOWN }
             val meshRpt = sky.mesh.count { it.role == MeshCore.Role.REPEATER }
+            // Nodes heard but sharing no location: counted here, and never pinned somewhere
+            // they are not, so the map's silence about them is explained rather than missing.
+            val meshNoPos = sky.mesh.count { it.lat == null || it.lon == null }
             // Still no card for a feed that is switched off and empty - an empty box of zeros
             // only takes the space the INTEL table needs. A feed that is on does get one even
             // with nothing in it, because "connected and silent" must not look like "off".
@@ -986,7 +1044,8 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 Text(
                     (if (settings.meshMqttEnabled || settings.meshCoreEnabled) "broker on" else "broker off") +
                         " \u00b7 ble " + meshBle + " \u00b7 mqtt " + meshMqtt +
-                        (if (meshCore > 0) " \u00b7 core " + meshCore + " \u00b7 rpt " + meshRpt else ""),
+                        (if (meshCore > 0) " \u00b7 core " + meshCore + " \u00b7 rpt " + meshRpt else "") +
+                        (if (meshNoPos > 0) " \u00b7 " + meshNoPos + " no pos" else ""),
                     color = Sky.textDim,
                     fontSize = 9.sp,
                     maxLines = 1,
@@ -1093,7 +1152,10 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 IntelPairRow("SAT", sky.sats.size, sky.loggedSats, showSats) { showSats = !showSats }
                 IntelPairRow("AIR", sky.aircraft.size, sky.loggedAircraft, showAir) { showAir = !showAir }
                 IntelPairRow("UAV", sky.drones.size, sky.loggedDrones, showDrones) { showDrones = !showDrones }
-                IntelPairRow("MESH", sky.mesh.size, sky.loggedMesh, showMesh) { showMesh = !showMesh }
+                // Every positioned node is written to the registry, so the logged column is the
+                // registry's count: it keeps counting a node after the feed stops listing it,
+                // which is exactly what the map is still drawing.
+                IntelPairRow("MESH", sky.mesh.size, loggedMesh.size, showMesh) { showMesh = !showMesh }
                 IntelPairRow("CELL", sky.cells.size, sky.loggedCells, showCells) { showCells = !showCells }
                 // Cameras and TASERs were heard, not triangulated: the row is still a count of
                 // matched advertisers, not of confirmed installations.

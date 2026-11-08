@@ -305,6 +305,19 @@ class AirspaceEngine(
             n.copy(logged = logged.contains(Layer.MESH, n.id))
         }.sortedByDescending { it.lastSeen }
 
+        // A node that shares a position becomes an entity the moment it is heard, not only
+        // while a drive is recording: the registry is on disk, so the node is still on the map
+        // after the feed stops or the app restarts, the way a satellite or a plane already is.
+        // Only ids the registry does not hold are written - putting the whole table back every
+        // two seconds is the republish that made a long session get heavier.
+        val unheard = meshNodes.mapNotNull { n ->
+            val lat = n.lat ?: return@mapNotNull null
+            val lon = n.lon ?: return@mapNotNull null
+            if (logged.contains(Layer.MESH, n.id)) return@mapNotNull null
+            LoggedRegistry.Sighting(Layer.MESH, n.id, n.name.ifBlank { n.id }, lat, lon)
+        }
+        if (unheard.isNotEmpty()) logged.logBatch(now, unheard)
+
         // Cell towers: pinned where first heard, refreshed with live signal strength.
         val cells = cell.poll(obs, now).map { c ->
             c.copy(logged = logged.contains(Layer.CELL, c.key))

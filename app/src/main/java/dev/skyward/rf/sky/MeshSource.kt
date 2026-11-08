@@ -307,12 +307,20 @@ class MeshSource(private val settings: () -> dev.skyward.rf.core.Settings) {
             }
 
             "position" -> {
-                val latI = payload.num("latitude_i") ?: payload.num("latitude")
-                val lonI = payload.num("longitude_i") ?: payload.num("longitude")
-                if (latI == null || lonI == null) return
-                val lat = if (kotlin.math.abs(latI) > 180.0) latI / 1e7 else latI
-                val lon = if (kotlin.math.abs(lonI) > 180.0) lonI / 1e7 else lonI
+                // `latitude_i` is the fixed-point field (degrees x 1e7) and `latitude` is the
+                // float one, so the field the value came from decides the scale. Guessing the
+                // scale from the magnitude read a node sitting on the equator or the prime
+                // meridian - a fixed-point value below 180 - as roughly 200 degrees, which is
+                // not a place on Earth, and drew it off the edge of the map.
+                val latFixed = payload.num("latitude_i")
+                val lonFixed = payload.num("longitude_i")
+                val lat = if (latFixed != null) latFixed / 1e7 else payload.num("latitude") ?: return
+                val lon = if (lonFixed != null) lonFixed / 1e7 else payload.num("longitude") ?: return
+                // A zero pair means "no position shared", which some gateways send instead of
+                // leaving the field out. It is not a node in the Gulf of Guinea.
                 if (lat == 0.0 && lon == 0.0) return
+                if (!lat.isFinite() || !lon.isFinite()) return
+                if (lat !in -90.0..90.0 || lon !in -180.0..180.0) return
                 val snr = root.num("snr") ?: 0.0
                 val existing = nodes[sender]
                 nodes[sender] = MeshNode(
@@ -326,6 +334,12 @@ class MeshSource(private val settings: () -> dev.skyward.rf.core.Settings) {
                     batteryPct = existing?.batteryPct ?: -1,
                     lastSeen = now,
                     source = "mqtt",
+                    // Carried over rather than rebuilt: a position packet is not a new node, so
+                    // it must not erase what another packet already learned about this one.
+                    rssi = existing?.rssi,
+                    role = existing?.role ?: MeshCore.Role.UNKNOWN,
+                    pubkey = existing?.pubkey.orEmpty(),
+                    distanceKm = existing?.distanceKm,
                     score = snrToScore(snr),
                 )
                 publish()
