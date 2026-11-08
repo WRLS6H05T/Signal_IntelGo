@@ -177,7 +177,8 @@ fun ToggleChip(
  * Column titles for the INTEL table: the live count, then the logged count.
  *
  * The two numbers share a row in the table below, so they are named once at the top instead of
- * a separate heading over each half.
+ * a separate heading over each half. They sit over the numbers themselves, which are now beside
+ * the label rather than out at the box's right edge.
  */
 @Composable
 fun IntelPairHeader() {
@@ -186,15 +187,13 @@ fun IntelPairHeader() {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Spacer(Modifier.width(46.dp))
-        Box(Modifier.weight(1f))
-        Spacer(Modifier.width(8.dp))
         Text(
             "LIVE",
             style = SkywardThemeLabel(),
             fontSize = 8.sp,
             color = Sky.textDim,
             textAlign = TextAlign.End,
-            modifier = Modifier.width(40.dp),
+            modifier = Modifier.width(38.dp),
         )
         Text(
             "LOGGED",
@@ -204,6 +203,8 @@ fun IntelPairHeader() {
             textAlign = TextAlign.End,
             modifier = Modifier.width(48.dp),
         )
+        Spacer(Modifier.width(8.dp))
+        Box(Modifier.weight(1f))
     }
 }
 
@@ -217,6 +218,10 @@ fun IntelPairHeader() {
  * A null count prints a dash: the track and the individual networks are not a logged entity in
  * their own right, and a sub-GHz carrier has no live count to give. A switched-off layer dims its
  * label but keeps both numbers, so "hidden" never looks like "zero".
+ *
+ * Both numbers sit immediately after the label. Pinned to the right edge they were the far side
+ * of a 216dp box from the word they belong to, and the eye had to carry the label across the
+ * leader rule to find its count.
  */
 @Composable
 fun IntelPairRow(
@@ -242,13 +247,6 @@ fun IntelPairRow(
             color = if (on) Sky.text else Sky.textDim,
             modifier = Modifier.width(46.dp),
         )
-        Box(
-            Modifier
-                .weight(1f)
-                .height(1.dp)
-                .background(Sky.outline.copy(alpha = 0.35f)),
-        )
-        Spacer(Modifier.width(8.dp))
         Text(
             live?.toString() ?: DASH,
             fontFamily = FontFamily.Monospace,
@@ -256,7 +254,7 @@ fun IntelPairRow(
             fontWeight = FontWeight.Bold,
             color = if (on && live != null) Sky.cyan else Sky.textDim,
             textAlign = TextAlign.End,
-            modifier = Modifier.width(40.dp),
+            modifier = Modifier.width(38.dp),
         )
         Text(
             logged?.toString() ?: DASH,
@@ -266,6 +264,13 @@ fun IntelPairRow(
             color = if (logged != null && logged > 0) Sky.logged else Sky.textDim,
             textAlign = TextAlign.End,
             modifier = Modifier.width(48.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Box(
+            Modifier
+                .weight(1f)
+                .height(1.dp)
+                .background(Sky.outline.copy(alpha = 0.35f)),
         )
     }
 }
