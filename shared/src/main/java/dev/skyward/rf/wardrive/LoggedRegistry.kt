@@ -91,6 +91,9 @@ class LoggedRegistry(private val store: FileStore) {
 
     fun contains(layer: Layer, id: String): Boolean = map.containsKey(key(layer, id))
 
+    /** One entity if the registry holds it, so a caller can borrow what it already knows. */
+    fun find(layer: Layer, id: String): LoggedEntity? = map[key(layer, id)]
+
     fun count(layer: Layer): Int = map.values.count { it.layer == layer }
 
     fun entitiesFor(layer: Layer): List<LoggedEntity> = map.values.filter { it.layer == layer }

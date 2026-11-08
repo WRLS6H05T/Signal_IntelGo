@@ -553,7 +553,10 @@ fun buildMarkers(
     // take a node off the map this phone has already found. A node the live feed still lists is
     // drawn once, by the loop above.
     if (showMesh) {
-        val live = sky.mesh.mapTo(HashSet()) { it.id }
+        // Only the nodes the loop above actually plotted count as live. A node the feed lists
+        // without a position is not drawn there, so calling it live would suppress the
+        // registry's copy as well and take a node off the map that the registry can still place.
+        val live = sky.mesh.filter { it.lat != null && it.lon != null }.mapTo(HashSet()) { it.id }
         loggedMesh.forEach { e: LoggedEntity ->
             // The registry keys an entity by "LAYER:id"; the marker is keyed by the same
             // string, so the live feed and the registry can never both draw one node.

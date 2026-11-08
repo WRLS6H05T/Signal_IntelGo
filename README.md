@@ -137,7 +137,9 @@ The continent outline is Natural Earth 110m land, simplified to 0.01° and bundl
 | BLE | `BluetoothLeScanner` (low latency) | Address/name/RSSI, plus Remote ID payloads. |
 
 **WADAMESH direct transfer.** The Transfer app on a WADAMESH device serves its files on
-`http://<device>/files`, behind a six-digit session code shown on the device. Setup -> Mesh ->
+`http://<device>:8765/files` (the device's web port), behind a six-digit session code shown on
+the device. The file list is paged: the device sends one `ENTRY` per `LIST NEXT`, as its own
+page does. Setup -> Mesh ->
 *WADAMESH direct transfer* takes the address and that code, lists the screenshots, crash
 reports, backups and uploads the device exposes, and pulls one to the system share sheet. The
 code is minted per session and is never written to settings. The session is plain HTTP on your

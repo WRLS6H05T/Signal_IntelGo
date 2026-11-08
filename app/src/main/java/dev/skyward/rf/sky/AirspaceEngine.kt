@@ -302,7 +302,24 @@ class AirspaceEngine(
         }
         mesh.updateDistances(obs?.lat, obs?.lon)
         val meshNodes = mesh.nodesFlow.value.values.map { n ->
-            n.copy(logged = logged.contains(Layer.MESH, n.id))
+            // A node is its id, not the position it last happened to send. After a restart the
+            // first packet from a node is usually a nodeinfo or an advert with no location, and
+            // the place this phone already found it belongs to the same node - so a node the
+            // registry holds is placed where the registry has it instead of dropping off the map
+            // until it shares a position again.
+            val known = if (n.lat == null || n.lon == null) logged.find(Layer.MESH, n.id) else null
+            val lat = n.lat ?: known?.lat
+            val lon = n.lon ?: known?.lon
+            n.copy(
+                lat = lat,
+                lon = lon,
+                distanceKm = n.distanceKm ?: if (lat != null && lon != null && obs != null) {
+                    OrbitMath.groundDistanceKm(obs.lat, obs.lon, lat, lon)
+                } else {
+                    null
+                },
+                logged = logged.contains(Layer.MESH, n.id),
+            )
         }.sortedByDescending { it.lastSeen }
 
         // A node that shares a position becomes an entity the moment it is heard, not only

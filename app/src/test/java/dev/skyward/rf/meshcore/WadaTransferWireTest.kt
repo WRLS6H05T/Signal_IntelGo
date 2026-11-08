@@ -38,12 +38,16 @@ class WadaTransferWireTest {
 
     @Test
     fun `an address is read the way the device shows it`() {
-        assertEquals("192.168.1.42" to 80, WadaWire.parseAddress("192.168.1.42"))
-        assertEquals("192.168.1.42" to 80, WadaWire.parseAddress(" http://192.168.1.42/ "))
+        // No port means the device's web port, which is where its file session lives. Port 80 is
+        // not it: dialling 80 made a reachable device look dead.
+        assertEquals("192.168.1.42" to 8765, WadaWire.parseAddress("192.168.1.42"))
+        assertEquals("192.168.1.42" to 8765, WadaWire.parseAddress(" http://192.168.1.42/ "))
         assertEquals("mesh.local" to 8080, WadaWire.parseAddress("mesh.local:8080"))
-        // The page address the device prints, pasted whole: scheme, path and query go.
-        assertEquals("192.168.1.42" to 80, WadaWire.parseAddress("http://192.168.1.42/files"))
-        assertEquals("192.168.1.42" to 80, WadaWire.parseAddress(" 192.168.1.42/files/ "))
+        // The page address the device prints, pasted whole: scheme, path and query go. The port
+        // it prints is kept, whether or not it is the default.
+        assertEquals("192.168.1.42" to 8765, WadaWire.parseAddress("http://192.168.1.42:8765/files"))
+        assertEquals("192.168.1.42" to 8765, WadaWire.parseAddress("http://192.168.1.42/files"))
+        assertEquals("192.168.1.42" to 8765, WadaWire.parseAddress(" 192.168.1.42/files/ "))
         assertEquals("192.168.1.42" to 8080, WadaWire.parseAddress("ws://192.168.1.42:8080/files?x=1"))
         assertNull(WadaWire.parseAddress(""))
         assertNull(WadaWire.parseAddress("http://"))

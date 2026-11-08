@@ -97,6 +97,21 @@ class MeshMarkerTest {
     }
 
     @Test
+    fun `a node heard again without a position keeps its logged place`() {
+        // After a restart the first packet from a node is often a nodeinfo or an advert with no
+        // location. The node is in the live feed, but an id in the live list is not a position on
+        // the map: the registry still knows where this node is, so it must still be drawn there.
+        val out = markers(
+            listOf(node("!gone", null, null, score = 40)),
+            loggedMesh = listOf(logged("!gone", 51.4, -0.3)),
+        )
+        assertEquals(1, out.size)
+        assertEquals("MESH:!gone", out[0].key)
+        assertEquals(51.4, out[0].lat, 1e-9)
+        assertTrue(out[0].logged)
+    }
+
+    @Test
     fun `a node that is live and logged is drawn once`() {
         val out = markers(
             listOf(node("!gone", 51.4, -0.3, score = 50)),

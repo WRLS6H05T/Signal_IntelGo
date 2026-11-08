@@ -66,7 +66,10 @@ class WadaTransfer {
         }
         close()
         _phase.value = Phase.CONNECTING
-        _status.value = "Connecting to ${target.first}…"
+        // The port is named because it is the part that is easy to get wrong: the device serves
+        // its file session on its own web port, not on 80, and a wrong port only ever looks like
+        // a device that has gone quiet.
+        _status.value = "Connecting to ${target.first}:${target.second}…"
         runCatching {
             val s = Socket()
             s.connect(InetSocketAddress(target.first, target.second), 6_000)
@@ -213,7 +216,12 @@ class WadaTransfer {
                         return
                     }
                     if (text.startsWith("ERR ")) throw IOException(text.removePrefix("ERR "))
-                    WadaWire.parseEntry(text)?.let { found += it }
+                    val entry = WadaWire.parseEntry(text) ?: continue
+                    found += entry
+                    // The device hands out one entry per request: its own page answers every
+                    // ENTRY with LIST NEXT. Without that the list stopped at the first file and
+                    // the session sat there until the socket gave up.
+                    sendText("LIST NEXT")
                 }
                 is WadaWire.Frame.Binary -> Unit
                 WadaWire.Frame.Closed -> throw IOException("the device closed the session")
@@ -263,13 +271,20 @@ internal object WadaWire {
     /** No file on the device is bigger than this in one frame. */
     private const val MAX_FRAME = 3 * 1024 * 1024
 
+    /** Where the device's web server listens, and so where /files is served. */
+    const val DEFAULT_PORT = 8765
+
     /**
      * "192.168.1.42", "192.168.1.42:8080" and the whole page address the device prints
-     * ("http://192.168.1.42/files") all mean the same thing.
+     * ("http://192.168.1.42:8765/files") all mean the same thing.
      *
      * The device shows its transfer page as a URL, so the field is routinely filled with the
      * scheme, the path and a trailing slash. Only the authority reaches the socket: rejecting
      * the rest made a correct address look like a missing one.
+     *
+     * A bare address means [DEFAULT_PORT], which is the device's web port - the one its file
+     * session is actually on. Defaulting to 80 dialled a port nothing listens on and made a
+     * reachable device look dead.
      */
     fun parseAddress(raw: String): Pair<String, Int>? {
         var text = raw.trim()
@@ -288,7 +303,7 @@ internal object WadaWire {
             host = text.substringBefore(':')
             if (text.contains(':')) text.substringAfter(':') else null
         }
-        val port = if (portText == null) 80 else portText.toIntOrNull() ?: return null
+        val port = if (portText == null) DEFAULT_PORT else portText.toIntOrNull() ?: return null
         if (host.isEmpty() || port !in 1..65535) return null
         return host to port
     }
@@ -414,7 +429,9 @@ internal object WadaWire {
         val key = newMask() + newMask() + newMask() + newMask()
         val request = buildString {
             append("GET /files HTTP/1.1\r\n")
-            append("Host: ").append(socket.inetAddress?.hostAddress ?: "device").append("\r\n")
+            append("Host: ").append(socket.inetAddress?.hostAddress ?: "device")
+            if (socket.port != 80) append(':').append(socket.port)
+            append("\r\n")
             append("Upgrade: websocket\r\n")
             append("Connection: Upgrade\r\n")
             append("Sec-WebSocket-Key: ").append(Base64.getEncoder().encodeToString(key)).append("\r\n")
@@ -433,8 +450,14 @@ internal object WadaWire {
         val line = header.lineSequence().firstOrNull() ?: ""
         if (!line.contains("101")) {
             throw IOException(
-                if (line.contains("503")) "a browser already has the transfer session"
-                else "the device refused the session ($line)",
+                if (line.contains("503")) {
+                    // The firmware answers 503 both when Transfer is closed on the device and
+                    // when another page already holds its one session; saying which is likely
+                    // is more use than repeating the status line.
+                    "Transfer is not open on the device, or a browser already has the session"
+                } else {
+                    "the device refused the session ($line)"
+                },
             )
         }
         return input to out
