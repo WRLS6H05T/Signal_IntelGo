@@ -100,6 +100,8 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                 .padding(horizontal = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            item { Spacer(Modifier.height(6.dp)) }
+            item { DataFolderCard(c) }
             item {
                 SectionCard(title = "Satellites", trailing = "${c.sat.cachedCount()} TLEs") {
                     Text("CelesTrak element sets, propagated on device (SGP4).", color = Sky.textDim, fontSize = 11.sp)
@@ -656,6 +658,8 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                     Text("Remote ID parsing is best-effort; some broadcasters rotate payloads.", color = Sky.textDim, fontSize = 10.sp)
                 }
             }
+            // Room for the folded tab button in the corner, so it never covers the last row.
+            item { Spacer(Modifier.height(64.dp)) }
         }
         PaneLabel("DEVICES")
         LazyColumn(
@@ -956,6 +960,7 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                     }
                 }
             }
+            item { Spacer(Modifier.height(64.dp)) }
         }
     }
 }
