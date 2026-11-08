@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilterChip
@@ -94,20 +95,25 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
     // They are written once and placed by the branch at the end, so stacked and side by side
     // are the same two lists in a different arrangement.
     Column(modifier.fillMaxSize().background(Sky.bg)) {
-        // Stacked or side by side. A phone held upright has width for one column of cards; a
-        // tablet, or a phone on its side, has height for two, and the choice is remembered.
-        Row(
+        // Merged, stacked or side by side. A phone held upright has width for one column of
+        // cards, and merged is exactly that: the whole screen in one scroll, with no pane to
+        // choose. A tablet, or a phone on its side, has height for two panes, and the choice is
+        // remembered. Wrapped rather than one line, because three chips and a label do not fit
+        // the narrowest phone.
+        FlowRow(
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 3.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text("SPLIT", style = SkywardThemeLabel(), color = Sky.textDim)
-            Spacer(Modifier.weight(1f))
-            ModeChip("STACKED", settings.setupSplit != "side") {
+            ModeChip("MERGED", settings.setupSplit == "merged") {
+                c.settingsStore.update { it.copy(setupSplit = "merged") }
+            }
+            ModeChip("STACKED", settings.setupSplit == "stacked") {
                 c.settingsStore.update { it.copy(setupSplit = "stacked") }
             }
-            Spacer(Modifier.width(6.dp))
             ModeChip("SIDE BY SIDE", settings.setupSplit == "side") {
                 c.settingsStore.update { it.copy(setupSplit = "side") }
             }
@@ -116,18 +122,14 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
         // switching the split rebuilds both of them. The two panes still scroll apart.
         val appScroll = rememberLazyListState()
         val devScroll = rememberLazyListState()
+        val mergedScroll = rememberLazyListState()
         val sideways = settings.setupSplit == "side"
+        val merged = settings.setupSplit == "merged"
 
-        val appPane: @Composable (Modifier) -> Unit = { paneModifier ->
-            Column(paneModifier) {
-                PaneLabel("APP")
-                LazyColumn(
-                    Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    state = appScroll,
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
+        // Each half's cards, declared once and placed by the branch at the end: merged, stacked
+        // and side by side are the same lists in a different arrangement, and merged needs them
+        // as one list rather than two pane lists that scroll apart.
+        val appItems: LazyListScope.() -> Unit = {
                     item { Spacer(Modifier.height(6.dp)) }
                     item { DataFolderCard(c) }
                     item {
@@ -688,19 +690,9 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                     }
                     // Room for the folded tab button in the corner, so it never covers the last row.
                     item { Spacer(Modifier.height(64.dp)) }
-                }
-            }
         }
-        val devPane: @Composable (Modifier) -> Unit = { paneModifier ->
-            Column(paneModifier) {
-                PaneLabel("DEVICES")
-                LazyColumn(
-                    Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    state = devScroll,
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
+
+        val devItems: LazyListScope.() -> Unit = {
                     item {
                         SectionCard(title = "Mesh nodes", trailing = if (c.mesh.isRunning()) "live" else "off") {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -986,11 +978,44 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                         }
                     }
                     item { Spacer(Modifier.height(64.dp)) }
-                }
+        }
+
+        val appPane: @Composable (Modifier) -> Unit = { paneModifier ->
+            Column(paneModifier) {
+                PaneLabel("APP")
+                LazyColumn(
+                    Modifier.weight(1f).fillMaxWidth(),
+                    state = appScroll,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) { appItems() }
+            }
+        }
+        val devPane: @Composable (Modifier) -> Unit = { paneModifier ->
+            Column(paneModifier) {
+                PaneLabel("DEVICES")
+                LazyColumn(
+                    Modifier.weight(1f).fillMaxWidth(),
+                    state = devScroll,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) { devItems() }
             }
         }
 
-        if (sideways) {
+        if (merged) {
+            // One screen and one scroll. There is no divide to draw and no pane to name once the
+            // halves are merged, so the cards are simply the whole settings screen.
+            LazyColumn(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp),
+                state = mergedScroll,
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                appItems()
+                devItems()
+            }
+        } else if (sideways) {
             Row(Modifier.weight(1f).fillMaxWidth()) {
                 appPane(Modifier.weight(1f).fillMaxHeight().padding(start = 12.dp, end = 6.dp))
                 // A hairline, so two columns of cards read as two panes and not one list.

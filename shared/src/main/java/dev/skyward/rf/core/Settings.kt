@@ -72,9 +72,9 @@ data class Settings(
      */
     val clockSeconds: Boolean = true,
     /**
-     * How Setup arranges its two panes: "stacked" (app above devices) or "side" (app beside
-     * devices). A phone held upright has width for one column of cards; a tablet, or a phone on
-     * its side, has height for two.
+     * How Setup arranges its cards: "merged" (one list, one scroll), "stacked" (app above
+     * devices, each scrolling on its own) or "side" (app beside devices). A phone held upright
+     * has width for one column of cards; a tablet, or a phone on its side, has height for two.
      */
     val setupSplit: String = "stacked",
     /** "km" or "mi": what every distance on screen is written in. Stored data stays metric. */

@@ -186,16 +186,17 @@ Unit tests (orbit math, Remote ID parser, colour scale, exports):
 
 ## Using it
 
-1. **Map** — the INTEL box holds two tables in one card, drawn the same on the map and on the
-   globe. **LIVE** is one row per category - **SAT**, **AIR**, **UAV**, **MESH**, **CELL**,
-   **WIFI**, **BLE**, **PATH**, **SIG**, **PEER**, **ESP** - read as counts, because the screen
-   is read for "how many" and a number is the honest way to say it when one category is in the
-   hundreds and another is two. Tapping a row shows or hides that layer, and the Wi-Fi and BLE
-   rows switch those radios (their tables clear, so the count drops to 0). A switched-off row
-   keeps its number drawn and dims only its label, so "hidden" never looks like "nothing
-   there". **LOGGED** is the entity table underneath: what the drive has caught, per layer, from
-   the sky and from every Wi-Fi network, Bluetooth device and sub-GHz hit the signal log holds -
-   the same numbers as the Log tab, in the corner already being looked at. Tap any marker for altitude,
+1. **Map** — the INTEL box is one table, drawn the same on the map and on the globe, with a row
+   per category - **SAT**, **AIR**, **UAV**, **MESH**, **CELL**, **WATCH**, **WIFI**, **BLE**,
+   **SUB**, **PATH**, **SIG**, **PEER**, **ESP** - and two counts on each. **LIVE**, beside the
+   label, is what is heard now, read as counts, because the screen is read for "how many" and a
+   number is the honest way to say it when one category is in the hundreds and another is two.
+   **LOGGED** sits at the right side of the table as its own column: what this phone has caught,
+   per layer, from the sky and from every Wi-Fi network, Bluetooth device and sub-GHz hit the
+   signal log holds - the same numbers as the Log tab, in the corner already being looked at.
+   Tapping a row shows or hides that layer, and the Wi-Fi and BLE rows switch those radios
+   (their tables clear, so the count drops to 0). A switched-off row keeps its numbers drawn and
+   dims only its label, so "hidden" never looks like "nothing there". Tap any marker for altitude,
    range, RSSI/SNR, squawk, operator ID and so on. The `◎` button re-centres on you;
    `⊙` logs the current sky. Zooming out declutters automatically (see *Zoom behaviour*).
    `MAPS ↗` hands the current view to your phone's own map app (Google Maps and friends, via a
@@ -208,9 +209,10 @@ Unit tests (orbit math, Remote ID parser, colour scale, exports):
 3. **Log** — saved drives with distance/peak counts; show one on the map, or export
    **GeoJSON** (track + per-fix points with `score`/`bin`) and **CSV**. The logged-entity
    registry exports too.
-4. **Setup** — satellite groups, ADS-B radius, Meshtastic and MeshCore broker/topic, WADAMESH
-direct transfer (address + session code), basemap
-   (dark or streets, both keyless OSM), weak-dot filter, logging radius, permission status.
+4. **Setup** — the top row arranges the screen: **MERGED** (one list, one scroll), **STACKED**
+   or **SIDE BY SIDE**; then satellite groups, ADS-B radius, Meshtastic and MeshCore
+   broker/topic, WADAMESH direct transfer (address + session code), basemap (dark or streets,
+   both keyless OSM), weak-dot filter, logging radius, permission status.
 
 Basemap tiles are cached on disk, so a drive area works again offline.
 
