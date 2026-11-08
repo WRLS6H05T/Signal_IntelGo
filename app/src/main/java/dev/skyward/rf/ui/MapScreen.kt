@@ -287,13 +287,14 @@ private val BirdsGold = Color(0xFFFFD166)
 /** NORAD 25544 is the station; the name never decides, because SWISSCUBE also contains "ISS". */
 private fun isIss(m: MapMarker): Boolean = m.station
 
-private fun markerColor(m: MapMarker, satEntity: Color = Sky.logged): Color = when {
+private fun markerColor(m: MapMarker, entityRing: Color = Sky.logged): Color = when {
     isIss(m) -> IssGold
     // The peer's catch is not this phone's logged purple: it is someone else's intel.
     m.peer -> Sky.cyan
     m.birds3 && m.logged -> BirdsGold
-    m.logged && m.layer == Layer.SATELLITE -> satEntity
-    m.logged -> Sky.logged
+    // One ring for every logged entity. The preset used to colour satellites only, which made
+    // a caught drone, tower, mesh node or camera read as a different kind of catch.
+    m.logged -> entityRing
     m.layer == Layer.SATELLITE -> Sky.satellite
     m.layer == Layer.AIRCRAFT -> Sky.aircraft
     m.layer == Layer.DRONE -> Sky.drone
@@ -759,7 +760,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 selectedSignal = null
             },
             spinSpeed = settings.globeSpin,
-            satEntity = entityColor(settings.satEntityColor),
+            entityRing = entityColor(settings.satEntityColor),
             offline = settings.offlineMode,
             modifier = Modifier.fillMaxSize(),
         )
@@ -1299,7 +1300,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 12.dp, start = 12.dp, end = 12.dp),
-                satEntity = entityColor(settings.satEntityColor),
+                entityRing = entityColor(settings.satEntityColor),
                 onClose = { selected = null },
             )
         }
@@ -1431,7 +1432,7 @@ private fun MarkerCard(
     marker: MapMarker,
     modifier: Modifier = Modifier,
     /** The colour this build uses for a logged satellite, chosen in Setup. */
-    satEntity: Color = Sky.logged,
+    entityRing: Color = Sky.logged,
     onClose: () -> Unit,
 ) {
     Column(
@@ -1439,11 +1440,11 @@ private fun MarkerCard(
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(Sky.surface)
-            .border(1.dp, markerColor(marker, satEntity).copy(alpha = 0.55f), RoundedCornerShape(14.dp))
+            .border(1.dp, markerColor(marker, entityRing).copy(alpha = 0.55f), RoundedCornerShape(14.dp))
             .padding(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Dot(markerColor(marker, satEntity), 9)
+            Dot(markerColor(marker, entityRing), 9)
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
                 Text(marker.title, color = Sky.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
@@ -1556,8 +1557,8 @@ private fun TacticalMap(
     onSelectSdr: (String?) -> Unit = {},
     /** 0 off, 1 = 1x, 2 = 3x: how fast the ball turns on its own axis. */
     spinSpeed: Int,
-    /** The entity colour a logged satellite is drawn in, from Settings.satEntityColor. */
-    satEntity: Color = Sky.logged,
+    /** The ring colour a logged entity is drawn in, from Settings.satEntityColor. */
+    entityRing: Color = Sky.logged,
     /** Offline mode: cached tiles only, nothing is downloaded. */
     offline: Boolean = false,
     modifier: Modifier = Modifier,
@@ -1896,6 +1897,11 @@ private fun TacticalMap(
 
             // ---- entities: lifted off the globe by their own altitude ----
             for (m in markers) {
+                // Aircraft belong to the flat map. They are the densest layer by far, and on the
+                // ball a few hundred airliner triangles are indistinguishable from the logged
+                // rings they sit among - while each still costs a projection and a glyph. The
+                // skip is before the projection so the globe does not pay for them at all.
+                if (cull && m.layer == Layer.AIRCRAFT) continue
                 vp.elevatedNormInto(m.lat, m.nx, m.ny, m.altM, pa)
                 // whatever has rotated round the back of the sphere is not drawn
                 if (cull && pa.front <= 0.02f) continue
@@ -1903,7 +1909,7 @@ private fun TacticalMap(
                 val a = if (cull) smoothstep(pa.front) else 1f
                 if (a <= 0.02f) continue
 
-                val base = markerColor(m, satEntity)
+                val base = markerColor(m, entityRing)
                 val color = base.copy(alpha = a)
                 val p = Offset(pa.x, pa.y)
 
@@ -1953,9 +1959,9 @@ private fun TacticalMap(
                         center = p,
                     )
                 } else if (m.logged) {
-                    // The entity circle. A satellite takes whichever colour was picked in
-                    // Setup; every other layer keeps the purple, so nothing else changes.
-                    val ring = if (m.layer == Layer.SATELLITE) satEntity else Sky.logged
+                    // The entity circle, in whichever colour was picked in Setup: every layer
+                    // takes it now, so "caught" reads the same in all of them.
+                    val ring = entityRing
                     drawCircle(color = ring.copy(alpha = 0.18f * a), radius = r * 3.2f, center = p)
                     drawCircle(
                         color = ring.copy(alpha = a),

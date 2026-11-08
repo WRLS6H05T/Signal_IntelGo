@@ -88,883 +88,893 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
         }
     }
 
-    LazyColumn(
-        modifier
-            .fillMaxSize()
-            .background(Sky.bg)
-            .padding(horizontal = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        item { Spacer(Modifier.height(6.dp)) }
-
-        item { DataFolderCard(c) }
-
-        item {
-            SectionCard(title = "Satellites", trailing = "${c.sat.cachedCount()} TLEs") {
-                Text("CelesTrak element sets, propagated on device (SGP4).", color = Sky.textDim, fontSize = 11.sp)
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for (g in listOf("stations", "visual", "weather")) {
-                        GroupChip(g, settings) { c.settingsStore.update(it) }
-                    }
-                }
-                Spacer(Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for (g in listOf("gps-ops", "science", "amateur")) {
-                        GroupChip(g, settings) { c.settingsStore.update(it) }
-                    }
-                }
-                Spacer(Modifier.height(6.dp))
-                // The two constellations people ask for by name. Starlink is one group of
-                // thousands; PRIVATE is the CubeSat catalogue, which is where privately built
-                // and operated smallsats live - they are not a government series like the
-                // weather or GPS groups above.
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    GroupChip("starlink", settings, name = "STRLINK") { c.settingsStore.update(it) }
-                    GroupChip("cubesat", settings, name = "PRIVATE") { c.settingsStore.update(it) }
-                }
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "PRIVATE is the CubeSat catalogue: privately built and operated smallsats. " +
-                        "STRLINK is the whole Starlink shell, so the sky tick slows while it is on.",
-                    color = Sky.textDim,
-                    fontSize = 9.sp,
-                )
-                Spacer(Modifier.height(8.dp))
-                Text("ENTITY COLOUR", color = Sky.textDim, fontSize = 9.sp)
-                Spacer(Modifier.height(4.dp))
-                // What a satellite takes the moment it becomes an entity. Purple is the
-                // original ring; the others exist so it still reads with Starlink lit up.
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for ((key, swatch) in EntityColors.entries.take(3)) {
-                        EntityColorChip(key, swatch, settings) { c.settingsStore.update(it) }
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for ((key, swatch) in EntityColors.entries.drop(3)) {
-                        EntityColorChip(key, swatch, settings) { c.settingsStore.update(it) }
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-                // Named because they were asked for, and honest about why they are not on
-                // the map: a satellite that re-entered has no orbit left to draw.
-                Text(
-                    "BIRDS-3 - NepaliSat-1, Raavana-1 and Uguisu - deployed from the ISS in " +
-                        "June 2019 and re-entered in October 2021. CelesTrak has no live " +
-                        "elements, so they are tracked automatically if any are catalogued again.",
-                    color = Sky.textDim,
-                    fontSize = 10.sp,
-                )
-            }
-        }
-
-        item {
-            SectionCard(title = "Aircraft", trailing = if (settings.aircraftEnabled) "on" else "off") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("ADS-B via api.adsb.lol", color = Sky.text, fontSize = 13.sp)
-                        Text("Community feed, no key needed", color = Sky.textDim, fontSize = 10.sp)
-                    }
-                    Switch(
-                        checked = settings.aircraftEnabled,
-                        onCheckedChange = { on -> c.settingsStore.update { it.copy(aircraftEnabled = on) } },
-                    )
-                }
-                Spacer(Modifier.height(6.dp))
-                // Fixed, not a dial: a contact past 30 miles is not overhead traffic and its
-                // link estimate is noise, so it is neither plotted nor logged.
-                Text(
-                    "Only aircraft inside " +
-                        Units.distance(AircraftSource.RANGE_KM, settings.distanceUnit, 0) +
-                        " are shown and logged",
-                    color = Sky.textDim,
-                    fontSize = 10.sp,
-                )
-            }
-        }
-
-        item {
-            SectionCard(title = "Location", trailing = if (settings.gpsEnabled) "on" else "off") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Phone GPS", color = Sky.text, fontSize = 13.sp)
-                        Text(
-                            "Satellites, aircraft and watch hits need a fix",
-                            color = Sky.textDim,
-                            fontSize = 10.sp,
-                        )
-                    }
-                    Switch(
-                        checked = settings.gpsEnabled,
-                        onCheckedChange = { on -> c.settingsStore.update { it.copy(gpsEnabled = on) } },
-                    )
-                }
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "Off stops the receiver; the map keeps the last position it had. Everything " +
-                        "that needs a fix - overhead satellites, ADS-B, a watch hit's placement - " +
-                        "goes quiet until it is switched back on.",
-                    color = Sky.textDim,
-                    fontSize = 10.sp,
-                )
-            }
-        }
-
-        item {
-            SectionCard(title = "Offline", trailing = if (settings.offlineMode) "on" else "off") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Offline mode", color = Sky.text, fontSize = 13.sp)
-                        Text(
-                            "GPS satellites only, from what is already on the phone",
-                            color = Sky.textDim,
-                            fontSize = 10.sp,
-                        )
-                    }
-                    Switch(
-                        checked = settings.offlineMode,
-                        onCheckedChange = { on -> c.settingsStore.update { it.copy(offlineMode = on) } },
-                    )
-                }
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "On, the globe and the map draw the GPS constellation and nothing else - no " +
-                        "aircraft, drones, mesh nodes, cell towers, ESP32 boards, watch hits, " +
-                        "logged signals or drive path. The element sets are the ones already " +
-                        "saved and the basemap is the tiles already cached, so no feed is asked " +
-                        "for and it works with no signal at all. An empty sky means the " +
-                        "satellites have not been downloaded yet: switch this off once with a " +
-                        "network, then back on.",
-                    color = Sky.textDim,
-                    fontSize = 10.sp,
-                )
-            }
-        }
-
-        item {
-            SectionCard(title = "Mesh nodes", trailing = if (c.mesh.isRunning()) "live" else "off") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Meshtastic MQTT", color = Sky.text, fontSize = 13.sp)
-                        Text("Public broker JSON feed + BLE advertisers", color = Sky.textDim, fontSize = 10.sp)
-                    }
-                    Switch(
-                        checked = settings.meshMqttEnabled,
-                        onCheckedChange = { on ->
-                            c.settingsStore.update { it.copy(meshMqttEnabled = on) }
-                            c.mesh.stop()
-                            if (on) c.mesh.start()
-                        },
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
-                MeshConfig(c, settings, wada)
-            }
-        }
-
-        item {
-            SectionCard(title = "ESP32 sensors", trailing = "${c.esp32.count()} seen") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Boards and GPS modules", color = Sky.text, fontSize = 13.sp)
-                        Text("BLE adverts, or JSON over MQTT", color = Sky.textDim, fontSize = 10.sp)
-                    }
-                    Switch(
-                        checked = settings.esp32Enabled,
-                        onCheckedChange = { on ->
-                            c.settingsStore.update { it.copy(esp32Enabled = on) }
-                            if (!on) c.esp32.stop()
-                        },
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Use board GPS as fallback", color = Sky.text, fontSize = 13.sp)
-                        Text(
-                            "While the phone has no fix of its own",
-                            color = Sky.textDim,
-                            fontSize = 10.sp,
-                        )
-                    }
-                    Switch(
-                        checked = settings.esp32GpsFallback,
-                        onCheckedChange = { on -> c.settingsStore.update { it.copy(esp32GpsFallback = on) } },
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("MQTT ingest", color = Sky.text, fontSize = 13.sp)
-                        Text("For boards that publish over Wi-Fi", color = Sky.textDim, fontSize = 10.sp)
-                    }
-                    Switch(
-                        checked = settings.esp32MqttEnabled,
-                        onCheckedChange = { on ->
-                            c.settingsStore.update { it.copy(esp32MqttEnabled = on) }
-                            c.esp32.stop()
-                            if (on) c.esp32.start()
-                        },
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("USB boards", color = Sky.text, fontSize = 13.sp)
-                        Text("GhostESP, ESP32 Marauder, Biscuit, any ESP32 on a cable", color = Sky.textDim, fontSize = 10.sp)
-                    }
-                    Switch(
-                        checked = settings.esp32UsbEnabled,
-                        onCheckedChange = { on ->
-                            c.settingsStore.update { it.copy(esp32UsbEnabled = on) }
-                            if (on) c.esp32Usb.start() else c.esp32Usb.stop()
-                        },
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
-                // Sub-GHz is a property of the board's hardware, not of the app: a Marauder
-                // without a CC1101 fitted answers nothing, and that is why the switch only
-                // decides whether the command is sent at all.
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Sub-GHz (CC1101)", color = Sky.text, fontSize = 13.sp)
-                        Text(
-                            "Sweep on a GhostESP or Marauder with the radio fitted",
-                            color = Sky.textDim,
-                            fontSize = 10.sp,
-                        )
-                    }
-                    Switch(
-                        checked = settings.subGhzEnabled,
-                        onCheckedChange = { on ->
-                            c.settingsStore.update { it.copy(subGhzEnabled = on) }
-                            c.esp32Usb.subGhzCommand = if (on) {
-                                settings.subGhzCommand.trim().ifBlank { null }
-                            } else {
-                                null
-                            }
-                        },
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
-                // The rate lives here as well as on the map's board card: it is a setting of
-                // the cable, and a board flashed at another rate answers a 115200 probe with
-                // noise, which reads exactly like a board that will not scan at all.
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("SERIAL SPEED", style = SkywardThemeLabel(), color = Sky.textDim)
-                    Spacer(Modifier.weight(1f))
-                    Text("${settings.esp32Baud}", color = Sky.text, fontSize = 10.sp)
-                }
-                Spacer(Modifier.height(4.dp))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    UsbBoards.BAUD_RATES.forEach { rate ->
-                        UnitChip("$rate", settings.esp32Baud == rate) {
-                            // Reopening the port is what applies it: the bridge rate is set
-                            // once, when the console is opened.
-                            c.settingsStore.update { it.copy(esp32Baud = rate) }
-                            c.esp32Usb.setBaud(rate)
-                            c.esp32Usb.stop()
-                            c.esp32Usb.start()
+    // Two panes, each with its own scroll: what the app does on top, what is plugged
+    // into it below. They do not share a scroll position, so reaching the peer card no
+    // longer scrolls the satellite groups off the screen.
+    Column(modifier.fillMaxSize().background(Sky.bg)) {
+        PaneLabel("APP")
+        LazyColumn(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            item {
+                SectionCard(title = "Satellites", trailing = "${c.sat.cachedCount()} TLEs") {
+                    Text("CelesTrak element sets, propagated on device (SGP4).", color = Sky.textDim, fontSize = 11.sp)
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for (g in listOf("stations", "visual", "weather")) {
+                            GroupChip(g, settings) { c.settingsStore.update(it) }
                         }
                     }
-                }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "115200 suits GhostESP and Marauder at their defaults. Pick the rate the " +
-                        "firmware was flashed at; the port reopens at the new speed straight away.",
-                    color = Sky.textDim,
-                    fontSize = 10.sp,
-                )
-                Spacer(Modifier.height(10.dp))
-                // The cable is the only way to a board that is not already running something
-                // the app understands: one console, one session at a time, poller waiting.
-                var serialOpen by remember { mutableStateOf(false) }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Chip("SERIAL", serialOpen, Sky.esp32) { serialOpen = true }
-                    Chip("RESCAN", false, Sky.esp32) { c.esp32Usb.rescan() }
-                }
-                Text(
-                    "Console and the board's GPS pin and baud, over USB.",
-                    color = Sky.textDim,
-                    fontSize = 10.sp,
-                )
-                if (serialOpen) EspSerialDialog(c, settings) { serialOpen = false }
-                Spacer(Modifier.height(8.dp))
-                Esp32Config(c, settings)
-            }
-        }
-
-        item {
-            SectionCard(title = "SDR", trailing = if (settings.sdrEnabled) "on" else "off") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("RTL-SDR dongle", color = Sky.text, fontSize = 13.sp)
-                        Text(
-                            "Spectrum on the map, recording and saved pins",
-                            color = Sky.textDim,
-                            fontSize = 10.sp,
-                        )
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for (g in listOf("gps-ops", "science", "amateur")) {
+                            GroupChip(g, settings) { c.settingsStore.update(it) }
+                        }
                     }
-                    Switch(
-                        checked = settings.sdrEnabled,
-                        onCheckedChange = { on ->
-                            c.settingsStore.update { it.copy(sdrEnabled = on) }
-                            if (on) c.sdr.start() else c.sdr.stop()
-                        },
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Plugged into the USB port, an RTL-SDR (0bda:2832 or 0bda:2838) opens a " +
-                        "spectrum drop-down at the top of the map. Recording saves the trace it " +
-                        "drew and pins it where the fix was, so a capture can be read back later " +
-                        "without the dongle. Off, the dongle is left alone and no panel is drawn.",
-                    color = Sky.textDim,
-                    fontSize = 10.sp,
-                )
-            }
-        }
-
-        item {
-            SectionCard(title = "Map") {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    TileChip("dark", "Dark", settings) { c.settingsStore.update(it) }
-                    TileChip("streets", "OSM", settings) { c.settingsStore.update(it) }
-                }
-                Spacer(Modifier.height(10.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Hide weak dots", color = Sky.text, fontSize = 13.sp)
-                        Text("Only plot entities above the red bin", color = Sky.textDim, fontSize = 10.sp)
+                    Spacer(Modifier.height(6.dp))
+                    // The two constellations people ask for by name. Starlink is one group of
+                    // thousands; PRIVATE is the CubeSat catalogue, which is where privately built
+                    // and operated smallsats live - they are not a government series like the
+                    // weather or GPS groups above.
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        GroupChip("starlink", settings, name = "STRLINK") { c.settingsStore.update(it) }
+                        GroupChip("cubesat", settings, name = "PRIVATE") { c.settingsStore.update(it) }
                     }
-                    Switch(
-                        checked = settings.dropWeakDots,
-                        onCheckedChange = { on -> c.settingsStore.update { it.copy(dropWeakDots = on) } },
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
-                SmallAction("CLEAR TILE CACHE") { tileStore.clear() }
-            }
-        }
-
-        item {
-            SectionCard(title = "Clock", trailing = if (settings.showLiveTime) "top right" else "off") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Live time", color = Sky.text, fontSize = 13.sp)
-                        Text(
-                            "A running clock in the map's top-right corner. Tapping it opens " +
-                                "the weather at your GPS pin.",
-                            color = Sky.textDim,
-                            fontSize = 10.sp,
-                        )
-                    }
-                    Switch(
-                        checked = settings.showLiveTime,
-                        onCheckedChange = { on -> c.settingsStore.update { it.copy(showLiveTime = on) } },
-                    )
-                }
-                Spacer(Modifier.height(6.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Seconds", color = Sky.text, fontSize = 13.sp)
-                        Text(
-                            "Off, the hour and minute are drawn larger in the same corner",
-                            color = Sky.textDim,
-                            fontSize = 10.sp,
-                        )
-                    }
-                    Switch(
-                        checked = settings.clockSeconds,
-                        onCheckedChange = { on -> c.settingsStore.update { it.copy(clockSeconds = on) } },
-                    )
-                }
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "Weather from Open-Meteo: no account and no key. It is read at most every " +
-                        "ten minutes, and again after moving two kilometres. The drop-down also " +
-                        "gives the terrain height at the pin, which is a useful second opinion " +
-                        "on the map's own elevation.",
-                    color = Sky.textDim,
-                    fontSize = 10.sp,
-                )
-            }
-        }
-
-        item {
-            SectionCard(
-                title = "Units",
-                trailing = Units.distanceLabel(settings.distanceUnit) + " \u00b7 " +
-                    Units.temperatureLabel(settings.tempUnit),
-            ) {
-                Text("DISTANCE", style = SkywardThemeLabel(), color = Sky.textDim)
-                Spacer(Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    UnitChip("KM", settings.distanceUnit != Units.MILES) {
-                        c.settingsStore.update { it.copy(distanceUnit = Units.KM) }
-                    }
-                    UnitChip("MILES", settings.distanceUnit == Units.MILES) {
-                        c.settingsStore.update { it.copy(distanceUnit = Units.MILES) }
-                    }
-                }
-                Spacer(Modifier.height(10.dp))
-                Text("TEMPERATURE", style = SkywardThemeLabel(), color = Sky.textDim)
-                Spacer(Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    UnitChip("\u00b0C", settings.tempUnit != Units.FAHRENHEIT) {
-                        c.settingsStore.update { it.copy(tempUnit = Units.CELSIUS) }
-                    }
-                    UnitChip("\u00b0F", settings.tempUnit == Units.FAHRENHEIT) {
-                        c.settingsStore.update { it.copy(tempUnit = Units.FAHRENHEIT) }
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Distances are stored in kilometres and converted only where they are " +
-                        "written on screen, so switching units never changes a saved drive or " +
-                        "what the other phone receives. Wind and rain follow the distance " +
-                        "unit: mph and inches with miles, km/h and millimetres with kilometres.",
-                    color = Sky.textDim,
-                    fontSize = 10.sp,
-                )
-            }
-        }
-
-        item {
-            SectionCard(
-                title = "Watcher",
-                trailing = when {
-                    !settings.voiceEnabled -> "off"
-                    voice.note.isNotBlank() -> "unavailable"
-                    voice.speaking -> "speaking"
-                    voice.listening -> "listening"
-                    else -> "tap to talk"
-                },
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Hands-free voice", color = Sky.text, fontSize = 13.sp)
-                        Text("Say 'Watcher', then a command", color = Sky.textDim, fontSize = 10.sp)
-                    }
-                    Switch(
-                        checked = settings.voiceEnabled,
-                        onCheckedChange = { on ->
-                            if (!on) {
-                                c.settingsStore.update { it.copy(voiceEnabled = false) }
-                            } else {
-                                val granted = ContextCompat.checkSelfPermission(
-                                    context,
-                                    Manifest.permission.RECORD_AUDIO,
-                                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                                if (granted) c.settingsStore.update { it.copy(voiceEnabled = true) }
-                                else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                            }
-                        },
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
-                Text("Machine voice", color = Sky.text, fontSize = 11.sp)
-                Spacer(Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for (gender in VoiceStyles.genders) {
-                        UnitChip(
-                            label = gender.label,
-                            selected = VoiceStyles.of(settings.voiceGender).gender == gender,
-                            onClick = {
-                                c.settingsStore.update { it.copy(voiceGender = gender.name.lowercase()) }
-                            },
-                        )
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Spacer(Modifier.height(6.dp))
                     Text(
-                        "Flat and clipped, one idea per sentence; the pitch is the only difference.",
+                        "PRIVATE is the CubeSat catalogue: privately built and operated smallsats. " +
+                            "STRLINK is the whole Starlink shell, so the sky tick slows while it is on.",
+                        color = Sky.textDim,
+                        fontSize = 9.sp,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    // Named because they were asked for, and honest about why they are not on
+                    // the map: a satellite that re-entered has no orbit left to draw.
+                    Text(
+                        "BIRDS-3 - NepaliSat-1, Raavana-1 and Uguisu - deployed from the ISS in " +
+                            "June 2019 and re-entered in October 2021. CelesTrak has no live " +
+                            "elements, so they are tracked automatically if any are catalogued again.",
                         color = Sky.textDim,
                         fontSize = 10.sp,
-                        modifier = Modifier.weight(1f),
                     )
-                    if (settings.voiceEnabled) {
-                        FilterChip(
-                            selected = false,
-                            onClick = {
-                                c.voice.speak(
-                                    VoiceStyles.sample(VoiceStyles.of(settings.voiceGender).gender),
-                                )
-                            },
-                            label = {
-                                Text("hear it", fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-                            },
-                            shape = RoundedCornerShape(9.dp),
-                            colors = FilterChipDefaults.filterChipColors(
-                                containerColor = Sky.surfaceHigh,
-                                labelColor = Sky.cyan,
-                            ),
+                }
+            }
+            item {
+                SectionCard(title = "Aircraft", trailing = if (settings.aircraftEnabled) "on" else "off") {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("ADS-B via api.adsb.lol", color = Sky.text, fontSize = 13.sp)
+                            Text("Community feed, no key needed", color = Sky.textDim, fontSize = 10.sp)
+                        }
+                        Switch(
+                            checked = settings.aircraftEnabled,
+                            onCheckedChange = { on -> c.settingsStore.update { it.copy(aircraftEnabled = on) } },
                         )
                     }
-                }
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Spoken replies", color = Sky.text, fontSize = 13.sp)
-                        Text("Watch alerts use the glitched voice", color = Sky.textDim, fontSize = 10.sp)
-                    }
-                    Switch(
-                        checked = settings.voiceAudio,
-                        onCheckedChange = { on -> c.settingsStore.update { it.copy(voiceAudio = on) } },
-                    )
-                }
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "It only listens between a tap on the status box under the map's clock and the " +
-                        "end of the command that follows - nothing holds the microphone on between " +
-                        "taps. Tap, then say: 'intel report', 'open map', 'drive', 'log', 'setup', " +
-                        "'open menu', 'close menu', 'start logging', 'stop logging', 'miles', " +
-                        "'kilometres', 'celsius', 'fahrenheit', 'mute', 'unmute', 'sleep'. The " +
-                        "name 'Watcher' may be said first, but it is not needed. The recogniser " +
-                        "and the speaker are the phone's own - nothing is recorded to a file and " +
-                        "nothing is sent anywhere.",
-                    color = Sky.textDim,
-                    fontSize = 10.sp,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "A phone's engine has one voice per language and a pitch and rate dial, so the " +
-                        "machine is made by pacing: commas and dashes become full stops, and the " +
-                        "gender is the pitch - the woman a little above the engine's natural voice, " +
-                        "the man well below it. That is the honest limit of text-to-speech, not a " +
-                        "clone of the Watch Dogs performance.",
-                    color = Sky.textDim,
-                    fontSize = 10.sp,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "The glitched delivery is kept for the watch list in either voice: Axon, " +
-                        "TASER, Flock and trackers, once per device per five minutes.",
-                    color = Sky.textDim,
-                    fontSize = 10.sp,
-                )
-                val note = micNote ?: voice.note
-                if (note.isNotBlank()) {
                     Spacer(Modifier.height(6.dp))
-                    Text(note, color = Sky.warn, fontSize = 10.sp)
-                }
-            }
-        }
-
-        item {
-            SectionCard(
-                title = "Intel updates",
-                trailing = if (settings.intelUpdateMinutes <= 0) "off"
-                else "every ${settings.intelUpdateMinutes} min",
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Timed intel update", color = Sky.text, fontSize = 13.sp)
-                        Text(
-                            "The Watcher reads its table out on its own",
-                            color = Sky.textDim,
-                            fontSize = 10.sp,
-                        )
-                    }
-                    Switch(
-                        checked = settings.intelUpdateMinutes > 0,
-                        onCheckedChange = { on ->
-                            val keep = settings.intelUpdateMinutes
-                            c.settingsStore.update {
-                                it.copy(intelUpdateMinutes = if (on) (if (keep > 0) keep else 5) else 0)
-                            }
-                        },
+                    // Fixed, not a dial: a contact past 30 miles is not overhead traffic and its
+                    // link estimate is noise, so it is neither plotted nor logged.
+                    Text(
+                        "Only aircraft inside " +
+                            Units.distance(AircraftSource.RANGE_KM, settings.distanceUnit, 0) +
+                            " are shown and logged",
+                        color = Sky.textDim,
+                        fontSize = 10.sp,
                     )
                 }
-                Spacer(Modifier.height(10.dp))
-                Text("WATCHER READS", style = SkywardThemeLabel(), color = Sky.textDim)
-                Spacer(Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    ModeChip("INTEL", settings.watcherReportStyle == Watcher.STYLE_INTEL) {
-                        c.settingsStore.update { it.copy(watcherReportStyle = Watcher.STYLE_INTEL) }
-                    }
-                    ModeChip("ENTITIES", settings.watcherReportStyle == Watcher.STYLE_ENTITIES) {
-                        c.settingsStore.update { it.copy(watcherReportStyle = Watcher.STYLE_ENTITIES) }
-                    }
-                    ModeChip("BOTH", settings.watcherReportStyle == Watcher.STYLE_BOTH) {
-                        c.settingsStore.update { it.copy(watcherReportStyle = Watcher.STYLE_BOTH) }
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    when (settings.watcherReportStyle) {
-                        Watcher.STYLE_INTEL ->
-                            "The live table only: connected devices, the radios' counts and the " +
-                                "fix. Nothing from the log."
-                        Watcher.STYLE_ENTITIES ->
-                            "The entity table only: what the drive has caught, per layer. No " +
-                                "live counts."
-                        else ->
-                            "The live table, then the entity table: what is overhead now and " +
-                                "what the drive has caught."
-                    },
-                    color = Sky.textDim,
-                    fontSize = 10.sp,
-                )
-                Spacer(Modifier.height(8.dp))
-                Text("MINUTES BETWEEN UPDATES", style = SkywardThemeLabel(), color = Sky.textDim)
-                Spacer(Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    for (choice in intArrayOf(3, 5, 7, 10, 30)) {
-                        FilterChip(
-                            selected = settings.intelUpdateMinutes == choice,
-                            onClick = {
-                                c.settingsStore.update { it.copy(intelUpdateMinutes = choice) }
-                            },
-                            label = {
-                                Text("$choice", fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                            },
-                            shape = RoundedCornerShape(9.dp),
-                            colors = FilterChipDefaults.filterChipColors(
-                                containerColor = Sky.surfaceHigh,
-                                labelColor = Sky.textDim,
-                                selectedContainerColor = Sky.cyan.copy(alpha = 0.22f),
-                                selectedLabelColor = Sky.cyan,
-                            ),
+            }
+            item {
+                SectionCard(title = "Location", trailing = if (settings.gpsEnabled) "on" else "off") {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Phone GPS", color = Sky.text, fontSize = 13.sp)
+                            Text(
+                                "Satellites, aircraft and watch hits need a fix",
+                                color = Sky.textDim,
+                                fontSize = 10.sp,
+                            )
+                        }
+                        Switch(
+                            checked = settings.gpsEnabled,
+                            onCheckedChange = { on -> c.settingsStore.update { it.copy(gpsEnabled = on) } },
                         )
                     }
-                }
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    if (settings.intelUpdateMinutes <= 0) {
-                        "Off. The Watcher only speaks when it is asked to."
-                    } else {
-                        "Every ${settings.intelUpdateMinutes} minutes it keys up with 'Watcher " +
-                            "to operator, intel update', reads " +
-                            (when (settings.watcherReportStyle) {
-                                Watcher.STYLE_INTEL -> "the live table"
-                                Watcher.STYLE_ENTITIES -> "the entity table"
-                                else -> "the live table then the entity table"
-                            }) + ", then the watch sightings since the last update, and signs " +
-                            "off 'Watcher out'. It needs hands-free voice on; on a peer link " +
-                            "only the larger screen speaks it."
-                    },
-                    color = Sky.textDim,
-                    fontSize = 10.sp,
-                )
-            }
-        }
-
-        item {
-            SectionCard(title = "Watch list", trailing = "${sky.watch.size} heard") {
-                Text(
-                    "Passive matches for surveillance hardware: Flock Safety ALPR cameras " +
-                        "(including the 'FS Ext Battery' packs and Flock-XXXX names), Axon " +
-                        "body cameras, Axon TASERs, and Bluetooth item trackers - AirTag, Tile, " +
-                        "SmartTag and Chipolo - which follow a person or a car rather than scan it.",
-                    color = Sky.textDim,
-                    fontSize = 11.sp,
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "The match is made from the name a device broadcasts, plus the Bluetooth " +
-                        "manufacturer id Flock's hardware uses (XUNTONG, 0x09C8). A camera that " +
-                        "keeps its name hidden, or any phone whose address rotates, cannot be " +
-                        "told apart from an anonymous MAC - so a hit is a lead, not proof. " +
-                        "A marker reading 'name + manufacturer id' is the one to trust. Trackers " +
-                        "are the opposite case: the name is the only evidence, because the good " +
-                        "ones randomise their address and encrypt what they advertise.",
-                    color = Sky.textDim,
-                    fontSize = 10.sp,
-                )
-                Spacer(Modifier.height(6.dp))
-                SwatchRow(color = Sky.watchFlock, label = "FLOCK", detail = "ALPR camera")
-                SwatchRow(color = Sky.watchAxon, label = "AXON", detail = "body camera")
-                SwatchRow(color = Sky.watchTaser, label = "TASER", detail = "Axon CED")
-                SwatchRow(color = Sky.watchTracker, label = "TRACKER", detail = "AirTag, Tile, SmartTag")
-            }
-        }
-
-        item {
-            SectionCard(
-                title = "Logging",
-                trailing = Units.distance(LOG_RADIUS_KM, settings.distanceUnit, 0),
-            ) {
-                // Fixed, not a dial. A wider radius caught most of the catalogue on every
-                // tick, which is the map rather than anything overhead.
-                Text(
-                    "Satellites within " + Units.distance(LOG_RADIUS_KM, settings.distanceUnit, 0) +
-                        " are captured during a drive. Aircraft are the " +
-                        Units.distance(AircraftSource.RANGE_KM, settings.distanceUnit, 0) + " set.",
-                    color = Sky.textDim,
-                    fontSize = 11.sp,
-                )
-            }
-        }
-
-        item {
-            SectionCard(
-                title = "Two devices",
-                trailing = when {
-                    peer.connected -> "linked"
-                    peer.running -> "searching"
-                    else -> "off"
-                },
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Share scans, intel and drives over BLE", color = Sky.text, fontSize = 13.sp)
-                        Text(
-                            "Two of your own devices, or a friend's, peer to peer: each keeps " +
-                                "wardriving on its own and both end up with the other's findings.",
-                            color = Sky.textDim,
-                            fontSize = 10.sp,
-                        )
-                    }
-                    Switch(
-                        checked = settings.peerEnabled,
-                        onCheckedChange = { on ->
-                            c.settingsStore.update { it.copy(peerEnabled = on) }
-                            if (on) c.peer.start() else c.peer.stop()
-                        },
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Off stops the receiver; the map keeps the last position it had. Everything " +
+                            "that needs a fix - overhead satellites, ADS-B, a watch hit's placement - " +
+                            "goes quiet until it is switched back on.",
+                        color = Sky.textDim,
+                        fontSize = 10.sp,
                     )
                 }
-                Spacer(Modifier.height(10.dp))
-                Text("SHARING WITH", style = SkywardThemeLabel(), color = Sky.textDim)
-                Spacer(Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    ShareChip("MY OWN DEVICES", PeerProtocol.SHARE_OWN, settings) { c.settingsStore.update(it) }
-                    ShareChip("A FRIEND", PeerProtocol.SHARE_FRIEND, settings) { c.settingsStore.update(it) }
+            }
+            item {
+                SectionCard(title = "Offline", trailing = if (settings.offlineMode) "on" else "off") {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Offline mode", color = Sky.text, fontSize = 13.sp)
+                            Text(
+                                "GPS satellites only, from what is already on the phone",
+                                color = Sky.textDim,
+                                fontSize = 10.sp,
+                            )
+                        }
+                        Switch(
+                            checked = settings.offlineMode,
+                            onCheckedChange = { on -> c.settingsStore.update { it.copy(offlineMode = on) } },
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "On, the globe and the map draw the GPS constellation and nothing else - no " +
+                            "aircraft, drones, mesh nodes, cell towers, ESP32 boards, watch hits, " +
+                            "logged signals or drive path. The element sets are the ones already " +
+                            "saved and the basemap is the tiles already cached, so no feed is asked " +
+                            "for and it works with no signal at all. An empty sky means the " +
+                            "satellites have not been downloaded yet: switch this off once with a " +
+                            "network, then back on.",
+                        color = Sky.textDim,
+                        fontSize = 10.sp,
+                    )
                 }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    if (settings.peerShareMode == PeerProtocol.SHARE_FRIEND) {
-                        "Intel only, both ways: radios, the fix, board intel and the entity table. " +
-                            "The drive library, the shared drive recording and forwarded Watcher " +
-                            "commands stay on your own devices."
-                    } else {
-                        "A second device of yours: everything above, plus drives, the same drive " +
-                            "recorded on both, and Watcher commands obeyed by both."
-                    },
-                    color = Sky.textDim,
-                    fontSize = 10.sp,
-                )
-
-                if (settings.peerEnabled) {
+            }
+            item {
+                SectionCard(title = "Map") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        TileChip("dark", "Dark", settings) { c.settingsStore.update(it) }
+                        TileChip("streets", "OSM", settings) { c.settingsStore.update(it) }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Hide weak dots", color = Sky.text, fontSize = 13.sp)
+                            Text("Only plot entities above the red bin", color = Sky.textDim, fontSize = 10.sp)
+                        }
+                        Switch(
+                            checked = settings.dropWeakDots,
+                            onCheckedChange = { on -> c.settingsStore.update { it.copy(dropWeakDots = on) } },
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    // One ring colour for every logged entity - aircraft, drones, mesh, towers,
+                    // boards and satellites alike - so "caught" looks the same in every layer. It
+                    // lives here rather than under Satellites because it is no longer theirs.
+                    Text("ENTITY COLOUR", style = SkywardThemeLabel(), color = Sky.textDim)
+                    Spacer(Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for ((key, swatch) in EntityColors.entries.take(3)) {
+                            EntityColorChip(key, swatch, settings) { c.settingsStore.update(it) }
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for ((key, swatch) in EntityColors.entries.drop(3)) {
+                            EntityColorChip(key, swatch, settings) { c.settingsStore.update(it) }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    SmallAction("CLEAR TILE CACHE") { tileStore.clear() }
+                }
+            }
+            item {
+                SectionCard(title = "Clock", trailing = if (settings.showLiveTime) "top right" else "off") {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Live time", color = Sky.text, fontSize = 13.sp)
+                            Text(
+                                "A running clock in the map's top-right corner. Tapping it opens " +
+                                    "the weather at your GPS pin.",
+                                color = Sky.textDim,
+                                fontSize = 10.sp,
+                            )
+                        }
+                        Switch(
+                            checked = settings.showLiveTime,
+                            onCheckedChange = { on -> c.settingsStore.update { it.copy(showLiveTime = on) } },
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Seconds", color = Sky.text, fontSize = 13.sp)
+                            Text(
+                                "Off, the hour and minute are drawn larger in the same corner",
+                                color = Sky.textDim,
+                                fontSize = 10.sp,
+                            )
+                        }
+                        Switch(
+                            checked = settings.clockSeconds,
+                            onCheckedChange = { on -> c.settingsStore.update { it.copy(clockSeconds = on) } },
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Weather from Open-Meteo: no account and no key. It is read at most every " +
+                            "ten minutes, and again after moving two kilometres. The drop-down also " +
+                            "gives the terrain height at the pin, which is a useful second opinion " +
+                            "on the map's own elevation.",
+                        color = Sky.textDim,
+                        fontSize = 10.sp,
+                    )
+                }
+            }
+            item {
+                SectionCard(
+                    title = "Units",
+                    trailing = Units.distanceLabel(settings.distanceUnit) + " \u00b7 " +
+                        Units.temperatureLabel(settings.tempUnit),
+                ) {
+                    Text("DISTANCE", style = SkywardThemeLabel(), color = Sky.textDim)
+                    Spacer(Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        UnitChip("KM", settings.distanceUnit != Units.MILES) {
+                            c.settingsStore.update { it.copy(distanceUnit = Units.KM) }
+                        }
+                        UnitChip("MILES", settings.distanceUnit == Units.MILES) {
+                            c.settingsStore.update { it.copy(distanceUnit = Units.MILES) }
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Text("TEMPERATURE", style = SkywardThemeLabel(), color = Sky.textDim)
+                    Spacer(Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        UnitChip("\u00b0C", settings.tempUnit != Units.FAHRENHEIT) {
+                            c.settingsStore.update { it.copy(tempUnit = Units.CELSIUS) }
+                        }
+                        UnitChip("\u00b0F", settings.tempUnit == Units.FAHRENHEIT) {
+                            c.settingsStore.update { it.copy(tempUnit = Units.FAHRENHEIT) }
+                        }
+                    }
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "This screen: ${PeerProtocol.roleLabel(peer.role)}",
-                        color = Sky.cyan,
-                        fontSize = 11.sp,
-                    )
-                    Text(
-                        peer.detail + if (peer.connected) " · ${peer.peerName}" else "",
+                        "Distances are stored in kilometres and converted only where they are " +
+                            "written on screen, so switching units never changes a saved drive or " +
+                            "what the other phone receives. Wind and rain follow the distance " +
+                            "unit: mph and inches with miles, km/h and millimetres with kilometres.",
                         color = Sky.textDim,
                         fontSize = 10.sp,
                     )
-                    Text(
-                        "peer wifi ${peer.peerWifi} · ble ${peer.peerBle} · up ${peer.sent} down ${peer.received}",
-                        color = Sky.textDim,
-                        fontSize = 10.sp,
-                    )
-                    if (peer.peerBoardWifi > 0 || peer.peerBoardBle > 0) {
-                        Text(
-                            "its board: wifi ${peer.peerBoardWifi} · ble ${peer.peerBoardBle}",
-                            color = Sky.esp32,
-                            fontSize = 10.sp,
+                }
+            }
+            item {
+                SectionCard(
+                    title = "Watcher",
+                    trailing = when {
+                        !settings.voiceEnabled -> "off"
+                        voice.note.isNotBlank() -> "unavailable"
+                        voice.speaking -> "speaking"
+                        voice.listening -> "listening"
+                        else -> "tap to talk"
+                    },
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Hands-free voice", color = Sky.text, fontSize = 13.sp)
+                            Text("Say 'Watcher', then a command", color = Sky.textDim, fontSize = 10.sp)
+                        }
+                        Switch(
+                            checked = settings.voiceEnabled,
+                            onCheckedChange = { on ->
+                                if (!on) {
+                                    c.settingsStore.update { it.copy(voiceEnabled = false) }
+                                } else {
+                                    val granted = ContextCompat.checkSelfPermission(
+                                        context,
+                                        Manifest.permission.RECORD_AUDIO,
+                                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                                    if (granted) c.settingsStore.update { it.copy(voiceEnabled = true) }
+                                    else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                }
+                            },
                         )
                     }
+                    Spacer(Modifier.height(8.dp))
+                    Text("Machine voice", color = Sky.text, fontSize = 11.sp)
+                    Spacer(Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for (gender in VoiceStyles.genders) {
+                            UnitChip(
+                                label = gender.label,
+                                selected = VoiceStyles.of(settings.voiceGender).gender == gender,
+                                onClick = {
+                                    c.settingsStore.update { it.copy(voiceGender = gender.name.lowercase()) }
+                                },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "Flat and clipped, one idea per sentence; the pitch is the only difference.",
+                            color = Sky.textDim,
+                            fontSize = 10.sp,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (settings.voiceEnabled) {
+                            FilterChip(
+                                selected = false,
+                                onClick = {
+                                    c.voice.speak(
+                                        VoiceStyles.sample(VoiceStyles.of(settings.voiceGender).gender),
+                                    )
+                                },
+                                label = {
+                                    Text("hear it", fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                                },
+                                shape = RoundedCornerShape(9.dp),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    containerColor = Sky.surfaceHigh,
+                                    labelColor = Sky.cyan,
+                                ),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Spoken replies", color = Sky.text, fontSize = 13.sp)
+                            Text("Watch alerts use the glitched voice", color = Sky.textDim, fontSize = 10.sp)
+                        }
+                        Switch(
+                            checked = settings.voiceAudio,
+                            onCheckedChange = { on -> c.settingsStore.update { it.copy(voiceAudio = on) } },
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
                     Text(
-                        if (peer.peerRecording) "both phones are recording" else
-                            "neither phone is recording",
+                        "It only listens between a tap on the status box under the map's clock and the " +
+                            "end of the command that follows - nothing holds the microphone on between " +
+                            "taps. Tap, then say: 'intel report', 'open map', 'drive', 'log', 'setup', " +
+                            "'open menu', 'close menu', 'start logging', 'stop logging', 'miles', " +
+                            "'kilometres', 'celsius', 'fahrenheit', 'mute', 'unmute', 'sleep'. The " +
+                            "name 'Watcher' may be said first, but it is not needed. The recogniser " +
+                            "and the speaker are the phone's own - nothing is recorded to a file and " +
+                            "nothing is sent anywhere.",
                         color = Sky.textDim,
-                        fontSize = 10.sp,
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        "A drive is shared: start one here and the other phone starts its own " +
-                            "for the same stretch of road. Each phone shares what it has caught " +
-                            "- satellites, aircraft, drones, mesh nodes and watch hits - so both " +
-                            "maps carry both skies, and a Watcher command said to either phone " +
-                            "is obeyed by both.",
-                        color = Sky.textDim,
-                        fontSize = 10.sp,
-                    )
-                    Text(
-                        if (peer.connected) {
-                            "Sharing intel with " + peer.peerName.ifBlank { "the other phone" } +
-                                ": " + peer.peerEntityTotal + " entities from it"
-                        } else {
-                            "Nothing shared yet: link the phones to exchange intel"
-                        },
-                        color = Sky.cyan,
                         fontSize = 10.sp,
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "Bluetooth must be on for both phones, and the link is peer to peer - nothing leaves the two devices.",
+                        "A phone's engine has one voice per language and a pitch and rate dial, so the " +
+                            "machine is made by pacing: commas and dashes become full stops, and the " +
+                            "gender is the pitch - the woman a little above the engine's natural voice, " +
+                            "the man well below it. That is the honest limit of text-to-speech, not a " +
+                            "clone of the Watch Dogs performance.",
+                        color = Sky.textDim,
+                        fontSize = 10.sp,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "The glitched delivery is kept for the watch list in either voice: Axon, " +
+                            "TASER, Flock and trackers, once per device per five minutes.",
+                        color = Sky.textDim,
+                        fontSize = 10.sp,
+                    )
+                    val note = micNote ?: voice.note
+                    if (note.isNotBlank()) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(note, color = Sky.warn, fontSize = 10.sp)
+                    }
+                }
+            }
+            item {
+                SectionCard(
+                    title = "Intel updates",
+                    trailing = if (settings.intelUpdateMinutes <= 0) "off"
+                    else "every ${settings.intelUpdateMinutes} min",
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Timed intel update", color = Sky.text, fontSize = 13.sp)
+                            Text(
+                                "The Watcher reads its table out on its own",
+                                color = Sky.textDim,
+                                fontSize = 10.sp,
+                            )
+                        }
+                        Switch(
+                            checked = settings.intelUpdateMinutes > 0,
+                            onCheckedChange = { on ->
+                                val keep = settings.intelUpdateMinutes
+                                c.settingsStore.update {
+                                    it.copy(intelUpdateMinutes = if (on) (if (keep > 0) keep else 5) else 0)
+                                }
+                            },
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Text("WATCHER READS", style = SkywardThemeLabel(), color = Sky.textDim)
+                    Spacer(Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        ModeChip("INTEL", settings.watcherReportStyle == Watcher.STYLE_INTEL) {
+                            c.settingsStore.update { it.copy(watcherReportStyle = Watcher.STYLE_INTEL) }
+                        }
+                        ModeChip("ENTITIES", settings.watcherReportStyle == Watcher.STYLE_ENTITIES) {
+                            c.settingsStore.update { it.copy(watcherReportStyle = Watcher.STYLE_ENTITIES) }
+                        }
+                        ModeChip("BOTH", settings.watcherReportStyle == Watcher.STYLE_BOTH) {
+                            c.settingsStore.update { it.copy(watcherReportStyle = Watcher.STYLE_BOTH) }
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        when (settings.watcherReportStyle) {
+                            Watcher.STYLE_INTEL ->
+                                "The live table only: connected devices, the radios' counts and the " +
+                                    "fix. Nothing from the log."
+                            Watcher.STYLE_ENTITIES ->
+                                "The entity table only: what the drive has caught, per layer. No " +
+                                    "live counts."
+                            else ->
+                                "The live table, then the entity table: what is overhead now and " +
+                                    "what the drive has caught."
+                        },
+                        color = Sky.textDim,
+                        fontSize = 10.sp,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text("MINUTES BETWEEN UPDATES", style = SkywardThemeLabel(), color = Sky.textDim)
+                    Spacer(Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        for (choice in intArrayOf(3, 5, 7, 10, 30)) {
+                            FilterChip(
+                                selected = settings.intelUpdateMinutes == choice,
+                                onClick = {
+                                    c.settingsStore.update { it.copy(intelUpdateMinutes = choice) }
+                                },
+                                label = {
+                                    Text("$choice", fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                },
+                                shape = RoundedCornerShape(9.dp),
+                                colors = FilterChipDefaults.filterChipColors(
+                                    containerColor = Sky.surfaceHigh,
+                                    labelColor = Sky.textDim,
+                                    selectedContainerColor = Sky.cyan.copy(alpha = 0.22f),
+                                    selectedLabelColor = Sky.cyan,
+                                ),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        if (settings.intelUpdateMinutes <= 0) {
+                            "Off. The Watcher only speaks when it is asked to."
+                        } else {
+                            "Every ${settings.intelUpdateMinutes} minutes it keys up with 'Watcher " +
+                                "to operator, intel update', reads " +
+                                (when (settings.watcherReportStyle) {
+                                    Watcher.STYLE_INTEL -> "the live table"
+                                    Watcher.STYLE_ENTITIES -> "the entity table"
+                                    else -> "the live table then the entity table"
+                                }) + ", then the watch sightings since the last update, and signs " +
+                                "off 'Watcher out'. It needs hands-free voice on; on a peer link " +
+                                "only the larger screen speaks it."
+                        },
                         color = Sky.textDim,
                         fontSize = 10.sp,
                     )
                 }
             }
-        }
-
-        item {
-            SectionCard(title = "Permissions") {
-                PermissionRow("Precise location", c.location.hasPermission())
-                PermissionRow("Wi-Fi scanning", c.rf.hasWifiPermission())
-                PermissionRow("Bluetooth scanning", c.rf.hasBlePermission())
-                Spacer(Modifier.height(8.dp))
-                SmallAction("REVIEW PERMISSIONS", Sky.cyan, onFixPermissions)
+            item {
+                SectionCard(title = "Watch list", trailing = "${sky.watch.size} heard") {
+                    Text(
+                        "Passive matches for surveillance hardware: Flock Safety ALPR cameras " +
+                            "(including the 'FS Ext Battery' packs and Flock-XXXX names), Axon " +
+                            "body cameras, Axon TASERs, and Bluetooth item trackers - AirTag, Tile, " +
+                            "SmartTag and Chipolo - which follow a person or a car rather than scan it.",
+                        color = Sky.textDim,
+                        fontSize = 11.sp,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "The match is made from the name a device broadcasts, plus the Bluetooth " +
+                            "manufacturer id Flock's hardware uses (XUNTONG, 0x09C8). A camera that " +
+                            "keeps its name hidden, or any phone whose address rotates, cannot be " +
+                            "told apart from an anonymous MAC - so a hit is a lead, not proof. " +
+                            "A marker reading 'name + manufacturer id' is the one to trust. Trackers " +
+                            "are the opposite case: the name is the only evidence, because the good " +
+                            "ones randomise their address and encrypt what they advertise.",
+                        color = Sky.textDim,
+                        fontSize = 10.sp,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    SwatchRow(color = Sky.watchFlock, label = "FLOCK", detail = "ALPR camera")
+                    SwatchRow(color = Sky.watchAxon, label = "AXON", detail = "body camera")
+                    SwatchRow(color = Sky.watchTaser, label = "TASER", detail = "Axon CED")
+                    SwatchRow(color = Sky.watchTracker, label = "TRACKER", detail = "AirTag, Tile, SmartTag")
+                }
+            }
+            item {
+                SectionCard(
+                    title = "Logging",
+                    trailing = Units.distance(LOG_RADIUS_KM, settings.distanceUnit, 0),
+                ) {
+                    // Fixed, not a dial. A wider radius caught most of the catalogue on every
+                    // tick, which is the map rather than anything overhead.
+                    Text(
+                        "Satellites within " + Units.distance(LOG_RADIUS_KM, settings.distanceUnit, 0) +
+                            " are captured during a drive. Aircraft are the " +
+                            Units.distance(AircraftSource.RANGE_KM, settings.distanceUnit, 0) + " set.",
+                        color = Sky.textDim,
+                        fontSize = 11.sp,
+                    )
+                }
+            }
+            item {
+                SectionCard(title = "Permissions") {
+                    PermissionRow("Precise location", c.location.hasPermission())
+                    PermissionRow("Wi-Fi scanning", c.rf.hasWifiPermission())
+                    PermissionRow("Bluetooth scanning", c.rf.hasBlePermission())
+                    Spacer(Modifier.height(8.dp))
+                    SmallAction("REVIEW PERMISSIONS", Sky.cyan, onFixPermissions)
+                }
+            }
+            item {
+                SectionCard(title = "About") {
+                    // The build number is how a phone proves it is running the build that was
+                    // published, rather than an older one with the same name.
+                    val version = remember {
+                        runCatching {
+                            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+                        }.getOrNull()
+                    }
+                    Text(
+                        "Signal_IntelGo ${version ?: "1.1"}",
+                        color = Sky.text,
+                        fontSize = 13.sp,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Live satellites (CelesTrak + SGP4), aircraft (ADS-B), drones (ASTM F3411 Remote ID over BLE), " +
+                            "mesh nodes (Meshtastic), and on-device Wi-Fi/BLE war-driving.",
+                        color = Sky.textDim,
+                        fontSize = 11.sp,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Use device maps", color = Sky.text, fontSize = 13.sp)
+                            Text(
+                                "Open the phone's map app instead of fetching online tiles",
+                                color = Sky.textDim,
+                                fontSize = 10.sp,
+                            )
+                        }
+                        Switch(
+                            checked = settings.useDeviceMap,
+                            onCheckedChange = { on -> c.settingsStore.update { it.copy(useDeviceMap = on) } },
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Text(TileSources.attribution(settings.tileSource), color = Sky.textDim, fontSize = 10.sp)
+                    Text("Remote ID parsing is best-effort; some broadcasters rotate payloads.", color = Sky.textDim, fontSize = 10.sp)
+                }
             }
         }
-
-        item {
-            SectionCard(title = "About") {
-                // The build number is how a phone proves it is running the build that was
-                // published, rather than an older one with the same name.
-                val version = remember {
-                    runCatching {
-                        context.packageManager.getPackageInfo(context.packageName, 0).versionName
-                    }.getOrNull()
+        PaneLabel("DEVICES")
+        LazyColumn(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            item {
+                SectionCard(title = "Mesh nodes", trailing = if (c.mesh.isRunning()) "live" else "off") {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Meshtastic MQTT", color = Sky.text, fontSize = 13.sp)
+                            Text("Public broker JSON feed + BLE advertisers", color = Sky.textDim, fontSize = 10.sp)
+                        }
+                        Switch(
+                            checked = settings.meshMqttEnabled,
+                            onCheckedChange = { on ->
+                                c.settingsStore.update { it.copy(meshMqttEnabled = on) }
+                                c.mesh.stop()
+                                if (on) c.mesh.start()
+                            },
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    MeshConfig(c, settings, wada)
                 }
-                Text(
-                    "Signal_IntelGo ${version ?: "1.1"}",
-                    color = Sky.text,
-                    fontSize = 13.sp,
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "Live satellites (CelesTrak + SGP4), aircraft (ADS-B), drones (ASTM F3411 Remote ID over BLE), " +
-                        "mesh nodes (Meshtastic), and on-device Wi-Fi/BLE war-driving.",
-                    color = Sky.textDim,
-                    fontSize = 11.sp,
-                )
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Use device maps", color = Sky.text, fontSize = 13.sp)
+            }
+            item {
+                SectionCard(title = "ESP32 sensors", trailing = "${c.esp32.count()} seen") {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Boards and GPS modules", color = Sky.text, fontSize = 13.sp)
+                            Text("BLE adverts, or JSON over MQTT", color = Sky.textDim, fontSize = 10.sp)
+                        }
+                        Switch(
+                            checked = settings.esp32Enabled,
+                            onCheckedChange = { on ->
+                                c.settingsStore.update { it.copy(esp32Enabled = on) }
+                                if (!on) c.esp32.stop()
+                            },
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Use board GPS as fallback", color = Sky.text, fontSize = 13.sp)
+                            Text(
+                                "While the phone has no fix of its own",
+                                color = Sky.textDim,
+                                fontSize = 10.sp,
+                            )
+                        }
+                        Switch(
+                            checked = settings.esp32GpsFallback,
+                            onCheckedChange = { on -> c.settingsStore.update { it.copy(esp32GpsFallback = on) } },
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("MQTT ingest", color = Sky.text, fontSize = 13.sp)
+                            Text("For boards that publish over Wi-Fi", color = Sky.textDim, fontSize = 10.sp)
+                        }
+                        Switch(
+                            checked = settings.esp32MqttEnabled,
+                            onCheckedChange = { on ->
+                                c.settingsStore.update { it.copy(esp32MqttEnabled = on) }
+                                c.esp32.stop()
+                                if (on) c.esp32.start()
+                            },
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("USB boards", color = Sky.text, fontSize = 13.sp)
+                            Text("GhostESP, ESP32 Marauder, Biscuit, any ESP32 on a cable", color = Sky.textDim, fontSize = 10.sp)
+                        }
+                        Switch(
+                            checked = settings.esp32UsbEnabled,
+                            onCheckedChange = { on ->
+                                c.settingsStore.update { it.copy(esp32UsbEnabled = on) }
+                                if (on) c.esp32Usb.start() else c.esp32Usb.stop()
+                            },
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    // Sub-GHz is a property of the board's hardware, not of the app: a Marauder
+                    // without a CC1101 fitted answers nothing, and that is why the switch only
+                    // decides whether the command is sent at all.
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Sub-GHz (CC1101)", color = Sky.text, fontSize = 13.sp)
+                            Text(
+                                "Sweep on a GhostESP or Marauder with the radio fitted",
+                                color = Sky.textDim,
+                                fontSize = 10.sp,
+                            )
+                        }
+                        Switch(
+                            checked = settings.subGhzEnabled,
+                            onCheckedChange = { on ->
+                                c.settingsStore.update { it.copy(subGhzEnabled = on) }
+                                c.esp32Usb.subGhzCommand = if (on) {
+                                    settings.subGhzCommand.trim().ifBlank { null }
+                                } else {
+                                    null
+                                }
+                            },
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    // The rate lives here as well as on the map's board card: it is a setting of
+                    // the cable, and a board flashed at another rate answers a 115200 probe with
+                    // noise, which reads exactly like a board that will not scan at all.
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("SERIAL SPEED", style = SkywardThemeLabel(), color = Sky.textDim)
+                        Spacer(Modifier.weight(1f))
+                        Text("${settings.esp32Baud}", color = Sky.text, fontSize = 10.sp)
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        UsbBoards.BAUD_RATES.forEach { rate ->
+                            UnitChip("$rate", settings.esp32Baud == rate) {
+                                // Reopening the port is what applies it: the bridge rate is set
+                                // once, when the console is opened.
+                                c.settingsStore.update { it.copy(esp32Baud = rate) }
+                                c.esp32Usb.setBaud(rate)
+                                c.esp32Usb.stop()
+                                c.esp32Usb.start()
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "115200 suits GhostESP and Marauder at their defaults. Pick the rate the " +
+                            "firmware was flashed at; the port reopens at the new speed straight away.",
+                        color = Sky.textDim,
+                        fontSize = 10.sp,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    // The cable is the only way to a board that is not already running something
+                    // the app understands: one console, one session at a time, poller waiting.
+                    var serialOpen by remember { mutableStateOf(false) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Chip("SERIAL", serialOpen, Sky.esp32) { serialOpen = true }
+                        Chip("RESCAN", false, Sky.esp32) { c.esp32Usb.rescan() }
+                    }
+                    Text(
+                        "Console and the board's GPS pin and baud, over USB.",
+                        color = Sky.textDim,
+                        fontSize = 10.sp,
+                    )
+                    if (serialOpen) EspSerialDialog(c, settings) { serialOpen = false }
+                    Spacer(Modifier.height(8.dp))
+                    Esp32Config(c, settings)
+                }
+            }
+            item {
+                SectionCard(title = "SDR", trailing = if (settings.sdrEnabled) "on" else "off") {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("RTL-SDR dongle", color = Sky.text, fontSize = 13.sp)
+                            Text(
+                                "Spectrum on the map, recording and saved pins",
+                                color = Sky.textDim,
+                                fontSize = 10.sp,
+                            )
+                        }
+                        Switch(
+                            checked = settings.sdrEnabled,
+                            onCheckedChange = { on ->
+                                c.settingsStore.update { it.copy(sdrEnabled = on) }
+                                if (on) c.sdr.start() else c.sdr.stop()
+                            },
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Plugged into the USB port, an RTL-SDR (0bda:2832 or 0bda:2838) opens a " +
+                            "spectrum drop-down at the top of the map. Recording saves the trace it " +
+                            "drew and pins it where the fix was, so a capture can be read back later " +
+                            "without the dongle. Off, the dongle is left alone and no panel is drawn.",
+                        color = Sky.textDim,
+                        fontSize = 10.sp,
+                    )
+                }
+            }
+            item {
+                SectionCard(
+                    title = "Two devices",
+                    trailing = when {
+                        peer.connected -> "linked"
+                        peer.running -> "searching"
+                        else -> "off"
+                    },
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Share scans, intel and drives over BLE", color = Sky.text, fontSize = 13.sp)
+                            Text(
+                                "Two of your own devices, or a friend's, peer to peer: each keeps " +
+                                    "wardriving on its own and both end up with the other's findings.",
+                                color = Sky.textDim,
+                                fontSize = 10.sp,
+                            )
+                        }
+                        Switch(
+                            checked = settings.peerEnabled,
+                            onCheckedChange = { on ->
+                                c.settingsStore.update { it.copy(peerEnabled = on) }
+                                if (on) c.peer.start() else c.peer.stop()
+                            },
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Text("SHARING WITH", style = SkywardThemeLabel(), color = Sky.textDim)
+                    Spacer(Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        ShareChip("MY OWN DEVICES", PeerProtocol.SHARE_OWN, settings) { c.settingsStore.update(it) }
+                        ShareChip("A FRIEND", PeerProtocol.SHARE_FRIEND, settings) { c.settingsStore.update(it) }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        if (settings.peerShareMode == PeerProtocol.SHARE_FRIEND) {
+                            "Intel only, both ways: radios, the fix, board intel and the entity table. " +
+                                "The drive library, the shared drive recording and forwarded Watcher " +
+                                "commands stay on your own devices."
+                        } else {
+                            "A second device of yours: everything above, plus drives, the same drive " +
+                                "recorded on both, and Watcher commands obeyed by both."
+                        },
+                        color = Sky.textDim,
+                        fontSize = 10.sp,
+                    )
+
+                    if (settings.peerEnabled) {
+                        Spacer(Modifier.height(8.dp))
                         Text(
-                            "Open the phone's map app instead of fetching online tiles",
+                            "This screen: ${PeerProtocol.roleLabel(peer.role)}",
+                            color = Sky.cyan,
+                            fontSize = 11.sp,
+                        )
+                        Text(
+                            peer.detail + if (peer.connected) " · ${peer.peerName}" else "",
+                            color = Sky.textDim,
+                            fontSize = 10.sp,
+                        )
+                        Text(
+                            "peer wifi ${peer.peerWifi} · ble ${peer.peerBle} · up ${peer.sent} down ${peer.received}",
+                            color = Sky.textDim,
+                            fontSize = 10.sp,
+                        )
+                        if (peer.peerBoardWifi > 0 || peer.peerBoardBle > 0) {
+                            Text(
+                                "its board: wifi ${peer.peerBoardWifi} · ble ${peer.peerBoardBle}",
+                                color = Sky.esp32,
+                                fontSize = 10.sp,
+                            )
+                        }
+                        Text(
+                            if (peer.peerRecording) "both phones are recording" else
+                                "neither phone is recording",
+                            color = Sky.textDim,
+                            fontSize = 10.sp,
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            "A drive is shared: start one here and the other phone starts its own " +
+                                "for the same stretch of road. Each phone shares what it has caught " +
+                                "- satellites, aircraft, drones, mesh nodes and watch hits - so both " +
+                                "maps carry both skies, and a Watcher command said to either phone " +
+                                "is obeyed by both.",
+                            color = Sky.textDim,
+                            fontSize = 10.sp,
+                        )
+                        Text(
+                            if (peer.connected) {
+                                "Sharing intel with " + peer.peerName.ifBlank { "the other phone" } +
+                                    ": " + peer.peerEntityTotal + " entities from it"
+                            } else {
+                                "Nothing shared yet: link the phones to exchange intel"
+                            },
+                            color = Sky.cyan,
+                            fontSize = 10.sp,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Bluetooth must be on for both phones, and the link is peer to peer - nothing leaves the two devices.",
                             color = Sky.textDim,
                             fontSize = 10.sp,
                         )
                     }
-                    Switch(
-                        checked = settings.useDeviceMap,
-                        onCheckedChange = { on -> c.settingsStore.update { it.copy(useDeviceMap = on) } },
-                    )
                 }
-                Spacer(Modifier.height(10.dp))
-                Text(TileSources.attribution(settings.tileSource), color = Sky.textDim, fontSize = 10.sp)
-                Text("Remote ID parsing is best-effort; some broadcasters rotate payloads.", color = Sky.textDim, fontSize = 10.sp)
             }
         }
-
-        // Room for the folded tab button in the corner, so it never covers the last row.
-        item { Spacer(Modifier.height(64.dp)) }
     }
+}
+
+/**
+ * The bar over a Setup pane. Both halves are "settings", so each says what it holds.
+ */
+@Composable
+private fun PaneLabel(text: String) {
+    Text(
+        text,
+        style = SkywardThemeLabel(),
+        color = Sky.textDim,
+        fontSize = 9.sp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Sky.surface)
+            .padding(horizontal = 12.dp, vertical = 5.dp),
+    )
 }
 
 @Composable
@@ -1236,7 +1246,7 @@ private fun GroupChip(
     )
 }
 
-/** One preset for the colour a logged satellite is drawn in, with its swatch on the chip. */
+/** One preset for the ring colour a logged entity is drawn in, with its swatch on the chip. */
 @Composable
 private fun EntityColorChip(
     key: String,

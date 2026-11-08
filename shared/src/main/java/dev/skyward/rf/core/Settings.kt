@@ -56,8 +56,9 @@ data class Settings(
     /** Globe auto-spin as a speed step: 0 off, 1 = 1x, 2 = 3x. */
     val globeSpin: Int = 1,
     /**
-     * The colour a logged satellite takes when it becomes an entity: "purple" by default, or
-     * one of the presets in [dev.skyward.rf.ui.EntityColors]. Other layers keep purple.
+     * The ring colour a logged entity takes: "purple" by default, or one of the presets in
+     * [dev.skyward.rf.ui.EntityColors]. It used to colour satellites only and now covers every
+     * layer; the key keeps its old name so a choice already saved survives the change.
      */
     val satEntityColor: String = "purple",
     /**
