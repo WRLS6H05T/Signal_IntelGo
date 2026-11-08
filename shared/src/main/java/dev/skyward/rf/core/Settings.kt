@@ -71,6 +71,12 @@ data class Settings(
      * which is the size that reads at arm's length on a dash mount.
      */
     val clockSeconds: Boolean = true,
+    /**
+     * How Setup arranges its two panes: "stacked" (app above devices) or "side" (app beside
+     * devices). A phone held upright has width for one column of cards; a tablet, or a phone on
+     * its side, has height for two.
+     */
+    val setupSplit: String = "stacked",
     /** "km" or "mi": what every distance on screen is written in. Stored data stays metric. */
     val distanceUnit: String = "km",
     /** "c" or "f": the weather drop-down's temperature. */
