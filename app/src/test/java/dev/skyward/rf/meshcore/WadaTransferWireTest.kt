@@ -2,8 +2,10 @@ package dev.skyward.rf.meshcore
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -141,5 +143,27 @@ class WadaTransferWireTest {
             ByteArrayOutputStream(),
         )
         assertEquals(WadaWire.Frame.Closed, close)
+    }
+
+    @Test
+    fun `the verdict on the code is read past its padding and its device name`() {
+        assertTrue(WadaWire.isAuthOk("AUTH OK"))
+        assertTrue(WadaWire.isAuthOk("auth ok"))
+        assertTrue(WadaWire.isAuthOk("  AUTH OK  "))
+        // Firmware that names itself after the verdict is still accepting the code.
+        assertTrue(WadaWire.isAuthOk("AUTH OK WADAMESH"))
+        assertFalse(WadaWire.isAuthOk("AUTH OKAY?"))
+        assertFalse(WadaWire.isAuthOk("WADAMESH transfer ready"))
+        assertFalse(WadaWire.isAuthOk(""))
+    }
+
+    @Test
+    fun `a greeting is not a refusal, so the reader waits for the verdict`() {
+        assertTrue(WadaWire.isRefused("AUTH FAIL"))
+        assertTrue(WadaWire.isRefused("ERR bad code"))
+        assertTrue(WadaWire.isRefused("denied"))
+        assertFalse(WadaWire.isRefused("AUTH OK"))
+        assertFalse(WadaWire.isRefused("WADAMESH transfer"))
+        assertFalse(WadaWire.isRefused(""))
     }
 }

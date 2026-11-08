@@ -77,9 +77,36 @@ class WadaTransfer {
             input = streams.first
             output = streams.second
             sendText("AUTH $pin")
-            val reply = WadaWire.readFrame(requireInput(), requireOutput())
-            if (reply !is WadaWire.Frame.Text || reply.text != "AUTH OK") {
-                throw IOException((reply as? WadaWire.Frame.Text)?.text ?: "the session was refused")
+            // The verdict is not necessarily the first frame. A device that greets the client
+            // before it judges the code is still accepting, and taking the greeting for the
+            // answer is what reported "the session was refused" on a session that worked.
+            var verdict: String? = null
+            for (attempt in 0 until AUTH_FRAMES) {
+                when (val reply = WadaWire.readFrame(requireInput(), requireOutput())) {
+                    is WadaWire.Frame.Text -> {
+                        val text = reply.text.trim()
+                        verdict = text
+                        if (WadaWire.isAuthOk(text) || WadaWire.isRefused(text)) break
+                    }
+                    is WadaWire.Frame.Binary -> Unit
+                    WadaWire.Frame.Closed -> {
+                        verdict = null
+                        break
+                    }
+                }
+            }
+            if (verdict == null || !WadaWire.isAuthOk(verdict)) {
+                // The device's own words: "refused" alone does not say whether the code was
+                // wrong, the page is already open somewhere else, or the firmware answered
+                // something this app does not know.
+                throw IOException(
+                    when {
+                        verdict == null -> "the device closed the session before accepting the code"
+                        WadaWire.isRefused(verdict) ->
+                            "the code was refused ($verdict) - it changes every time Transfer is reopened"
+                        else -> "the device answered \"$verdict\" instead of accepting the code"
+                    },
+                )
             }
             _phase.value = Phase.CONNECTED
             _status.value = "Connected to the device."
@@ -212,6 +239,9 @@ class WadaTransfer {
     private companion object {
         val PIN = Regex("\\d{6}")
 
+        /** How many frames to read before deciding the device is never going to answer. */
+        const val AUTH_FRAMES = 4
+
         /** The browser page caps a download at 64 MB; a phone assembling more would be a memory bug. */
         const val MAX_DOWNLOAD = 64L * 1024 * 1024
     }
@@ -261,6 +291,28 @@ internal object WadaWire {
         val port = if (portText == null) 80 else portText.toIntOrNull() ?: return null
         if (host.isEmpty() || port !in 1..65535) return null
         return host to port
+    }
+
+    /**
+     * The device's verdict on the session code.
+     *
+     * `AUTH OK` is the documented reply, but the comparison used to be exact: firmware that
+     * answers the verdict followed by its own name, or with different case or padding, was
+     * reported as a refusal on a session that was in fact accepted.
+     */
+    fun isAuthOk(text: String): Boolean {
+        val t = text.trim().uppercase()
+        return t == "AUTH OK" || t.startsWith("AUTH OK ")
+    }
+
+    /**
+     * An explicit rejection, so the reader stops on it instead of waiting out its frame budget.
+     * A greeting is neither: the verdict may still be in the next frame.
+     */
+    fun isRefused(text: String): Boolean {
+        val t = text.trim().uppercase()
+        return t == "ERR" || t.startsWith("ERR ") || t.startsWith("AUTH FAIL") ||
+            t.startsWith("AUTH BAD") || t.startsWith("AUTH ERR") || t.startsWith("DENIED")
     }
 
     fun parseEntry(line: String): WadaTransfer.Entry? {

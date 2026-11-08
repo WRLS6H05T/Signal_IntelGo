@@ -492,7 +492,10 @@ fun buildMarkers(
         val lat = n.lat
         val lon = n.lon
         if (lat == null || lon == null) return@forEach
-        if (n.score < minScore) return@forEach
+        // The weak-dot filter is for layers holding thousands of entries. A node is one piece
+        // of infrastructure, and dropping it because its last advert arrived faint made the
+        // marker disappear while the MESH count still listed it, which reads as a node that
+        // went away.
         out.add(
             MapMarker(
                 key = "MESH:${n.id}",
@@ -1925,7 +1928,15 @@ private fun TacticalMap(
                     )
                 }
 
-                val r = (if (m.logged) 5.4f else 4.4f) * density
+                // Mesh has a size of its own. The dish and the mast are thin line work, and at
+                // the shared entity size they disappeared against tiles and coastlines - on
+                // the globe as much as on the street map.
+                val r = when {
+                    m.layer == Layer.MESH && m.logged -> 9.2f * density
+                    m.layer == Layer.MESH -> 8.2f * density
+                    m.logged -> 5.4f * density
+                    else -> 4.4f * density
+                }
                 // The station is drawn a size up: it is one object, and it should read as one.
                 val iconR = if (isIss(m)) r * 1.9f else r
                 // The station and the BIRDS-3 set are the two gold objects on the map; both
@@ -1956,6 +1967,11 @@ private fun TacticalMap(
                 if (isIss(m)) {
                     // A gold halo under the glyph, so the station reads gold logged or not.
                     drawCircle(color = IssGold.copy(alpha = 0.22f * a), radius = iconR * 1.8f, center = p)
+                }
+                if (m.layer == Layer.MESH) {
+                    // A disc under the glyph: on the ball a dish is a few thin lines over a
+                    // continent, and an unlogged node has no ring to give it any weight.
+                    drawCircle(color = base.copy(alpha = 0.18f * a), radius = r * 1.75f, center = p)
                 }
                 when (m.layer) {
                     Layer.AIRCRAFT -> drawPlaneArrow(p, m.headingDeg ?: 0f, r, color)
