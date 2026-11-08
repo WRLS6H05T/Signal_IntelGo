@@ -13,7 +13,6 @@ class PeerProtocolTest {
         kind = PeerProtocol.KIND_SKY,
         id = "ab12cd34",
         name = "Pixel",
-        diagIn = 6.2f,
         lat = 34.36,
         lon = -86.29,
         sats = 9,
@@ -47,8 +46,9 @@ class PeerProtocolTest {
 
     @Test
     fun `another protocol version is refused rather than misread`() {
-        val json = PeerProtocol.encode(sample).replace("\"v\":2", "\"v\":1")
-        assertNull(PeerProtocol.decode(json))
+        val older = PeerProtocol.encode(sample)
+            .replace("\"v\":${PeerProtocol.VERSION}", "\"v\":${PeerProtocol.VERSION - 1}")
+        assertNull(PeerProtocol.decode(older))
     }
 
     @Test
@@ -57,29 +57,6 @@ class PeerProtocolTest {
         assertNull(PeerProtocol.decode("   "))
         assertNull(PeerProtocol.decode("{not json"))
         assertNull(PeerProtocol.decode("{\"v\":1,\"kind\":\"\"}"))
-    }
-
-    @Test
-    fun `the bigger screen takes the globe and the smaller one the drive view`() {
-        assertEquals(PeerProtocol.DISPLAY, PeerProtocol.roleFor(6.7f, 5.4f))
-        assertEquals(PeerProtocol.SENSOR, PeerProtocol.roleFor(5.4f, 6.7f))
-    }
-
-    @Test
-    fun `similar screens and unknown sizes get no role`() {
-        assertEquals("", PeerProtocol.roleFor(6.1f, 6.2f))
-        assertEquals("", PeerProtocol.roleFor(0f, 6.2f))
-        assertEquals("", PeerProtocol.roleFor(6.2f, 0f))
-    }
-
-    @Test
-    fun `a drive started on one phone is announced to the other`() {
-        val back = PeerProtocol.decode(
-            PeerProtocol.encode(sample.copy(recording = true, recordName = "Drive A")),
-        )
-        assertNotNull(back)
-        assertTrue(back!!.recording)
-        assertEquals("Drive A", back.recordName)
     }
 
     @Test
@@ -103,15 +80,15 @@ class PeerProtocolTest {
     }
 
     @Test
-    fun `a watcher command is forwarded to the other phone`() {
+    fun `a drive running on one phone is reported, never started over there`() {
         val back = PeerProtocol.decode(
-            PeerProtocol.encode(
-                sample.copy(kind = PeerProtocol.KIND_WATCHER, voice = "OPEN_MENU"),
-            ),
+            PeerProtocol.encode(sample.copy(recording = true, recordName = "Drive A")),
         )
         assertNotNull(back)
-        assertEquals(PeerProtocol.KIND_WATCHER, back!!.kind)
-        assertEquals("OPEN_MENU", back.voice)
+        assertTrue(back!!.recording)
+        assertEquals("Drive A", back.recordName)
+        // The name is data; nothing on the wire tells the other phone to do anything with it.
+        assertFalse("no verb in the state", PeerProtocol.encode(back).contains("start"))
     }
 
     @Test
@@ -135,20 +112,21 @@ class PeerProtocolTest {
         assertEquals(240, back.entityTotal)
     }
 
+    /**
+     * The guarantee this test exists for: what crosses the link is observations, and no field
+     * can name an action. Adding a command kind, a forwarded phrase, a screen role or a
+     * per-device setting should fail here before it reaches a second phone.
+     */
     @Test
-    fun `the link carries no host role and no scan assignment`() {
+    fun `the link carries observations and no way to act on the other phone`() {
         val json = PeerProtocol.encode(
             sample.copy(entities = listOf(PeerProtocol.Entity("MESH", "!ab12", "Roof", 51.0, -0.1))),
         )
-        assertFalse("no host blob" , json.contains("hostSettings"))
+        assertFalse("no host blob", json.contains("hostSettings"))
         assertFalse("no hand-picked role", json.contains("\"mode\""))
         assertFalse("no assigned sweep", json.contains("\"scan\""))
-    }
-
-    @Test
-    fun `labels name what each screen shows`() {
-        assertEquals("globe", PeerProtocol.roleLabel(PeerProtocol.DISPLAY))
-        assertEquals("wardrive", PeerProtocol.roleLabel(PeerProtocol.SENSOR))
-        assertEquals("shared", PeerProtocol.roleLabel(""))
+        assertFalse("no spoken command", json.contains("\"voice\""))
+        assertFalse("no screen role", json.contains("\"diagIn\""))
+        assertFalse("no command message kind", json.contains("\"watcher\""))
     }
 }

@@ -30,7 +30,6 @@ import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
-import kotlin.math.hypot
 
 /**
  * A second phone, linked over Bluetooth Low Energy.
@@ -44,6 +43,11 @@ import kotlin.math.hypot
  * what it holds every few seconds. So the link is a second radio, not a replacement: a phone
  * paired with another still wardrives on its own, and each side ends up with both sets of
  * observations.
+ *
+ * What crosses the link is data and only data: observations, fixes, board intel, logged entities
+ * and recorded drives, plus the bare facts a card needs to describe the other phone. No command
+ * travels, so neither phone can start, stop, reconfigure or speak for the other, and no role is
+ * handed out - each screen shows what its own user chose.
  *
  * BLE is a narrow pipe - twenty bytes per write until the MTU is negotiated - so messages are
  * chunked ([PeerFrames]) and capped in size. A sweep that does not fit is dropped whole rather
@@ -75,7 +79,7 @@ class BlePeer(private val context: Context) {
         private const val NAME_CHARS = 20
         private const val MAX_MESSAGE = 4_800
 
-        /** How long one drive part may wait before the next is queued, so control messages fit. */
+        /** How long one drive part may wait before the next is queued, so a sweep gets a turn. */
         private const val PART_GAP_MS = 150L
 
         /** How many drives are offered at once; more would not fit one message. */
@@ -113,9 +117,6 @@ class BlePeer(private val context: Context) {
         val scanning: Boolean = false,
         val connected: Boolean = false,
         val peerName: String = "",
-        val role: String = "",
-        /** What the other device is showing, from its own side of the size comparison. */
-        val peerRole: String = "",
         /** How many entities the other phone has logged, and how many arrived last time. */
         val peerEntities: Int = 0,
         val peerEntityTotal: Int = 0,
@@ -169,14 +170,6 @@ class BlePeer(private val context: Context) {
     @Volatile
     var onPeerBoard: ((List<PeerProtocol.Ap>, List<PeerProtocol.Device>) -> Unit)? = null
 
-    /** The other phone started or stopped a drive, and the name it gave it. */
-    @Volatile
-    var onPeerRecording: ((Boolean, String) -> Unit)? = null
-
-    /** A Watcher command said to the other phone, by name. */
-    @Volatile
-    var onPeerVoice: ((String) -> Unit)? = null
-
     /** Whether this phone is recording, and the name of the drive it is recording. */
     @Volatile
     var recordingProvider: (() -> Pair<Boolean, String>)? = null
@@ -194,13 +187,6 @@ class BlePeer(private val context: Context) {
 
     @Volatile
     private var mtuSize = 23
-
-    @Volatile
-    private var peerDiagIn = 0f
-
-    /** The other phone's id, as last reported on the link. */
-    @Volatile
-    private var peerId = ""
 
     @Volatile
     private var sent = 0
@@ -247,28 +233,7 @@ class BlePeer(private val context: Context) {
     @Volatile
     private var lastQueuedAt = 0L
 
-    /** Screen diagonal in inches: the only thing that decides which device gets which screen. */
-    fun diagonalInches(): Float {
-        val dm = context.resources.displayMetrics
-        if (dm.densityDpi <= 0 || dm.widthPixels <= 0 || dm.heightPixels <= 0) return 0f
-        return hypot(dm.widthPixels.toFloat(), dm.heightPixels.toFloat()) / dm.densityDpi
-    }
-
-    fun role(): String = PeerProtocol.roleFor(diagonalInches(), peerDiagIn)
-
-    /** The other phone's screen, as it sees itself: the roles are complementary. */
-    fun peerRole(): String = PeerProtocol.roleFor(peerDiagIn, diagonalInches())
-
     fun isRunning(): Boolean = running
-
-    /**
-     * Whether this phone sorts first in the link.
-     *
-     * The only thing that can break a tie in the screen split: two phones of the same size get
-     * no role from the size comparison, and the pair still needs one of them to speak. The
-     * smaller id wins, which is the same rule the link already uses to decide which phone dials.
-     */
-    fun firstOnLink(): Boolean = peerId.isNotBlank() && id < peerId
 
     // ---------------- lifecycle ----------------
 
@@ -329,8 +294,6 @@ class BlePeer(private val context: Context) {
         connection = null
         subscription = null
         peerAddress = null
-        peerId = ""
-        peerDiagIn = 0f
         synchronized(lock) {
             outbox.clear()
             outParts.clear()
@@ -423,7 +386,6 @@ class BlePeer(private val context: Context) {
                 _state.value = _state.value.copy(
                     connected = true,
                     peerName = runCatching { device?.name }.getOrNull() ?: "BLE peer",
-                    role = role(),
                     detail = "linked",
                 )
                 // Both ends offer their drives straight away; the lists are small.
@@ -438,7 +400,6 @@ class BlePeer(private val context: Context) {
                     peerBle = 0,
                     peerWifiTotal = 0,
                     peerBleTotal = 0,
-                    peerRole = "",
                     peerGps = false,
                     peerCell = false,
                     detail = if (running) "waiting for the other device" else "off",
@@ -532,7 +493,7 @@ class BlePeer(private val context: Context) {
                 stopScanning()
                 runCatching { g?.requestMtu(517) }
                 runCatching { g?.discoverServices() }
-                _state.value = _state.value.copy(connected = true, detail = "linked", role = role())
+                _state.value = _state.value.copy(connected = true, detail = "linked")
                 sendLogList()
             } else {
                 runCatching { g?.close() }
@@ -543,7 +504,6 @@ class BlePeer(private val context: Context) {
                     peerBle = 0,
                     peerWifiTotal = 0,
                     peerBleTotal = 0,
-                    peerRole = "",
                     peerGps = false,
                     peerCell = false,
                     detail = if (running) "searching" else "off",
@@ -596,8 +556,6 @@ class BlePeer(private val context: Context) {
         val message = assembler.add(bytes) ?: return
         val decoded = PeerProtocol.decode(String(message, Charsets.UTF_8)) ?: return
         received++
-        if (decoded.diagIn > 0f) peerDiagIn = decoded.diagIn
-        if (decoded.id.isNotBlank()) peerId = decoded.id
         // Local copies: the message type is compiled in :shared now, and a smart cast does not
         // cross a module boundary, so the null check has to be on the same values it guards.
         val fixLat = decoded.lat
@@ -606,9 +564,7 @@ class BlePeer(private val context: Context) {
         if (fix != null) _peerFix.value = fix
         _state.value = _state.value.copy(
             peerName = decoded.name.ifBlank { decoded.id },
-            role = role(),
             received = received,
-            peerRole = peerRole(),
             peerEntities = decoded.entities.size,
             peerEntityTotal = if (decoded.entityTotal > 0) decoded.entityTotal else decoded.entities.size,
             peerWifi = decoded.wifi.size,
@@ -623,11 +579,6 @@ class BlePeer(private val context: Context) {
             peerRecording = decoded.recording,
         )
         if (decoded.logs.isNotEmpty()) onPeerLogs?.invoke(decoded.logs)
-        // A drive is a shared act: whichever phone starts one, the other records the same
-        // stretch of road. The state rides every snapshot, so the two settle rather than
-        // taking turns telling each other to start.
-        onPeerRecording?.invoke(decoded.recording, decoded.recordName)
-        if (decoded.voice.isNotBlank()) onPeerVoice?.invoke(decoded.voice)
         if (decoded.boardWifi.isNotEmpty() || decoded.boardBle.isNotEmpty()) {
             onPeerBoard?.invoke(decoded.boardWifi, decoded.boardBle)
         }
@@ -680,7 +631,6 @@ class BlePeer(private val context: Context) {
             kind = PeerProtocol.KIND_SKY,
             id = id,
             name = deviceName,
-            diagIn = diagonalInches(),
             lat = snapshot.fix?.lat,
             lon = snapshot.fix?.lon,
             sats = snapshot.sats,
@@ -726,33 +676,10 @@ class BlePeer(private val context: Context) {
                 kind = PeerProtocol.KIND_LOGS,
                 id = id,
                 name = deviceName,
-                diagIn = diagonalInches(),
                 at = System.currentTimeMillis(),
                 logs = logs,
             ),
         )
-    }
-
-    /**
-     * One Watcher command, said to this phone and obeyed by both.
-     *
-     * Only the intent travels. The phone that heard the words does the talking, so the pair
-     * never answers the same sentence twice. Putting the snapshot clock back a beat means the
-     * command is not overwritten by the next sweep before it leaves.
-     */
-    fun sendVoice(command: String) {
-        if (!_state.value.connected || command.isBlank()) return
-        val queued = queue(
-            PeerProtocol.Message(
-                kind = PeerProtocol.KIND_WATCHER,
-                id = id,
-                name = deviceName,
-                diagIn = diagonalInches(),
-                at = System.currentTimeMillis(),
-                voice = command,
-            ),
-        )
-        if (queued) lastQueuedAt = System.currentTimeMillis()
     }
 
     /** Asks the other phone to send its list again. */
@@ -763,7 +690,6 @@ class BlePeer(private val context: Context) {
                 kind = PeerProtocol.KIND_LOGS,
                 id = id,
                 name = deviceName,
-                diagIn = diagonalInches(),
                 at = System.currentTimeMillis(),
                 wantList = true,
             ),
@@ -778,7 +704,6 @@ class BlePeer(private val context: Context) {
                 kind = PeerProtocol.KIND_LOGS,
                 id = id,
                 name = deviceName,
-                diagIn = diagonalInches(),
                 at = System.currentTimeMillis(),
                 want = logId,
             ),
@@ -814,7 +739,6 @@ class BlePeer(private val context: Context) {
                 kind = PeerProtocol.KIND_LOGS,
                 id = id,
                 name = deviceName,
-                diagIn = diagonalInches(),
                 at = now,
                 part = next,
             ),

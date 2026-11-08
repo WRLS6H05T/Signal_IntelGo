@@ -228,10 +228,6 @@ class Container(context: Context) {
     @Volatile
     private var running = false
 
-    /** The drive state the other phone last reported, so a repeat is not a new instruction. */
-    @Volatile
-    private var lastPeerRecording = false
-
     /** The last real handset fix, so board GPS is only ever a stand-in for it. */
     @Volatile
     private var phoneFix: LatLon? = null
@@ -330,24 +326,11 @@ class Container(context: Context) {
             if (!sharingWithFriend()) wardrive.importSession(json, from)
         }
 
-        // A drive is a shared act: whichever phone starts one, both record the same road. The
-        // comparison is against what the other phone last said, not against this phone, so a
-        // stop here is not undone by the other phone repeating an older snapshot.
+        // Reported so the other phone's card can say a drive is running there. This side never
+        // acts on it: recording stays a decision each phone makes for itself.
         peer.recordingProvider = {
             val st = wardrive.state.value
-            // A friend's phone is not a second recorder: the drive library stays yours.
             if (sharingWithFriend()) false to "" else st.active to st.name
-        }
-        peer.onPeerRecording = { active, name ->
-            val shared = !sharingWithFriend()
-            if (shared && active != lastPeerRecording) {
-                val drive = wardrive.state.value
-                when {
-                    active && !drive.active -> wardrive.start(name.ifBlank { null })
-                    !active && drive.active -> wardrive.stop()
-                }
-            }
-            lastPeerRecording = active
         }
 
         // The other phone's board intel lands on this phone as the other phone's: it reaches
@@ -359,16 +342,6 @@ class Container(context: Context) {
                 ble = ble.map { RfScanner.RemoteObs(it.id, it.name, it.rssi) },
                 via = "peer",
             )
-        }
-
-        // The Watcher is one assistant across the pair: said to either phone, obeyed by both.
-        peer.onPeerVoice = { name ->
-            // A friend's phone cannot work this one by voice; a second device of yours can.
-            if (!sharingWithFriend()) {
-                runCatching { Watcher.Command.valueOf(name) }.getOrNull()?.let { cmd ->
-                    runCatching { handleVoice(cmd, fromPeer = true) }
-                }
-            }
         }
 
         peer.onRemote = { wifi, ble, fix ->
@@ -459,9 +432,9 @@ class Container(context: Context) {
             airspace.state.collect { sky ->
                 val cfg = settingsStore.current
                 if (!cfg.voiceEnabled || !cfg.voiceAudio) return@collect
-                // The host owns the Watcher. Its table already carries what the peer posted,
-                // so its alerts cover both radios and the pair speaks once, not twice.
-                if (!isHostPhone()) return@collect
+                // Each phone speaks for itself: the link shares the hits, not the job of
+                // announcing them, so a pair standing together can say one hit twice. That is
+                // the price of a link that cannot make the other phone do anything.
                 val now = System.currentTimeMillis()
                 if (now - lastAlert < alertGapMs) return@collect
                 val hit = sky.watch.firstOrNull { w ->
@@ -478,58 +451,20 @@ class Container(context: Context) {
      * Whether the phone on the other end is a friend rather than a second device of yours.
      *
      * A friend's phone shares the radio picture and the entity table, and nothing that is about
-     * this phone: no drive library, no shared recording, no Watcher commands.
+     * this phone: the drive library stays here.
      */
     fun sharingWithFriend(): Boolean =
         settingsStore.current.peerShareMode == PeerProtocol.SHARE_FRIEND
 
     /**
-     * Whether this phone speaks the Watcher's alerts for the pair.
-     *
-     * Not a host: the link has none. Both phones hold the same intel now, so an alert read out
-     * on each of them would be the same sentence twice. The larger screen speaks, which is the
-     * device the screen split already gives the globe; a tie is broken by the smaller id, and an
-     * unlinked phone speaks for itself.
-     */
-    fun isHostPhone(): Boolean = !peer.isRunning() || peer.role() == PeerProtocol.DISPLAY ||
-        (peer.role() == "" && peer.firstOnLink())
-
-    /**
-     * Commands that describe what both phones should be doing, not what one should say.
-     *
-     * Reports and help are answered by the phone that was asked, sleep ends one session, and a
-     * drive already travels as shared recording state, so none of those are forwarded.
-     */
-    private val SHARED_COMMANDS = setOf(
-        Watcher.Command.MAP,
-        Watcher.Command.DRIVE,
-        Watcher.Command.LOG,
-        Watcher.Command.SETUP,
-        Watcher.Command.OPEN_MENU,
-        Watcher.Command.CLOSE_MENU,
-        Watcher.Command.MILES,
-        Watcher.Command.KILOMETRES,
-        Watcher.Command.CELSIUS,
-        Watcher.Command.FAHRENHEIT,
-        Watcher.Command.MUTE,
-        Watcher.Command.UNMUTE,
-    )
-
-    /**
      * What a spoken command does. Screens are not changed here - the request goes into
      * [WatcherVoice.nav] and the scaffold acts on it - but everything stateful is: logging,
      * units and the audio switch.
+     *
+     * Nothing here travels: a command changes only the phone that heard it, because the link
+     * carries data and a command is not data.
      */
-    private fun handleVoice(cmd: Watcher.Command, fromPeer: Boolean = false) {
-        // A command that describes what both phones should be doing is passed on, so saying
-        // "miles" or "open menu" to one phone does it on the other. Answers and drives are
-        // not forwarded: a report is spoken by the phone that was asked, and a drive already
-        // travels as shared recording state.
-        if (!fromPeer && isHostPhone() && !sharingWithFriend() &&
-            cmd in SHARED_COMMANDS && peer.isRunning()
-        ) {
-            peer.sendVoice(cmd.name)
-        }
+    private fun handleVoice(cmd: Watcher.Command) {
         when (cmd) {
             // Keyed up like an alert and signed off like one, but in the plain voice: it was
             // asked for, so it is not the glitched delivery reserved for watch hits.
@@ -565,15 +500,14 @@ class Container(context: Context) {
             }
             Watcher.Command.MUTE -> {
                 // Said before the switch is thrown, or the confirmation is the first thing
-                // muted. The other phone's copy of a forwarded mute stays silent: the phone
-                // that heard the words is the one that answers.
-                if (!fromPeer) voice.speak("Muting.")
+                // muted.
+                voice.speak("Muting.")
                 settingsStore.update { it.copy(voiceAudio = false) }
             }
             Watcher.Command.UNMUTE -> {
                 settingsStore.update { it.copy(voiceAudio = true) }
                 voice.audible = true
-                if (!fromPeer) voice.speak("Audio on.")
+                voice.speak("Audio on.")
             }
             // The recogniser already treats "sleep" as the end of the session; this only
             // matters if the command is ever routed from elsewhere.
@@ -714,7 +648,7 @@ class Container(context: Context) {
                 kotlinx.coroutines.delay(minutes * 60_000L)
                 // Moved while waiting: that is a new schedule, not this one.
                 if (settingsStore.current.intelUpdateMinutes != minutes) continue
-                if (!settingsStore.current.voiceEnabled || !isHostPhone()) continue
+                if (!settingsStore.current.voiceEnabled) continue
                 voice.speak(intelUpdate(minutes), intel = true)
             }
         }

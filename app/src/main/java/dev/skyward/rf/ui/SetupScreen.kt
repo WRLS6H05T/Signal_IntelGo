@@ -923,11 +923,10 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                             Text(
                                 if (settings.peerShareMode == PeerProtocol.SHARE_FRIEND) {
                                     "Intel only, both ways: radios, the fix, board intel and the entity table. " +
-                                        "The drive library, the shared drive recording and forwarded Watcher " +
-                                        "commands stay on your own devices."
+                                        "The drive library stays on your own devices."
                                 } else {
-                                    "A second device of yours: everything above, plus drives, the same drive " +
-                                        "recorded on both, and Watcher commands obeyed by both."
+                                    "A second device of yours: everything above, plus your recorded drives " +
+                                        "on request."
                                 },
                                 color = Sky.textDim,
                                 fontSize = 10.sp,
@@ -935,11 +934,6 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
 
                             if (settings.peerEnabled) {
                                 Spacer(Modifier.height(8.dp))
-                                Text(
-                                    "This screen: ${PeerProtocol.roleLabel(peer.role)}",
-                                    color = Sky.cyan,
-                                    fontSize = 11.sp,
-                                )
                                 Text(
                                     peer.detail + if (peer.connected) " · ${peer.peerName}" else "",
                                     color = Sky.textDim,
@@ -958,18 +952,17 @@ fun SetupScreen(c: Container, modifier: Modifier = Modifier, onFixPermissions: (
                                     )
                                 }
                                 Text(
-                                    if (peer.peerRecording) "both phones are recording" else
-                                        "neither phone is recording",
+                                    if (peer.peerRecording) "the other phone is recording a drive" else
+                                        "the other phone is not recording",
                                     color = Sky.textDim,
                                     fontSize = 10.sp,
                                 )
                                 Spacer(Modifier.height(10.dp))
                                 Text(
-                                    "A drive is shared: start one here and the other phone starts its own " +
-                                        "for the same stretch of road. Each phone shares what it has caught " +
+                                    "Only data crosses the link: each phone shares what it has caught " +
                                         "- satellites, aircraft, drones, mesh nodes and watch hits - so both " +
-                                        "maps carry both skies, and a Watcher command said to either phone " +
-                                        "is obeyed by both.",
+                                        "maps carry both skies. Neither phone starts, stops, reconfigures or " +
+                                        "speaks for the other.",
                                     color = Sky.textDim,
                                     fontSize = 10.sp,
                                 )

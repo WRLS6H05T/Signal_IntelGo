@@ -2,7 +2,6 @@ package dev.skyward.rf.peer
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import kotlin.math.abs
 
 /**
  * Wire format for the two-device link.
@@ -12,6 +11,10 @@ import kotlin.math.abs
  * to offer - the networks and advertisers its own radios heard, its fix, its boards, the
  * entities it has logged and the drives it has recorded - so your own two devices, or two
  * friends' phones, end up holding the same intel without either of them being in charge.
+ *
+ * Data only, deliberately: nothing here asks the other end to do anything. There is no command
+ * kind, no recording control and no screen role, because a shared observation is not an
+ * instruction, and a link that cannot act on the far end cannot be used to drive it.
  *
  * Kept free of Android and of the app's own models on purpose: this is the one part of the
  * feature that can be tested on the JVM, and a protocol that drifts silently between two phones
@@ -23,25 +26,16 @@ import kotlin.math.abs
 object PeerProtocol {
 
     /**
-     * Bumped when the link stops being what the old one was: this version carries entities and
-     * no longer carries a mode or a scan assignment, so an older build is refused rather than
-     * read as a peer that has simply gone quiet.
+     * Bumped when the link stops being what the old one was. This version is the data-only one:
+     * the forwarded-command kind, the voice field and the screen role are gone, so a build that
+     * still expects to be obeyed or to be told what to show is refused rather than half-linked.
      */
-    const val VERSION = 2
+    const val VERSION = 3
 
     const val KIND_SKY = "sky"
 
     /** Messages about recorded drives, as opposed to live sweeps. */
     const val KIND_LOGS = "logs"
-
-    /** A Watcher command, said to one phone and obeyed by both. */
-    const val KIND_WATCHER = "watcher"
-
-    /** Globe device: the bigger screen, which shows the map and the sphere. */
-    const val DISPLAY = "display"
-
-    /** Wardriving device: the smaller screen, which shows the drive readout. */
-    const val SENSOR = "sensor"
 
     /** Whose phone is on the other end: a second device of yours, or one a friend is holding. */
     const val SHARE_OWN = "own"
@@ -98,8 +92,6 @@ object PeerProtocol {
         val kind: String = KIND_SKY,
         val id: String = "",
         val name: String = "",
-        /** Screen diagonal in inches; decides which device takes which screen. */
-        val diagIn: Float = 0f,
         val lat: Double? = null,
         val lon: Double? = null,
         val sats: Int = 0,
@@ -123,8 +115,6 @@ object PeerProtocol {
         /** Whether this phone is recording a drive right now, and what it called that drive. */
         val recording: Boolean = false,
         val recordName: String = "",
-        /** A Watcher command forwarded from the other phone, by name. */
-        val voice: String = "",
         /**
          * Intel from this phone's own ESP32 boards, carried alongside its sweep so the other
          * phone holds it too. The record of it stays with the board that heard it.
@@ -157,25 +147,5 @@ object PeerProtocol {
         if (message.v != VERSION) return null
         if (message.kind.isBlank()) return null
         return message
-    }
-
-    /**
-     * Which screen this device should show.
-     *
-     * The larger diagonal takes the globe, the smaller takes the wardriving readout. A tie, or
-     * an unknown size, leaves both alone rather than making two similar phones fight over the
-     * same role every message.
-     */
-    fun roleFor(mineInches: Float, peerInches: Float): String = when {
-        mineInches <= 0f || peerInches <= 0f -> ""
-        abs(mineInches - peerInches) < 0.3f -> ""
-        mineInches > peerInches -> DISPLAY
-        else -> SENSOR
-    }
-
-    fun roleLabel(role: String): String = when (role) {
-        DISPLAY -> "globe"
-        SENSOR -> "wardrive"
-        else -> "shared"
     }
 }

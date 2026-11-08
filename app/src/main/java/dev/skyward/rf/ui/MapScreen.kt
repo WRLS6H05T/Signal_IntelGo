@@ -880,11 +880,10 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                             fontSize = 9.sp,
                         )
                     }
-                    // The card describes the other phone, so it names the other phone's screen:
-                    // this phone's role is already obvious from what is on it.
+                    // What the other radio holds. Its screen is its own business: the link
+                    // carries data, so the card claims nothing about what it is showing.
                     Text(
-                        PeerProtocol.roleLabel(peer.peerRole) + " \u00b7 wifi " + peer.peerWifiTotal +
-                            " \u00b7 ble " + peer.peerBleTotal,
+                        "wifi " + peer.peerWifiTotal + " \u00b7 ble " + peer.peerBleTotal,
                         color = Sky.textDim,
                         fontSize = 9.sp,
                         maxLines = 1,

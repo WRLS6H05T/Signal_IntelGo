@@ -45,7 +45,6 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import dev.skyward.rf.Container
 import dev.skyward.rf.core.Watcher
-import dev.skyward.rf.peer.PeerProtocol
 import dev.skyward.rf.ui.theme.Sky
 
 private fun requiredPermissions(): List<String> {
@@ -67,21 +66,6 @@ private fun requiredPermissions(): List<String> {
 fun AppRoot(c: Container) {
     val context = LocalContext.current
     var tab by remember { mutableStateOf(0) }
-
-    // Two phones on one network split the work: the bigger screen shows the globe, the smaller
-    // one the wardriving readout. The switch happens when the link or the role changes, never on
-    // every message, so after that it leaves the user's own tab choice alone.
-    val peer by c.peer.state.collectAsState()
-    val settings by c.settingsStore.state.collectAsState()
-    LaunchedEffect(peer.connected, peer.role) {
-        // The screen-size split, and nothing else: the link has no hand-picked role to override
-        // it, and an unlinked phone is left on whichever tab the user chose.
-        if (!peer.connected) return@LaunchedEffect
-        when (peer.role) {
-            PeerProtocol.DISPLAY -> tab = 0
-            PeerProtocol.SENSOR -> tab = 1
-        }
-    }
 
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
