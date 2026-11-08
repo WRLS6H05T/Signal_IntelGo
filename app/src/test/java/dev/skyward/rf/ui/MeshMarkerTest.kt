@@ -97,6 +97,17 @@ class MeshMarkerTest {
     }
 
     @Test
+    fun `every logged node is drawn, not just the first few`() {
+        // The registry can hold a whole mesh, and the map must draw all of it: a live feed that
+        // lists a node without a position used to hide the registry's copy and take it off the
+        // screen, which is how a logged mesh read as partial.
+        val entries = (1..25).map { i -> logged("!n$i", 50.0 + i / 1000.0, -1.0 - i / 1000.0) }
+        val out = markers(emptyList(), loggedMesh = entries)
+        assertEquals(25, out.size)
+        assertEquals(25, out.map { it.key }.toSet().size)
+    }
+
+    @Test
     fun `a node heard again without a position keeps its logged place`() {
         // After a restart the first packet from a node is often a nodeinfo or an advert with no
         // location. The node is in the live feed, but an id in the live list is not a position on

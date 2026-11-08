@@ -333,7 +333,13 @@ class AirspaceEngine(
             if (logged.contains(Layer.MESH, n.id)) return@mapNotNull null
             LoggedRegistry.Sighting(Layer.MESH, n.id, n.name.ifBlank { n.id }, lat, lon)
         }
-        if (unheard.isNotEmpty()) logged.logBatch(now, unheard)
+        if (unheard.isNotEmpty()) {
+            logged.logBatch(now, unheard)
+            // Written now, not at the next periodic flush: a repeater advertises every few
+            // hours, so a session that ends inside the flush window is a node that never comes
+            // back on its own. Only unseen ids reach here, so this is a rare write.
+            logged.save()
+        }
 
         // Cell towers: pinned where first heard, refreshed with live signal strength.
         val cells = cell.poll(obs, now).map { c ->

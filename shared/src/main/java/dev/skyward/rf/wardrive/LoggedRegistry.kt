@@ -60,6 +60,12 @@ class LoggedRegistry(private val store: FileStore) {
     }
 
     private fun put(layer: Layer, id: String, name: String, lat: Double, lon: Double, now: Long) {
+        // The table is only ever persisted as JSON, and JSON cannot hold NaN or an infinity. One
+        // such pair anywhere in it made the whole file fail to encode, so the save silently
+        // stopped and every logged entity was gone at the next start - hidden by the live layers
+        // re-logging themselves within a minute. Mesh nodes are heard again in hours, not
+        // seconds, which is where the loss showed.
+        if (!lat.isFinite() || !lon.isFinite()) return
         val k = key(layer, id)
         val existing = map[k]
         map[k] = if (existing == null) {
@@ -103,8 +109,10 @@ class LoggedRegistry(private val store: FileStore) {
     /** Flush to disk; call on pause/stop rather than on every sighting. */
     fun save() {
         if (!dirty) return
-        store.write(file, map.values.toList())
-        dirty = false
+        // Only a write that reached the disk clears the flag. Clearing it regardless made a
+        // failed save permanent: the table in memory kept growing while the file on disk stayed
+        // at whatever it last held.
+        if (store.write(file, map.values.toList())) dirty = false
     }
 
     fun clear() {

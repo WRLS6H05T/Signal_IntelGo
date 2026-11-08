@@ -504,7 +504,13 @@ fun buildMarkers(
             ),
         )
     }
-    if (showMesh) sky.mesh.forEach { n: MeshNode ->
+    if (showMesh) {
+        // One marker per node, from both sources at once: the live feed has the radio detail and
+        // the registry has the position a restart took away. Unioning them by id is what makes
+        // "every mesh node this app knows is on the map" true by construction, instead of two
+        // loops having to agree about which of them draws which id.
+        val meshMarkers = LinkedHashMap<String, MapMarker>()
+        sky.mesh.forEach { n: MeshNode ->
         // A node's own position, or no pin. Drawing a node that shares no location at this
         // phone's fix put fixed infrastructure on whatever street the phone was on - a
         // confident answer that was simply wrong. The MESH card counts those nodes instead, so
@@ -515,8 +521,7 @@ fun buildMarkers(
         // of infrastructure, and dropping it because its last advert arrived faint made the
         // marker disappear while the MESH count still listed it, which reads as a node that
         // went away.
-        out.add(
-            MapMarker(
+        meshMarkers[n.id] = MapMarker(
                 key = "MESH:${n.id}",
                 layer = Layer.MESH,
                 lat = lat,
@@ -543,43 +548,36 @@ fun buildMarkers(
                     n.pubkey.takeIf { it.isNotBlank() }?.let { "Public key" to it.take(16) + "…" },
                     "Node id" to n.id,
                 ),
-            ),
-        )
-    }
-    // A node with a position is an entity from the moment it is heard, so the registry is
-    // drawn as well: a restart, a broker that dropped the node, or a feed switched off must not
-    // take a node off the map this phone has already found. A node the live feed still lists is
-    // drawn once, by the loop above.
-    if (showMesh) {
-        // Only the nodes the loop above actually plotted count as live. A node the feed lists
-        // without a position is not drawn there, so calling it live would suppress the
-        // registry's copy as well and take a node off the map that the registry can still place.
-        val live = sky.mesh.filter { it.lat != null && it.lon != null }.mapTo(HashSet()) { it.id }
+            )
+        }
+        // A node with a position is an entity from the moment it is heard, so the registry is
+        // added too: a restart, a broker that dropped the node, or a feed switched off must not
+        // take a node off the map this phone has already found. An id already placed above is
+        // skipped - the live marker is the richer card.
         loggedMesh.forEach { e: LoggedEntity ->
-            // The registry keys an entity by "LAYER:id"; the marker is keyed by the same
-            // string, so the live feed and the registry can never both draw one node.
-            val id = e.key.substringAfter(':')
-            if (e.layer != Layer.MESH || id in live) return@forEach
+            if (e.layer != Layer.MESH) return@forEach
             if (!e.lat.isFinite() || !e.lon.isFinite()) return@forEach
-            out.add(
-                MapMarker(
-                    key = e.key,
-                    layer = Layer.MESH,
-                    lat = e.lat,
-                    lon = e.lon,
-                    title = e.name.ifBlank { id },
-                    subtitle = "logged · not heard now",
-                    score = 0,
-                    logged = true,
-                    lines = listOf(
-                        "Status" to "logged entity, kept after the feed",
-                        "Node id" to id,
-                        "Position" to String.format(Locale.US, "%.5f, %.5f", e.lat, e.lon),
-                        "Sightings" to e.sightings.toString(),
-                    ),
+            // The registry keys an entity by "LAYER:id", so the id is the node id either way.
+            val id = e.key.substringAfter(':')
+            if (id in meshMarkers) return@forEach
+            meshMarkers[id] = MapMarker(
+                key = e.key,
+                layer = Layer.MESH,
+                lat = e.lat,
+                lon = e.lon,
+                title = e.name.ifBlank { id },
+                subtitle = "logged · not heard now",
+                score = 0,
+                logged = true,
+                lines = listOf(
+                    "Status" to "logged entity, kept after the feed",
+                    "Node id" to id,
+                    "Position" to String.format(Locale.US, "%.5f, %.5f", e.lat, e.lon),
+                    "Sightings" to e.sightings.toString(),
                 ),
             )
         }
+        out.addAll(meshMarkers.values)
     }
     if (showEsp32) sky.esp32.forEach { b ->
         val lat = b.lat

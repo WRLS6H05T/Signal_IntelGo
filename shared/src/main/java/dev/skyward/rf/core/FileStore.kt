@@ -25,24 +25,33 @@ class FileStore(private val dir: File) {
         if (f.exists()) f.readText() else null
     }.getOrNull()
 
-    fun writeText(name: String, text: String) {
-        runCatching {
-            if (!dir.exists()) dir.mkdirs()
-            val f = File(dir, name)
-            val tmp = File(dir, "$name.tmp")
-            tmp.writeText(text)
-            if (f.exists()) f.delete()
-            tmp.renameTo(f)
-        }
-    }
+    /**
+     * Writes the file whole, and says whether it landed.
+     *
+     * The answer matters to a caller that tracks its own dirty flag: marking a table clean after
+     * a write that never reached the disk loses it on the next start, with nothing on screen to
+     * say so.
+     */
+    fun writeText(name: String, text: String): Boolean = runCatching {
+        if (!dir.exists()) dir.mkdirs()
+        val f = File(dir, name)
+        val tmp = File(dir, "$name.tmp")
+        tmp.writeText(text)
+        if (f.exists()) f.delete()
+        tmp.renameTo(f)
+    }.getOrDefault(false)
 
     inline fun <reified T> read(name: String): T? {
         val text = readText(name) ?: return null
         return runCatching { json.decodeFromString<T>(text) }.getOrNull()
     }
 
-    inline fun <reified T> write(name: String, value: T) {
-        writeText(name, json.encodeToString(value))
+    inline fun <reified T> write(name: String, value: T): Boolean {
+        // Encoding is the step that fails on a value JSON cannot hold - a NaN or an infinity in
+        // a table of doubles - and letting that escape turned one bad row into a save that threw
+        // and a table that was never written again.
+        val text = runCatching { json.encodeToString(value) }.getOrNull() ?: return false
+        return writeText(name, text)
     }
 
     fun delete(name: String) {
