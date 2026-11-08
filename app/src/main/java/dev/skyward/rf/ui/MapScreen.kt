@@ -129,6 +129,8 @@ data class MapMarker(
     val birds3: Boolean = false,
     /** Which surveillance family matched, when this marker is a watch hit. */
     val watch: WatchKind? = null,
+    /** How many nodes this one marker stands for: see [foldCoincident]. */
+    val stack: Int = 1,
 
     /** Caught by the linked phone rather than this one: drawn cyan and owned by neither sky. */
     val peer: Boolean = false,
@@ -577,7 +579,7 @@ fun buildMarkers(
                 ),
             )
         }
-        out.addAll(meshMarkers.values)
+        out.addAll(foldCoincident(meshMarkers.values.toList()))
     }
     if (showEsp32) sky.esp32.forEach { b ->
         val lat = b.lat
@@ -665,6 +667,41 @@ fun buildMarkers(
     // One non-finite coordinate would poison the frame's transform and take every marker
     // after it with it, so a bad fix is dropped here rather than in the draw loop.
     return out.filter { it.lat.isFinite() && it.lon.isFinite() }
+}
+
+/**
+ * Folds markers that sit on the same spot into one marker that says how many it stands for.
+ *
+ * A mesh table can hold many nodes on one coordinate - a node written down where it was heard
+ * from instead of where it is, a repeater whose adverts all carried the observer's fix, or a
+ * table that was filled while the map was at the whole-planet zoom - and fifty dish icons on
+ * one pixel look exactly like one node. That is the shape of "the count says fifty and the map
+ * shows one": every marker was there and every one was drawn, on top of its neighbour. The
+ * spot keeps its first marker (the live one, when the feed still lists it) and carries the
+ * count, so the number is printed instead of being hidden under the glyph.
+ */
+internal fun foldCoincident(markers: List<MapMarker>, places: Int = 4): List<MapMarker> {
+    // Four decimal places is about 11 m: two nodes closer than that cannot be told apart on the
+    // map at any zoom, so they share a spot rather than a pixel each.
+    val scale = 10.0.pow(places)
+    val spots = LinkedHashMap<Pair<Long, Long>, MutableList<MapMarker>>()
+    for (m in markers) {
+        // A non-finite coordinate never reaches here (buildMarkers drops it), and rounding one
+        // would claim a position it does not have.
+        if (!m.lat.isFinite() || !m.lon.isFinite()) continue
+        val spot = Math.round(m.lat * scale) to Math.round(m.lon * scale)
+        spots.getOrPut(spot) { ArrayList(1) }.add(m)
+    }
+    return spots.values.map { group ->
+        if (group.size == 1) {
+            group[0]
+        } else {
+            group[0].copy(
+                stack = group.size,
+                lines = group[0].lines + ("At this spot" to "${group.size} nodes"),
+            )
+        }
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -2101,6 +2138,18 @@ private fun TacticalMap(
                         WatchKind.POLICE_RADIO -> drawRadioIcon(p, r, color)
                         else -> drawCameraIcon(p, r, color)
                     }
+                }
+                // A spot standing for several nodes must say so: drawing the dish alone is what
+                // made a whole logged mesh read as one node on the map.
+                if (m.stack > 1 && a > 0.4f) {
+                    labelPaint.color = color.toArgb()
+                    labelPaint.textSize = 9f * density
+                    drawContext.canvas.nativeCanvas.drawText(
+                        "\u00d7${m.stack}",
+                        p.x - iconR * 0.5f,
+                        p.y - iconR * 2.1f,
+                        labelPaint,
+                    )
                 }
                 if (m.key == selectedKey) {
                     drawCircle(

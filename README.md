@@ -66,6 +66,11 @@ in view.
 Layer colours when *not* logged: satellites sky-blue `#38BDF8`, aircraft white `#F8FAFC`,
 drones pink `#F472B6`, mesh nodes green `#34D399`, MeshCore repeaters lime `#A3E635`.
 
+Mesh nodes that sit on the same spot - within about ten metres, which no zoom can separate -
+are drawn as one dish carrying the number of nodes it stands for (`×50`). Their cards say how
+many share the position. Fifty dishes on one pixel used to read as a single node while the
+INTEL and Log tables counted fifty.
+
 ---
 
 ## Zoom behaviour

@@ -132,4 +132,35 @@ class MeshMarkerTest {
         // The live marker is the one drawn: its card carries the radio detail, not the tombstone.
         assertFalse(out[0].subtitle.startsWith("logged"))
     }
+
+    @Test
+    fun `nodes stacked on one spot say how many they stand for`() {
+        // Fifty dishes on one pixel look like one node: every marker was drawn, on top of its
+        // neighbour. The spot has to carry the count, or the map contradicts the table.
+        val entries = (1..50).map { i -> logged("!s$i", 51.5, -0.1) }
+        val out = markers(emptyList(), loggedMesh = entries)
+        assertEquals(1, out.size)
+        assertEquals(50, out[0].stack)
+        assertTrue(out[0].lines.any { it.second == "50 nodes" })
+    }
+
+    @Test
+    fun `nodes at their own positions are not folded together`() {
+        val entries = (1..50).map { i -> logged("!p$i", 51.0 + i / 100.0, -0.1) }
+        val out = markers(emptyList(), loggedMesh = entries)
+        assertEquals(50, out.size)
+        assertTrue(out.all { it.stack == 1 })
+    }
+
+    @Test
+    fun `a live node and a logged one on the same spot count as two`() {
+        val out = markers(
+            listOf(node("!here", 51.5, -0.1, score = 50)),
+            loggedMesh = listOf(logged("!other", 51.5, -0.1)),
+        )
+        assertEquals(1, out.size)
+        assertEquals(2, out[0].stack)
+        // The live marker is the one kept: its card carries the radio detail.
+        assertFalse(out[0].subtitle.startsWith("logged"))
+    }
 }
