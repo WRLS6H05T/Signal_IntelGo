@@ -66,58 +66,47 @@ class WadaTransfer {
         }
         close()
         _phase.value = Phase.CONNECTING
-        // The port is named because it is the part that is easy to get wrong: the device serves
-        // its file session on its own web port, not on 80, and a wrong port only ever looks like
-        // a device that has gone quiet.
-        _status.value = "Connecting to ${target.first}:${target.second}…"
         runCatching {
+            // A typed port is taken as given. A bare address is looked for on the ports the
+            // device's web server is known to use, because one guessed port only fails one way:
+            // a connect that times out on a device that was up all along.
+            val port = target.second ?: probe(target.first)
+            _status.value = "Connecting to ${target.first}:$port…"
             val s = Socket()
-            s.connect(InetSocketAddress(target.first, target.second), 6_000)
-            s.soTimeout = 20_000
+            s.connect(InetSocketAddress(target.first, port), CONNECT_MS)
+            s.soTimeout = READ_MS
             s.tcpNoDelay = true
             val streams = WadaWire.openFilesSession(s)
             socket = s
             input = streams.first
             output = streams.second
-            sendText("AUTH $pin")
-            // The verdict is not necessarily the first frame. A device that greets the client
-            // before it judges the code is still accepting, and taking the greeting for the
-            // answer is what reported "the session was refused" on a session that worked.
-            var verdict: String? = null
-            for (attempt in 0 until AUTH_FRAMES) {
-                when (val reply = WadaWire.readFrame(requireInput(), requireOutput())) {
-                    is WadaWire.Frame.Text -> {
-                        val text = reply.text.trim()
-                        verdict = text
-                        if (WadaWire.isAuthOk(text) || WadaWire.isRefused(text)) break
-                    }
-                    is WadaWire.Frame.Binary -> Unit
-                    WadaWire.Frame.Closed -> {
-                        verdict = null
-                        break
-                    }
-                }
-            }
-            if (verdict == null || !WadaWire.isAuthOk(verdict)) {
-                // The device's own words: "refused" alone does not say whether the code was
-                // wrong, the page is already open somewhere else, or the firmware answered
-                // something this app does not know.
-                throw IOException(
-                    when {
-                        verdict == null -> "the device closed the session before accepting the code"
-                        WadaWire.isRefused(verdict) ->
-                            "the code was refused ($verdict) - it changes every time Transfer is reopened"
-                        else -> "the device answered \"$verdict\" instead of accepting the code"
-                    },
-                )
-            }
             _phase.value = Phase.CONNECTED
-            _status.value = "Connected to the device."
-            listLocked()
+            sendText("AUTH $pin")
+            // The file list is asked for straight after the code rather than after a verdict:
+            // firmware that accepts the code without announcing it left this reader waiting on a
+            // socket that was never going to speak, and the session died as a read timeout. A
+            // refusal still arrives as a frame, and listLocked() turns it into the message - so
+            // a device that says nothing is handled the same as one that says AUTH OK.
+            listLocked(authPending = true)
         }.onFailure { e ->
             close()
             fail(e.message ?: "could not reach the device")
         }
+    }
+
+    /**
+     * The port to dial when the address has none: the first of the device's known web ports that
+     * answers its own page.
+     */
+    private fun probe(host: String): Int {
+        for (port in WadaWire.DEFAULT_PORTS) {
+            _status.value = "Looking for the device on $host:$port…"
+            if (WadaWire.probeHttp(host, port, PROBE_CONNECT_MS, PROBE_READ_MS) != null) return port
+        }
+        throw IOException(
+            "nothing answered on $host:${WadaWire.DEFAULT_PORTS.joinToString(" or :")} - " +
+                "put the phone on the device's Wi-Fi and check the address",
+        )
     }
 
     /** Re-reads the device's file list: the session is live, the files on it are not static. */
@@ -178,7 +167,6 @@ class WadaTransfer {
             Downloaded(leaf, bytes.toByteArray())
         }.onFailure { e ->
             _status.value = e.message ?: "download failed"
-            null
         }.getOrNull()
     }
 
@@ -199,15 +187,24 @@ class WadaTransfer {
         _phase.value = Phase.IDLE
     }
 
-    private fun listLocked() {
+    private fun listLocked(authPending: Boolean = false) {
         val out = requireOutput()
         val input = requireInput()
         sendText("LIST")
         val found = ArrayList<Entry>()
+        // A device already known to have accepted this session (a refresh on a live session) has
+        // no verdict left to wait for; anything refused from here is a file command.
+        var accepted = !authPending
         while (true) {
             when (val frame = WadaWire.readFrame(input, out)) {
                 is WadaWire.Frame.Text -> {
-                    val text = frame.text
+                    val text = frame.text.trim()
+                    // The verdict may come before the list, between its entries, or never.
+                    if (WadaWire.isAuthOk(text)) {
+                        accepted = true
+                        continue
+                    }
+                    if (WadaWire.isRefused(text)) throw IOException(refusal(text, accepted))
                     if (text == "LIST DONE") {
                         _files.value = found
                         _status.value =
@@ -215,8 +212,8 @@ class WadaTransfer {
                             else "${found.size} files on the device."
                         return
                     }
-                    if (text.startsWith("ERR ")) throw IOException(text.removePrefix("ERR "))
                     val entry = WadaWire.parseEntry(text) ?: continue
+                    accepted = true
                     found += entry
                     // The device hands out one entry per request: its own page answers every
                     // ENTRY with LIST NEXT. Without that the list stopped at the first file and
@@ -224,10 +221,19 @@ class WadaTransfer {
                     sendText("LIST NEXT")
                 }
                 is WadaWire.Frame.Binary -> Unit
-                WadaWire.Frame.Closed -> throw IOException("the device closed the session")
+                WadaWire.Frame.Closed ->
+                    throw IOException("the device closed the session before it listed any files")
             }
         }
     }
+
+    /**
+     * The device's own words. "Refused" alone does not say whether the code was wrong, the page
+     * is already open elsewhere, or a command this app sent is not one the firmware knows.
+     */
+    private fun refusal(text: String, accepted: Boolean): String =
+        if (accepted) "the device refused a file command: $text"
+        else "the code was refused ($text) - it changes every time Transfer is reopened"
 
     private fun sendText(text: String) {
         val out = requireOutput()
@@ -247,8 +253,16 @@ class WadaTransfer {
     private companion object {
         val PIN = Regex("\\d{6}")
 
-        /** How many frames to read before deciding the device is never going to answer. */
-        const val AUTH_FRAMES = 4
+        /** Long enough for a busy device on a LAN, short enough not to read as a hang. */
+        const val CONNECT_MS = 6_000
+
+        /** The device answers a list from flash; a read this long means it stopped answering. */
+        const val READ_MS = 20_000
+
+        /** A probe is only asking "is anything listening here", so it waits far less. */
+        const val PROBE_CONNECT_MS = 2_000
+
+        const val PROBE_READ_MS = 3_000
 
         /** The browser page caps a download at 64 MB; a phone assembling more would be a memory bug. */
         const val MAX_DOWNLOAD = 64L * 1024 * 1024
@@ -271,8 +285,13 @@ internal object WadaWire {
     /** No file on the device is bigger than this in one frame. */
     private const val MAX_FRAME = 3 * 1024 * 1024
 
-    /** Where the device's web server listens, and so where /files is served. */
-    const val DEFAULT_PORT = 8765
+    /**
+     * Where the firmware's web server has been seen listening, best guess first.
+     *
+     * The transfer page has been served on 8765, on 80 and on 5000 depending on the build, so a
+     * bare address is tried on all three instead of being pinned to one.
+     */
+    val DEFAULT_PORTS = intArrayOf(8765, 80, 5000)
 
     /**
      * "192.168.1.42", "192.168.1.42:8080" and the whole page address the device prints
@@ -282,11 +301,11 @@ internal object WadaWire {
      * scheme, the path and a trailing slash. Only the authority reaches the socket: rejecting
      * the rest made a correct address look like a missing one.
      *
-     * A bare address means [DEFAULT_PORT], which is the device's web port - the one its file
-     * session is actually on. Defaulting to 80 dialled a port nothing listens on and made a
-     * reachable device look dead.
+     * An address without a port comes back with `null`, meaning the caller has to find the port
+     * rather than assume one: the firmware has shipped its page on more than one port, and a
+     * single wrong guess is indistinguishable from a device that is switched off.
      */
-    fun parseAddress(raw: String): Pair<String, Int>? {
+    fun parseAddress(raw: String): Pair<String, Int?>? {
         var text = raw.trim()
         val scheme = text.indexOf("://")
         if (scheme >= 0) text = text.substring(scheme + 3)
@@ -303,10 +322,50 @@ internal object WadaWire {
             host = text.substringBefore(':')
             if (text.contains(':')) text.substringAfter(':') else null
         }
-        val port = if (portText == null) DEFAULT_PORT else portText.toIntOrNull() ?: return null
-        if (host.isEmpty() || port !in 1..65535) return null
+        val port = if (portText == null) {
+            null
+        } else {
+            val typed = portText.toIntOrNull() ?: return null
+            if (typed !in 1..65535) return null
+            typed
+        }
+        if (host.isEmpty()) return null
         return host to port
     }
+
+    /**
+     * A plain `GET /files` on one port: the status line that came back, or `null` if nothing
+     * answered there at all.
+     *
+     * This is how the right port is found without a guess. It also gets the device's answer in
+     * advance: a page that answers 503 is serving, but has no session to give - which is a
+     * different problem from an address that reaches nothing, and used to be reported as the
+     * same timeout.
+     */
+    fun probeHttp(host: String, port: Int, connectMs: Int, readMs: Int): String? = runCatching {
+        val s = Socket()
+        try {
+            s.connect(InetSocketAddress(host, port), connectMs)
+            s.soTimeout = readMs
+            s.getOutputStream().apply {
+                write(
+                    ("GET /files HTTP/1.1\r\nHost: $host:$port\r\nConnection: close\r\n\r\n")
+                        .toByteArray(Charsets.US_ASCII),
+                )
+                flush()
+            }
+            val input = s.getInputStream()
+            val line = StringBuilder()
+            while (line.length < 120) {
+                val b = input.read()
+                if (b < 0 || b == '\n'.code) break
+                if (b != '\r'.code) line.append(b.toChar())
+            }
+            line.toString().takeIf { it.startsWith("HTTP/") }
+        } finally {
+            runCatching { s.close() }
+        }
+    }.getOrNull()
 
     /**
      * The device's verdict on the session code.

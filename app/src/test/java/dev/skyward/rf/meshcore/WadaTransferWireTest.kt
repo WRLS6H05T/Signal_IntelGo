@@ -9,6 +9,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.net.ServerSocket
+import kotlin.concurrent.thread
 
 /**
  * The transfer session's wire format: the browser page and the device agree on these exact
@@ -38,20 +40,53 @@ class WadaTransferWireTest {
 
     @Test
     fun `an address is read the way the device shows it`() {
-        // No port means the device's web port, which is where its file session lives. Port 80 is
-        // not it: dialling 80 made a reachable device look dead.
-        assertEquals("192.168.1.42" to 8765, WadaWire.parseAddress("192.168.1.42"))
-        assertEquals("192.168.1.42" to 8765, WadaWire.parseAddress(" http://192.168.1.42/ "))
+        // No port is reported as none at all: the firmware has served its page on 8765, on 80 and
+        // on 5000, so the port is found by asking, not assumed.
+        assertEquals("192.168.1.42" to null, WadaWire.parseAddress("192.168.1.42"))
+        assertEquals("192.168.1.42" to null, WadaWire.parseAddress(" http://192.168.1.42/ "))
         assertEquals("mesh.local" to 8080, WadaWire.parseAddress("mesh.local:8080"))
         // The page address the device prints, pasted whole: scheme, path and query go. The port
-        // it prints is kept, whether or not it is the default.
+        // it prints is kept.
         assertEquals("192.168.1.42" to 8765, WadaWire.parseAddress("http://192.168.1.42:8765/files"))
-        assertEquals("192.168.1.42" to 8765, WadaWire.parseAddress("http://192.168.1.42/files"))
-        assertEquals("192.168.1.42" to 8765, WadaWire.parseAddress(" 192.168.1.42/files/ "))
+        assertEquals("192.168.1.42" to null, WadaWire.parseAddress("http://192.168.1.42/files"))
+        assertEquals("192.168.1.42" to null, WadaWire.parseAddress(" 192.168.1.42/files/ "))
         assertEquals("192.168.1.42" to 8080, WadaWire.parseAddress("ws://192.168.1.42:8080/files?x=1"))
         assertNull(WadaWire.parseAddress(""))
         assertNull(WadaWire.parseAddress("http://"))
         assertNull(WadaWire.parseAddress("host:no-port"))
+    }
+
+    @Test
+    fun `the port is found by asking, and a closed one is not mistaken for an answer`() {
+        // The three ports the page has shipped on are tried before anything is concluded.
+        assertTrue(WadaWire.DEFAULT_PORTS.contains(8765))
+        assertTrue(WadaWire.DEFAULT_PORTS.contains(80))
+        val server = ServerSocket(0)
+        try {
+            val answer = thread(isDaemon = true) {
+                server.accept().use { s ->
+                    val input = s.getInputStream()
+                    val head = StringBuilder()
+                    while (!head.endsWith("\r\n\r\n")) {
+                        val b = input.read()
+                        if (b < 0) break
+                        head.append(b.toChar())
+                    }
+                    s.getOutputStream().apply {
+                        write("HTTP/1.1 503 Busy\r\nContent-Length: 0\r\n\r\n".toByteArray())
+                        flush()
+                    }
+                }
+            }
+            val line = WadaWire.probeHttp("127.0.0.1", server.localPort, 2_000, 3_000)
+            assertEquals("HTTP/1.1 503 Busy", line)
+            answer.join(5_000)
+        } finally {
+            server.close()
+        }
+        // Nothing listening: no answer, which is what sends the caller to the next port.
+        val closed = ServerSocket(0).use { it.localPort }
+        assertNull(WadaWire.probeHttp("127.0.0.1", closed, 1_000, 1_000))
     }
 
     @Test
