@@ -129,8 +129,7 @@ data class MapMarker(
     val birds3: Boolean = false,
     /** Which surveillance family matched, when this marker is a watch hit. */
     val watch: WatchKind? = null,
-    /** A MeshCore repeater: infrastructure gets its own glyph, not another dish. */
-    val meshRepeater: Boolean = false,
+
     /** Caught by the linked phone rather than this one: drawn cyan and owned by neither sky. */
     val peer: Boolean = false,
     /** The printed label, cut once here instead of sixty times a second in the draw loop. */
@@ -310,7 +309,7 @@ private fun markerColor(m: MapMarker, entityRing: Color = Sky.logged): Color = w
         WatchKind.TRACKER -> Sky.watchTracker
         null -> Sky.watchFlock
     }
-    m.layer == Layer.MESH && m.meshRepeater -> Sky.meshCore
+    // Every mesh node is the same kind of thing on the map; a repeater's role is in its card.
     else -> Sky.mesh
 }
 
@@ -533,7 +532,6 @@ fun buildMarkers(
                 score = n.score,
                 logged = n.logged,
                 altM = n.altitudeM.toDouble(),
-                meshRepeater = n.role == MeshCore.Role.REPEATER,
                 lines = listOfNotNull(
                     if (n.role != MeshCore.Role.UNKNOWN) "Role" to n.role.label else null,
                     "SNR" to String.format("%.1f dB", n.snr),
@@ -2033,12 +2031,12 @@ private fun TacticalMap(
                     )
                 }
 
-                // Mesh has a size of its own. The dish and the mast are thin line work, and at
-                // the shared entity size they disappeared against tiles and coastlines - on
-                // the globe as much as on the street map.
+                // Mesh has a size of its own, and it is half the entity size: a feed can hold
+                // dozens of nodes at once, and at full weight they crowded out the aircraft and
+                // the watch hits instead of sitting behind them as infrastructure.
                 val r = when {
-                    m.layer == Layer.MESH && m.logged -> 9.2f * density
-                    m.layer == Layer.MESH -> 8.2f * density
+                    m.layer == Layer.MESH && m.logged -> 4.6f * density
+                    m.layer == Layer.MESH -> 4.1f * density
                     m.logged -> 5.4f * density
                     else -> 4.4f * density
                 }
@@ -2082,9 +2080,9 @@ private fun TacticalMap(
                     Layer.AIRCRAFT -> drawPlaneArrow(p, m.headingDeg ?: 0f, r, color)
                     Layer.SATELLITE -> if (isIss(m)) drawStationIcon(p, iconR, color) else drawSatelliteIcon(p, r, color)
                     Layer.CELL -> drawTowerIcon(p, r, color)
-                    // A repeater is fixed infrastructure, not a node in a pocket: the mast
-                    // reads as one from across the map, the dish stays for everything else.
-                    Layer.MESH -> if (m.meshRepeater) drawRepeaterIcon(p, r, color) else drawDishIcon(p, r, color)
+                    // One shape for the whole layer: a repeater is a node that repeats, and its
+                    // role is in its card rather than in a second glyph this small.
+                    Layer.MESH -> drawDishIcon(p, r, color)
                     Layer.ESP32 -> drawChipIcon(p, r, color)
                     Layer.DRONE -> {
                         // A drone with a track is a triangle, but a smaller one than an airliner:

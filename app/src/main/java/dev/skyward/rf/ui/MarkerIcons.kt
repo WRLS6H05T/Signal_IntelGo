@@ -131,74 +131,7 @@ fun DrawScope.drawPlaneArrow(
     }
 }
 
-/** Meshtastic node: a satellite dish on a short mast. */
-/**
- * MeshCore repeater: a mast with a base, two crossbars and two arcs of coverage.
- *
- * A repeater is infrastructure - bolted to a roof or a hill - so it must not read as the mesh
- * dish that stands for a node on a desk. The mast is the part that says "fixed".
- */
-fun DrawScope.drawRepeaterIcon(at: Offset, r: Float, tint: Color) {
-    // Mast and legs.
-    drawLine(
-        color = tint,
-        start = Offset(at.x, at.y - r * 1.15f),
-        end = Offset(at.x, at.y + r * 0.15f),
-        strokeWidth = r * 0.16f,
-    )
-    drawLine(
-        color = tint.dim(0.8f),
-        start = Offset(at.x - r * 0.62f, at.y + r * 0.55f),
-        end = Offset(at.x, at.y - r * 0.1f),
-        strokeWidth = r * 0.13f,
-    )
-    drawLine(
-        color = tint.dim(0.8f),
-        start = Offset(at.x + r * 0.62f, at.y + r * 0.55f),
-        end = Offset(at.x, at.y - r * 0.1f),
-        strokeWidth = r * 0.13f,
-    )
-    // Crossbars, short at the top of the mast: an antenna array, not a tree.
-    drawLine(
-        color = tint,
-        start = Offset(at.x - r * 0.42f, at.y - r * 0.72f),
-        end = Offset(at.x + r * 0.42f, at.y - r * 0.72f),
-        strokeWidth = r * 0.12f,
-    )
-    drawLine(
-        color = tint.dim(0.85f),
-        start = Offset(at.x - r * 0.3f, at.y - r * 0.4f),
-        end = Offset(at.x + r * 0.3f, at.y - r * 0.4f),
-        strokeWidth = r * 0.11f,
-    )
-    // Coverage arcs, held back from the mast so the glyph stays legible at dot size.
-    drawLine(
-        color = tint.dim(0.55f),
-        start = Offset(at.x - r * 0.95f, at.y - r * 0.95f),
-        end = Offset(at.x - r * 0.72f, at.y - r * 1.28f),
-        strokeWidth = r * 0.11f,
-    )
-    drawLine(
-        color = tint.dim(0.55f),
-        start = Offset(at.x - r * 0.72f, at.y - r * 1.28f),
-        end = Offset(at.x - r * 0.34f, at.y - r * 1.42f),
-        strokeWidth = r * 0.11f,
-    )
-    drawLine(
-        color = tint.dim(0.55f),
-        start = Offset(at.x + r * 0.95f, at.y - r * 0.95f),
-        end = Offset(at.x + r * 0.72f, at.y - r * 1.28f),
-        strokeWidth = r * 0.11f,
-    )
-    drawLine(
-        color = tint.dim(0.55f),
-        start = Offset(at.x + r * 0.72f, at.y - r * 1.28f),
-        end = Offset(at.x + r * 0.34f, at.y - r * 1.42f),
-        strokeWidth = r * 0.11f,
-    )
-    drawCircle(color = tint, radius = r * 0.16f, center = Offset(at.x, at.y - r * 1.2f))
-}
-
+/** A mesh node of any role: a satellite dish on a short mast. */
 fun DrawScope.drawDishIcon(at: Offset, r: Float, tint: Color) {
     val size = Size(r * 1.7f, r * 1.7f)
     val topLeft = Offset(at.x - r * 0.85f, at.y - r * 1.05f)
