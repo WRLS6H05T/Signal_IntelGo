@@ -259,6 +259,39 @@ fun DrawScope.drawGpsLogo(at: Offset, r: Float, tint: Color) {
 }
 
 /**
+ * A dome CCTV camera: a half-sphere hanging under its bracket.
+ *
+ * A Flock plate reader is a box with a lens sticking out; a dome camera is a mushroom. They are
+ * the two things on a street that watch, and they must not share one glyph.
+ */
+fun DrawScope.drawCctvIcon(at: Offset, r: Float, tint: Color) {
+    // The dome itself: the upper half of a circle, filled, sitting on its own rim.
+    drawArc(
+        color = tint,
+        startAngle = 180f,
+        sweepAngle = 180f,
+        useCenter = true,
+        topLeft = Offset(at.x - r * 0.9f, at.y - r * 0.95f),
+        size = Size(r * 1.8f, r * 1.8f),
+    )
+    // The lens looks down, so it is a dark spot low in the dome rather than at its crown.
+    drawCircle(color = tint.dim(0.32f), radius = r * 0.26f, center = Offset(at.x, at.y - r * 0.08f))
+    // Bracket: a short arm out of the dome's edge, and the post it hangs from.
+    drawLine(
+        color = tint.dim(0.85f),
+        start = Offset(at.x - r * 0.9f, at.y - r * 0.05f),
+        end = Offset(at.x - r * 1.28f, at.y - r * 0.05f),
+        strokeWidth = r * 0.18f,
+    )
+    drawLine(
+        color = tint.dim(0.55f),
+        start = Offset(at.x - r * 0.55f, at.y - r * 1.45f),
+        end = Offset(at.x - r * 0.55f, at.y - r * 0.95f),
+        strokeWidth = r * 0.16f,
+    )
+}
+
+/**
  * Surveillance camera: a lens on a bracket, side-on. It has to be unmistakable next to the
  * ESP32 chip and the mesh dish, which are the two other box-shaped things on the map.
  */

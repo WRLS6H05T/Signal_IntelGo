@@ -71,6 +71,17 @@ are drawn as one dish carrying the number of nodes it stands for (`×50`). Their
 many share the position. Fifty dishes on one pixel used to read as a single node while the
 INTEL and Log tables counted fifty.
 
+**Mapped cameras** are the one layer no radio hears. Flock and other ALPR plate readers, and
+CCTV cameras, are read from OpenStreetMap through the Overpass API within three kilometres of
+the phone, refreshed every ten minutes or after a kilometre of travel. A plate reader keeps the
+camera-on-a-bracket glyph in the Flock rose, a CCTV camera gets a grey dome. Tap one for its
+card - operator, vendor, housing, facing, mount, zone, distance - and, when the mapping carries
+one, an **OPEN LIVE FEED** button that hands the camera's own HLS, MJPEG or web link to whatever
+app can play it. The `CAM` row in INTEL switches the layer.
+
+Volunteer mapping is a lower bound: an unmapped camera is not an absent camera, and Flock
+publishes no map of its own. Camera positions are © OpenStreetMap contributors, ODbL.
+
 ---
 
 ## Zoom behaviour

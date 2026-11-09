@@ -36,6 +36,12 @@ object Sky {
     val watchRouter = Color(0xFF2DD4BF)
     val watchRadio = Color(0xFFE879F9)
 
+    /**
+     * A mapped CCTV camera: neutral grey, because it is street furniture rather than a radio
+     * catch. The Flock plate reader keeps the rose the watch layer already gives it.
+     */
+    val cctv = Color(0xFF94A3B8)
+
     /** A CC1101 carrier: yellow, because it is a different band and a different kind of thing. */
     val subGhz = Color(0xFFFDE047)
 

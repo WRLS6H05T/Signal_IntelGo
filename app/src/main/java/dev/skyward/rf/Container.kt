@@ -24,6 +24,7 @@ import dev.skyward.rf.sdr.SdrLibrary
 import dev.skyward.rf.sdr.SdrStream
 import dev.skyward.rf.sky.AircraftSource
 import dev.skyward.rf.sky.AirspaceEngine
+import dev.skyward.rf.sky.CameraSource
 import dev.skyward.rf.scan.EspTerminal
 import dev.skyward.rf.sky.Esp32Source
 import dev.skyward.rf.sky.MeshSource
@@ -109,6 +110,9 @@ class Container(context: Context) {
         http = http,
     )
     val aircraft = AircraftSource(http)
+
+    /** Mapped Flock ALPR and CCTV cameras: positions from OpenStreetMap, keyless. */
+    val cameras = CameraSource(http)
     val mesh = MeshSource { settingsStore.current }
     val esp32Usb = UsbBoards(appContext)
     val esp32 = Esp32Source({ settingsStore.current }, esp32Usb)
@@ -216,6 +220,7 @@ class Container(context: Context) {
         settings = settingsStore,
         sat = sat,
         aircraftSource = aircraft,
+        cameraSource = cameras,
         mesh = mesh,
         esp32 = esp32,
         rf = rf,

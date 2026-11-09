@@ -1,6 +1,7 @@
 package dev.skyward.rf.sky
 
 import dev.skyward.rf.core.AircraftView
+import dev.skyward.rf.core.CameraView
 import dev.skyward.rf.core.CellView
 import dev.skyward.rf.core.DroneView
 import dev.skyward.rf.core.Esp32Node
@@ -44,6 +45,7 @@ class AirspaceEngine(
     private val settings: SettingsStore,
     private val sat: SatTracker,
     private val aircraftSource: AircraftSource,
+    private val cameraSource: CameraSource,
     private val mesh: MeshSource,
     private val esp32: Esp32Source,
     private val rf: RfScanner,
@@ -61,8 +63,11 @@ class AirspaceEngine(
         val cells: List<CellView> = emptyList(),
         val esp32: List<Esp32Node> = emptyList(),
         val watch: List<WatchView> = emptyList(),
+        /** Mapped Flock and CCTV cameras: read from OpenStreetMap, never logged as a catch. */
+        val cameras: List<CameraView> = emptyList(),
         val satStatus: FeedStatus = FeedStatus(),
         val acStatus: FeedStatus = FeedStatus(),
+        val camStatus: FeedStatus = FeedStatus(),
         val tleCount: Int = 0,
         val tleAgeMs: Long = 0L,
         val lastTick: Long = 0L,
@@ -96,6 +101,7 @@ class AirspaceEngine(
 
     private var tickJob: Job? = null
     private var aircraftJob: Job? = null
+    private var cameraJob: Job? = null
     private var started = false
 
     fun start() {
@@ -103,12 +109,44 @@ class AirspaceEngine(
         started = true
         tickJob = scope.launch(Dispatchers.Default) { tickLoop() }
         aircraftJob = scope.launch(Dispatchers.IO) { aircraftLoop() }
+        cameraJob = scope.launch(Dispatchers.IO) { cameraLoop() }
     }
 
     fun stop() {
         started = false
         tickJob?.cancel()
         aircraftJob?.cancel()
+        cameraJob?.cancel()
+    }
+
+    /**
+     * Mapped surveillance cameras.
+     *
+     * Flock plate readers and CCTV cameras are read from OpenStreetMap's Overpass API: there is
+     * no vendor feed to subscribe to, and volunteer mapping is the only public record of where
+     * the cameras are. The source throttles itself to one read per area per ten minutes, so
+     * asking on every pass costs nothing and a drive still updates the layer as it moves.
+     */
+    private suspend fun cameraLoop() {
+        while (scope.isActive && started) {
+            val cfg = settings.current
+            val obs = observer.value
+            if (cfg.offlineMode) {
+                // Offline draws the GPS constellation and nothing from the street, and the
+                // camera layer is a street feed like any other.
+                _state.value = _state.value.copy(
+                    cameras = emptyList(),
+                    camStatus = FeedStatus(false, "offline mode", System.currentTimeMillis(), 0),
+                )
+            } else if (obs != null) {
+                cameraSource.refresh(obs)
+                _state.value = _state.value.copy(
+                    cameras = cameraSource.cameras.value,
+                    camStatus = cameraSource.status.value,
+                )
+            }
+            delay(20_000L)
+        }
     }
 
     private suspend fun tickLoop() {
@@ -253,6 +291,8 @@ class AirspaceEngine(
                 cells = emptyList(),
                 esp32 = emptyList(),
                 watch = emptyList(),
+                cameras = emptyList(),
+                camStatus = FeedStatus(false, "offline mode", now, 0),
                 observer = observer.value,
                 lastTick = now,
             )

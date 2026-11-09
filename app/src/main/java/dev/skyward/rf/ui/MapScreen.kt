@@ -1,5 +1,8 @@
 package dev.skyward.rf.ui
 
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -68,6 +71,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import dev.skyward.rf.Container
 import dev.skyward.rf.core.AircraftView
+import dev.skyward.rf.core.CameraKind
+import dev.skyward.rf.core.CameraView
 import dev.skyward.rf.core.CellView
 import dev.skyward.rf.core.CrashLog
 import dev.skyward.rf.core.Geo
@@ -129,6 +134,10 @@ data class MapMarker(
     val birds3: Boolean = false,
     /** Which surveillance family matched, when this marker is a watch hit. */
     val watch: WatchKind? = null,
+    /** Mapped camera family, when this marker came from the web camera layer. */
+    val camera: CameraKind? = null,
+    /** A mapped camera's own feed: opened outside the app, null when none is mapped. */
+    val feedUrl: String? = null,
     /** How many nodes this one marker stands for: see [foldCoincident]. */
     val stack: Int = 1,
 
@@ -302,6 +311,9 @@ private fun markerColor(m: MapMarker, entityRing: Color = Sky.logged): Color = w
     m.layer == Layer.AIRCRAFT -> Sky.aircraft
     m.layer == Layer.DRONE -> Sky.drone
     m.layer == Layer.ESP32 -> Sky.esp32
+    // Two families of mapped camera, two colours: a Flock plate reader is the surveillance the
+    // radios already hunt for, while a CCTV camera is street furniture that happens to watch.
+    m.layer == Layer.CAMERA -> if (m.camera == CameraKind.CCTV) Sky.cctv else Sky.watchFlock
     m.layer == Layer.WATCH -> when (m.watch) {
         WatchKind.FLOCK -> Sky.watchFlock
         WatchKind.AXON -> Sky.watchAxon
@@ -357,6 +369,8 @@ fun buildMarkers(
     showCells: Boolean,
     showEsp32: Boolean,
     showWatch: Boolean,
+    /** Mapped Flock and CCTV cameras: no radio hears them, they are read from a web map. */
+    showCameras: Boolean = true,
     /** "km" or "mi": the marker card is the only place a distance is written down. */
     distanceUnit: String,
     minScore: Int,
@@ -664,6 +678,48 @@ fun buildMarkers(
             ),
         )
     }
+    // ---- mapped surveillance cameras: Flock ALPR and CCTV, from OpenStreetMap ----
+    // These are the one layer no radio hears. They carry real coordinates recorded by whoever
+    // mapped them, so unlike a watch hit they belong on the street they are on. The feed is
+    // carried into the card and opened from there: a camera that publishes its own picture is
+    // watched outside an app whose job is the map.
+    if (showCameras) sky.cameras.forEach { cam: CameraView ->
+        val feed = cam.liveFeed.takeIf { it.isNotBlank() }
+        out.add(
+            MapMarker(
+                key = "CAM:${cam.kind.name}:${cam.id}",
+                layer = Layer.CAMERA,
+                camera = cam.kind,
+                lat = cam.lat,
+                lon = cam.lon,
+                title = cam.name,
+                subtitle = if (cam.kind == CameraKind.FLOCK) {
+                    "Flock / ALPR \u00b7 mapped"
+                } else {
+                    "CCTV \u00b7 mapped"
+                },
+                // A camera read from a map has no radio score: it is either mapped or it is not,
+                // so the weak-dot filter must never hide one.
+                score = 100,
+                logged = false,
+                feedUrl = feed,
+                lines = listOfNotNull(
+                    "Source" to "OpenStreetMap \u00b7 ODbL",
+                    "Vendor" to cam.manufacturer.ifBlank { "\u2014" },
+                    "Operator" to cam.operator.ifBlank { "\u2014" },
+                    "Camera" to cam.cameraType.ifBlank { "\u2014" },
+                    cam.directionDeg?.let { "Facing" to String.format(Locale.US, "%.0f\u00b0", it) },
+                    "Zone" to cam.zone.ifBlank { "\u2014" },
+                    "Mount" to cam.mount.ifBlank { "\u2014" },
+                    "Install" to cam.install.ifBlank { "\u2014" },
+                    "Live feed" to (feed?.let { cam.feedKind } ?: "none mapped"),
+                    "Distance" to Units.distance(cam.distanceKm, distanceUnit, 2),
+                    "Position" to String.format(Locale.US, "%.5f, %.5f", cam.lat, cam.lon),
+                    "OSM" to cam.id,
+                ),
+            ),
+        )
+    }
     // One non-finite coordinate would poison the frame's transform and take every marker
     // after it with it, so a bad fix is dropped here rather than in the draw loop.
     return out.filter { it.lat.isFinite() && it.lon.isFinite() }
@@ -728,6 +784,8 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
     var showMesh by remember { mutableStateOf(true) }
     var showCells by remember { mutableStateOf(true) }
     var showWatch by remember { mutableStateOf(true) }
+    // Mapped cameras are their own layer: they are read from a web map, not heard here.
+    var showCameras by remember { mutableStateOf(true) }
     // Boards are status, not a layer: they no longer have a switch in the INTEL box.
     val showEsp32 = true
     var showPath by remember { mutableStateOf(true) }
@@ -778,7 +836,8 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
     val markers by produceState(
         initialValue = emptyList<MapMarker>(),
         sky, showSats, showAir, showDrones, showMesh, showCells, showEsp32, showWatch,
-        settings.aircraftEnabled, settings.dropWeakDots, settings.distanceUnit, peerIntel,
+        showCameras, settings.aircraftEnabled, settings.dropWeakDots, settings.distanceUnit,
+        peerIntel,
         crew, loggedMesh,
     ) {
         value = withContext(Dispatchers.Default) {
@@ -791,6 +850,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 showCells = showCells,
                 showEsp32 = showEsp32,
                 showWatch = showWatch,
+                showCameras = showCameras,
                 distanceUnit = settings.distanceUnit,
                 minScore = if (settings.dropWeakDots) 20 else 0,
                 peerEntities = peerIntel,
@@ -1195,6 +1255,9 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 // Cameras and TASERs were heard, not triangulated: the row is still a count of
                 // matched advertisers, not of confirmed installations.
                 IntelPairRow("WATCH", sky.watch.size, sky.loggedWatch, showWatch) { showWatch = !showWatch }
+                // Mapped, not caught: the camera layer has no LOGGED column because nothing here
+                // was heard, and a dash is the honest number for it.
+                IntelPairRow("CAM", sky.cameras.size, null, showCameras) { showCameras = !showCameras }
                 // One table for both phones, keyed by device: a network heard by either is a
                 // single row, so the two devices print the same numbers. Adding the peer's
                 // total to this phone's own counted every shared network twice, which is why
@@ -1567,6 +1630,7 @@ private fun MarkerCard(
     entityRing: Color = Sky.logged,
     onClose: () -> Unit,
 ) {
+    val context = LocalContext.current
     Column(
         modifier
             .fillMaxWidth()
@@ -1590,6 +1654,41 @@ private fun MarkerCard(
         }
         Spacer(Modifier.height(8.dp))
         for ((k, v) in marker.lines) KeyValueRow(k, v)
+        marker.feedUrl?.let { url ->
+            Spacer(Modifier.height(10.dp))
+            // The feed is opened where it can actually play. This app draws a map, not a video
+            // surface, and a mapped feed may be HLS, MJPEG or a vendor page behind a login.
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(Sky.cyan)
+                    .clickable { openFeed(context, url) }
+                    .padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "OPEN LIVE FEED",
+                    color = Sky.bg,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Hands a mapped camera feed to whatever app can play it.
+ *
+ * A link with no handler is a toast rather than a crash: the camera is still worth knowing about
+ * when the phone has nothing installed that opens it.
+ */
+private fun openFeed(context: android.content.Context, url: String) {
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching { context.startActivity(intent) }.onFailure {
+        Toast.makeText(context, "No app can open that feed", Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -2106,7 +2205,7 @@ private fun TacticalMap(
                     // A gold halo under the glyph, so the station reads gold logged or not.
                     drawCircle(color = IssGold.copy(alpha = 0.22f * a), radius = iconR * 1.8f, center = p)
                 }
-                if (m.layer == Layer.MESH) {
+                if (m.layer == Layer.MESH || m.layer == Layer.CAMERA) {
                     // A disc under the glyph: on the ball a dish is a few thin lines over a
                     // continent, and an unlogged node has no ring to give it any weight.
                     drawCircle(color = base.copy(alpha = 0.18f * a), radius = r * 1.75f, center = p)
@@ -2119,6 +2218,13 @@ private fun TacticalMap(
                     // role is in its card rather than in a second glyph this small.
                     Layer.MESH -> drawDishIcon(p, r, color)
                     Layer.ESP32 -> drawChipIcon(p, r, color)
+                    // A plate reader keeps the lens-on-a-bracket the watch layer uses; a CCTV
+                    // dome gets its own glyph so the two do not read as the same box.
+                    Layer.CAMERA -> if (m.camera == CameraKind.CCTV) {
+                        drawCctvIcon(p, r, color)
+                    } else {
+                        drawCameraIcon(p, r, color)
+                    }
                     Layer.DRONE -> {
                         // A drone with a track is a triangle, but a smaller one than an airliner:
                         // the two must not read as the same weight in the sky. Without a

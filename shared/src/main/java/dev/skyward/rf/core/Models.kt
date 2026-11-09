@@ -40,9 +40,55 @@ data class RfObservation(
     val source: String = "local",
 )
 
-/** Airspace layers that can be "logged" during a drive. */
+/**
+ * Airspace layers that can be "logged" during a drive.
+ *
+ * CAMERA is the one layer this app never writes: those positions come from a public map, not
+ * from a radio, so they are fetched and listed rather than caught.
+ */
 @Serializable
-enum class Layer { SATELLITE, AIRCRAFT, DRONE, MESH, CELL, ESP32, WATCH }
+enum class Layer { SATELLITE, AIRCRAFT, DRONE, MESH, CELL, ESP32, WATCH, CAMERA }
+
+/**
+ * The two kinds of camera a street carries: a plate reader and a surveillance camera.
+ *
+ * FLOCK covers every ALPR unit the map holds, because that is what the mapping records and the
+ * vendors build the same thing; [CameraView.manufacturer] is what names the actual one.
+ */
+enum class CameraKind { FLOCK, CCTV }
+
+/**
+ * A camera read from a map rather than heard from a radio.
+ *
+ * The position is the camera's own, recorded by a volunteer who stood in front of it - the one
+ * thing a radio hit can never give. The telemetry is what the map says about the installation,
+ * and [liveFeed] is the camera's own picture when it publishes one.
+ */
+data class CameraView(
+    /** `node/123` or `way/456`: the OpenStreetMap element this camera is. */
+    val id: String,
+    val kind: CameraKind,
+    val lat: Double,
+    val lon: Double,
+    val name: String,
+    val operator: String = "",
+    val manufacturer: String = "",
+    /** `fixed`, `dome`, `panning`: how the housing is built. */
+    val cameraType: String = "",
+    /** Degrees the camera faces, when the mapping records it. */
+    val directionDeg: Double? = null,
+    val mount: String = "",
+    /** What it watches: `traffic`, `public`, `station` and so on. */
+    val zone: String = "",
+    /** `public`, `outdoor`, `indoor`: the mapping's own view of the installation. */
+    val install: String = "",
+    val ref: String = "",
+    val distanceKm: Double = 0.0,
+    /** The camera's own stream or page, empty when the map carries none. */
+    val liveFeed: String = "",
+    /** How [liveFeed] can be opened: "HLS stream", "MJPEG stream", "video file", "web page". */
+    val feedKind: String = "",
+)
 
 data class SatView(
     val noradId: String,
