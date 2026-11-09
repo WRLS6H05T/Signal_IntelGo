@@ -174,12 +174,10 @@ fun ToggleChip(
 }
 
 /**
- * Column titles for the INTEL table: the live count beside the label, the logged count out at
- * the right edge.
+ * Column titles for the INTEL table: live then logged, both beside the label.
  *
- * The two numbers share a row in the table below, so they are named once at the top instead of
- * a separate heading over each half. They are named where they are drawn: the live count sits
- * next to the layer it belongs to, and the logged total is its own column down the right side.
+ * The two numbers share a row, so they are read as a pair: what is here now, then what this
+ * drive has caught. Naming them once at the top keeps every layer name printed once.
  */
 @Composable
 fun IntelPairHeader() {
@@ -194,19 +192,26 @@ fun IntelPairHeader() {
             fontSize = 8.sp,
             color = Sky.textDim,
             textAlign = TextAlign.End,
-            modifier = Modifier.width(38.dp),
+            modifier = Modifier.width(LIVE_W.dp),
         )
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.width(GAP_W.dp))
         Text(
             "LOGGED",
             style = SkywardThemeLabel(),
             fontSize = 8.sp,
             color = Sky.textDim,
             textAlign = TextAlign.End,
-            modifier = Modifier.width(48.dp),
+            modifier = Modifier.width(LOGGED_W.dp),
         )
     }
 }
+
+/** The live count's column: wide enough for four digits, narrow enough to sit beside its twin. */
+private const val LIVE_W = 34
+
+/** The logged count's column, and the gap that keeps the two numbers from reading as one. */
+private const val LOGGED_W = 40
+private const val GAP_W = 8
 
 /**
  * One row of the INTEL table: a one-word label and the two numbers that belong to it.
@@ -215,14 +220,13 @@ fun IntelPairHeader() {
  * and the count you were comparing sat a table away. One label and two numbers reads both states
  * in one glance.
  *
+ * The two numbers sit next to each other, live then logged, so the pair is compared by eye
+ * rather than by following a divider line across the box: "3 of 54" is a sentence, and a number
+ * pinned to the far edge is not.
+ *
  * A null count prints a dash: the track and the individual networks are not a logged entity in
  * their own right, and a sub-GHz carrier has no live count to give. A switched-off layer dims its
  * label but keeps both numbers, so "hidden" never looks like "zero".
- *
- * The live count stays beside the label it belongs to, and the logged count is pinned to the
- * right edge as its own column: the live number answers "what is here now" about this row,
- * while the logged number is the same registry total the LOG screen shares, read straight down
- * the right side rather than hunted for among the live figures.
  */
 @Composable
 fun IntelPairRow(
@@ -255,16 +259,9 @@ fun IntelPairRow(
             fontWeight = FontWeight.Bold,
             color = if (on && live != null) Sky.cyan else Sky.textDim,
             textAlign = TextAlign.End,
-            modifier = Modifier.width(38.dp),
+            modifier = Modifier.width(LIVE_W.dp),
         )
-        Spacer(Modifier.width(8.dp))
-        Box(
-            Modifier
-                .weight(1f)
-                .height(1.dp)
-                .background(Sky.outline.copy(alpha = 0.35f)),
-        )
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(GAP_W.dp))
         Text(
             logged?.toString() ?: DASH,
             fontFamily = FontFamily.Monospace,
@@ -272,8 +269,9 @@ fun IntelPairRow(
             fontWeight = FontWeight.Bold,
             color = if (logged != null && logged > 0) Sky.logged else Sky.textDim,
             textAlign = TextAlign.End,
-            modifier = Modifier.width(48.dp),
+            modifier = Modifier.width(LOGGED_W.dp),
         )
+        Spacer(Modifier.weight(1f))
     }
 }
 
