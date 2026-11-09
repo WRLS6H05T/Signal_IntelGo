@@ -1127,7 +1127,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
             // Still no card for a feed that is switched off and empty - an empty box of zeros
             // only takes the space the INTEL table needs. A feed that is on does get one even
             // with nothing in it, because "connected and silent" must not look like "off".
-            val meshFeedOn = sky.mesh.isNotEmpty() ||
+            val meshFeedOn = sky.mesh.isNotEmpty() || sky.meshStatus.ok == true ||
                 settings.meshMqttEnabled || settings.meshCoreEnabled
             if (meshFeedOn) StatusCard(
                 title = "MESH",
@@ -1136,15 +1136,34 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 open = meshOpen,
                 onToggle = { meshOpen = !meshOpen },
             ) {
+                // The switch is a setting; this line is what the clients are doing. "broker on"
+                // used to be printed from the setting alone, so a feed that had never connected -
+                // or had dropped and not re-subscribed - claimed to be live while carrying
+                // nothing, which reads exactly like a broker that is working.
+                val meshPlotted = markers.count { it.layer == Layer.MESH }
+                val ms = sky.meshStatus
                 Text(
-                    (if (settings.meshMqttEnabled || settings.meshCoreEnabled) "broker on" else "broker off") +
+                    "broker " + (if (ms.ok == true) "live" else "down") +
                         " \u00b7 ble " + meshBle + " \u00b7 mqtt " + meshMqtt +
                         (if (meshCore > 0) " \u00b7 core " + meshCore + " \u00b7 rpt " + meshRpt else "") +
-                        (if (meshNoPos > 0) " \u00b7 " + meshNoPos + " no pos" else ""),
+                        (if (meshNoPos > 0) " \u00b7 " + meshNoPos + " no pos" else "") +
+                        " \u00b7 " + meshPlotted + " plotted",
                     color = Sky.textDim,
                     fontSize = 9.sp,
                     maxLines = 1,
                 )
+                // Why a count can be larger than the map: "down" is the feed, "no pos" is a node
+                // that shares no location, and "plotted" is the dishes actually on the map -
+                // including a spot standing for several nodes. Those three numbers were the
+                // ones that had to be guessed at before.
+                if (ms.detail.isNotBlank()) {
+                    Text(
+                        ms.detail,
+                        color = if (ms.ok == true) Sky.textDim else Sky.danger,
+                        fontSize = 9.sp,
+                        maxLines = 2,
+                    )
+                }
                 // The address itself. "Broker on" says nothing about what it is on, and the
                 // topic is only half of what had to be typed to get here: a broker one letter
                 // wrong looks exactly like a broker that is working.

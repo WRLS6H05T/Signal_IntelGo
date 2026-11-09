@@ -406,7 +406,9 @@ class Container(context: Context) {
                     mesh.stop()
                     if (peer.isRunning()) peer.stop()
                 } else {
-                    if (cfg.meshMqttEnabled) mesh.start()
+                    // start() checks each feed's own switch. Gating it on the Meshtastic one left
+                    // the observer bridge down for good after a trip through offline mode.
+                    mesh.start()
                     if (cfg.peerEnabled && !peer.isRunning()) peer.start()
                 }
             }

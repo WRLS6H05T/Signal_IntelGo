@@ -15,12 +15,13 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken
-import org.eclipse.paho.client.mqttv3.MqttCallback
+import org.eclipse.paho.client.mqttv3.MqttCallbackExtended
 import org.eclipse.paho.client.mqttv3.MqttClient
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions
 import org.eclipse.paho.client.mqttv3.MqttMessage
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Mesh nodes (Meshtastic).
@@ -48,8 +49,21 @@ class MeshSource(private val settings: () -> dev.skyward.rf.core.Settings) {
     private val _nodes = MutableStateFlow<Map<String, MeshNode>>(emptyMap())
     val nodesFlow: StateFlow<Map<String, MeshNode>> = _nodes
 
-    private val _status = MutableStateFlow(FeedStatus(null, "idle", 0L, 0))
-    val status: StateFlow<FeedStatus> = _status
+    // Each feed reports on itself. One shared status line meant a MeshCore client that failed
+    // overwrote the Meshtastic one that was delivering, and a Meshtastic drop printed "down"
+    // over a MeshCore feed that was still live - so the HUD could not be believed either way.
+    private val _mqttStatus = MutableStateFlow(FeedStatus(null, "idle", 0L, 0))
+    private val _coreStatus = MutableStateFlow(FeedStatus(null, "idle", 0L, 0))
+    val mqttStatus: StateFlow<FeedStatus> = _mqttStatus
+    val coreStatus: StateFlow<FeedStatus> = _coreStatus
+
+    // What actually arrived, not what was subscribed to. A clean session is discarded by the
+    // broker whenever the link drops, so "connected" and "delivering" are two different facts,
+    // and the second is the one worth putting on screen.
+    private val mqttMessages = AtomicLong()
+    private val coreMessages = AtomicLong()
+    private val lastMqttMessageAt = AtomicLong(0L)
+    private val lastCoreMessageAt = AtomicLong(0L)
 
     @Volatile
     private var client: MqttClient? = null
@@ -73,14 +87,15 @@ class MeshSource(private val settings: () -> dev.skyward.rf.core.Settings) {
         if (client?.isConnected == true) return
         val cfg = settings()
         if (!cfg.meshMqttEnabled) {
-            _status.value = FeedStatus(null, "mesh feed off", System.currentTimeMillis(), nodes.size)
+            _mqttStatus.value = FeedStatus(null, "mesh feed off", System.currentTimeMillis(), nodes.size)
             return
         }
         val broker = cfg.meshBroker.trim()
         if (broker.isEmpty()) {
-            _status.value = FeedStatus(false, "no broker configured", System.currentTimeMillis(), nodes.size)
+            _mqttStatus.value = FeedStatus(false, "no broker configured", System.currentTimeMillis(), nodes.size)
             return
         }
+        val topic = cfg.meshTopic.trim()
         // Only this client is dropped here: the MeshCore feed is a separate connection and a
         // Meshtastic reconnect must not take it down with it.
         runCatching {
@@ -101,34 +116,67 @@ class MeshSource(private val settings: () -> dev.skyward.rf.core.Settings) {
                 if (cfg.meshUser.isNotBlank()) userName = cfg.meshUser
                 if (cfg.meshPass.isNotBlank()) password = cfg.meshPass.toCharArray()
             }
-            c.setCallback(object : MqttCallback {
+            c.setCallback(object : MqttCallbackExtended {
+                /**
+                 * Paho reconnects on its own, and a clean session leaves nothing behind: the
+                 * broker forgot the subscription with the connection, and the client does not
+                 * restore it. The client then reports connected for ever while delivering
+                 * nothing, which is exactly what "broker on and no data" looks like. Every
+                 * automatic reconnect re-subscribes here.
+                 */
+                override fun connectComplete(reconnect: Boolean, serverURI: String?) {
+                    if (!reconnect) return
+                    runCatching { c.subscribe(topic, 0) }
+                        .onSuccess { _mqttStatus.value = liveStatus(broker, topic, "mesh") }
+                        .onFailure { e ->
+                            _mqttStatus.value = FeedStatus(
+                                false,
+                                "resubscribe failed: " + (e.message ?: "mqtt"),
+                                System.currentTimeMillis(),
+                                nodes.size,
+                            )
+                        }
+                }
+
                 override fun connectionLost(cause: Throwable?) {
-                    _status.value = FeedStatus(false, cause?.message ?: "mqtt disconnected", System.currentTimeMillis(), nodes.size)
+                    _mqttStatus.value = FeedStatus(
+                        false,
+                        (cause?.message ?: "mqtt disconnected") + " · reconnecting",
+                        System.currentTimeMillis(),
+                        nodes.size,
+                    )
                 }
 
                 override fun messageArrived(topic: String?, message: MqttMessage?) {
                     val payload = message?.payload ?: return
+                    mqttMessages.incrementAndGet()
+                    lastMqttMessageAt.set(System.currentTimeMillis())
                     runCatching { ingestJson(String(payload)) }
                 }
 
                 override fun deliveryComplete(token: IMqttDeliveryToken?) = Unit
             })
             c.connect(opts)
-            c.subscribe(cfg.meshTopic.trim(), 0)
             client = c
             // The address is part of the status: "live" on its own does not say which broker
             // this is on, and the topic is only half of what had to be configured to get here.
-            _status.value = FeedStatus(
-                true,
-                "mesh live · ${hostOf(broker)} · ${cfg.meshTopic}",
-                System.currentTimeMillis(),
-                nodes.size,
-            )
+            c.subscribe(topic, 0)
+            _mqttStatus.value = liveStatus(broker, topic, "mesh")
         }.onFailure {
             client = null
-            _status.value = FeedStatus(false, it.message ?: "mqtt failed", System.currentTimeMillis(), nodes.size)
+            _mqttStatus.value = FeedStatus(false, it.message ?: "mqtt failed", System.currentTimeMillis(), nodes.size)
         }
     }
+
+    /**
+     * "Connected, subscribed, waiting".
+     *
+     * A refused subscription does not raise: the broker answers SUBACK with a failure code and
+     * the socket stays open. So this line only claims the session, and the message count on the
+     * map is what says whether anything is actually arriving.
+     */
+    private fun liveStatus(broker: String, topic: String, label: String): FeedStatus =
+        FeedStatus(true, "$label live · ${hostOf(broker)} · $topic", System.currentTimeMillis(), nodes.size)
 
     fun stop() {
         runCatching {
@@ -145,6 +193,29 @@ class MeshSource(private val settings: () -> dev.skyward.rf.core.Settings) {
             }
         }
         coreClient = null
+        _mqttStatus.value = FeedStatus(null, "stopped", System.currentTimeMillis(), nodes.size)
+        _coreStatus.value = FeedStatus(null, "stopped", System.currentTimeMillis(), nodes.size)
+    }
+
+    /**
+     * The two feeds as one line for the map.
+     *
+     * Read on every tick rather than pushed from the callbacks: the counters and the
+     * last-message clock live here, and the map needs the arrival time to tell a broker that is
+     * delivering from one that is merely connected.
+     */
+    fun status(now: Long = System.currentTimeMillis()): FeedStatus {
+        val cfg = settings()
+        return mergeMeshStatus(
+            mqtt = _mqttStatus.value,
+            core = _coreStatus.value,
+            mqttEnabled = cfg.meshMqttEnabled,
+            coreEnabled = cfg.meshCoreEnabled,
+            messages = mqttMessages.get() + coreMessages.get(),
+            lastMessageAt = maxOf(lastMqttMessageAt.get(), lastCoreMessageAt.get()),
+            nodes = nodes.size,
+            now = now,
+        )
     }
 
     /**
@@ -156,10 +227,17 @@ class MeshSource(private val settings: () -> dev.skyward.rf.core.Settings) {
      */
     private fun startMeshCore() {
         val cfg = settings()
-        if (!cfg.meshCoreEnabled) return
+        if (!cfg.meshCoreEnabled) {
+            _coreStatus.value = FeedStatus(null, "observer bridge off", System.currentTimeMillis(), nodes.size)
+            return
+        }
         if (coreClient?.isConnected == true) return
         val broker = cfg.meshCoreBroker.trim()
-        if (broker.isEmpty()) return
+        if (broker.isEmpty()) {
+            _coreStatus.value = FeedStatus(false, "no observer broker", System.currentTimeMillis(), nodes.size)
+            return
+        }
+        val topic = cfg.meshCoreTopic.trim()
         stopMeshCore()
         runCatching {
             val c = MqttClient(broker, "skyward-core-" + (1000..9999).random(), MemoryPersistence())
@@ -169,11 +247,26 @@ class MeshSource(private val settings: () -> dev.skyward.rf.core.Settings) {
                 connectionTimeout = 12
                 keepAliveInterval = 30
             }
-            c.setCallback(object : MqttCallback {
+            c.setCallback(object : MqttCallbackExtended {
+                /** Same clean-session rule as the Meshtastic feed: re-subscribe on every reconnect. */
+                override fun connectComplete(reconnect: Boolean, serverURI: String?) {
+                    if (!reconnect) return
+                    runCatching { c.subscribe(topic, 0) }
+                        .onSuccess { _coreStatus.value = liveStatus(broker, topic, "core") }
+                        .onFailure { e ->
+                            _coreStatus.value = FeedStatus(
+                                false,
+                                "resubscribe failed: " + (e.message ?: "meshcore"),
+                                System.currentTimeMillis(),
+                                nodes.size,
+                            )
+                        }
+                }
+
                 override fun connectionLost(cause: Throwable?) {
-                    _status.value = FeedStatus(
+                    _coreStatus.value = FeedStatus(
                         false,
-                        cause?.message ?: "meshcore disconnected",
+                        (cause?.message ?: "meshcore disconnected") + " · reconnecting",
                         System.currentTimeMillis(),
                         nodes.size,
                     )
@@ -181,23 +274,20 @@ class MeshSource(private val settings: () -> dev.skyward.rf.core.Settings) {
 
                 override fun messageArrived(topic: String?, message: MqttMessage?) {
                     val payload = message?.payload ?: return
+                    coreMessages.incrementAndGet()
+                    lastCoreMessageAt.set(System.currentTimeMillis())
                     runCatching { ingestCoreJson(String(payload)) }
                 }
 
                 override fun deliveryComplete(token: IMqttDeliveryToken?) = Unit
             })
             c.connect(opts)
-            c.subscribe(cfg.meshCoreTopic.trim(), 0)
             coreClient = c
-            _status.value = FeedStatus(
-                true,
-                "meshcore live · ${hostOf(broker)} · ${cfg.meshCoreTopic}",
-                System.currentTimeMillis(),
-                nodes.size,
-            )
+            c.subscribe(topic, 0)
+            _coreStatus.value = liveStatus(broker, topic, "core")
         }.onFailure {
             coreClient = null
-            _status.value = FeedStatus(false, it.message ?: "meshcore failed", System.currentTimeMillis(), nodes.size)
+            _coreStatus.value = FeedStatus(false, it.message ?: "meshcore failed", System.currentTimeMillis(), nodes.size)
         }
     }
 
@@ -396,7 +486,8 @@ class MeshSource(private val settings: () -> dev.skyward.rf.core.Settings) {
 
     private fun publish() {
         _nodes.value = nodes.toMap()
-        _status.value = _status.value.copy(count = nodes.size)
+        _mqttStatus.value = _mqttStatus.value.copy(count = nodes.size)
+        _coreStatus.value = _coreStatus.value.copy(count = nodes.size)
     }
 
     private fun batteryOf(payload: JsonObject): Int? {
@@ -417,7 +508,55 @@ class MeshSource(private val settings: () -> dev.skyward.rf.core.Settings) {
     private fun JsonObject.str(key: String): String? =
         (this[key] as? JsonPrimitive)?.contentOrNull
 
-    private fun JsonObject.num(key: String): Double? =
-        (this[key] as? JsonPrimitive)?.doubleOrNull
-            ?: (this[key] as? JsonPrimitive)?.intOrNull?.toDouble()
+    /**
+     * A number, whichever way the bridge wrote it.
+     *
+     * `doubleOrNull` answers null for a JSON *string*, and several gateways and observer
+     * bridges publish the whole packet with every number quoted - `"latitude_i":"515000000"`.
+     * Those packets parsed, created a node, and then lost its position and SNR, so the nodes
+     * were listed and never drawn. The content is tried as a number before giving up.
+     */
+    private fun JsonObject.num(key: String): Double? {
+        val p = this[key] as? JsonPrimitive ?: return null
+        return p.doubleOrNull ?: p.intOrNull?.toDouble() ?: p.contentOrNull?.trim()?.toDoubleOrNull()
+    }
+}
+
+/**
+ * One line for the map, built from the two feeds' own verdicts.
+ *
+ * "Broker on" is a setting. This is what the clients are doing: which one is connected, which
+ * refused, and whether anything has actually arrived since. A connected client that has
+ * delivered nothing is called out rather than counted as working, because a clean session is
+ * forgotten on every drop and comes back subscribed to nothing.
+ */
+internal fun mergeMeshStatus(
+    mqtt: FeedStatus,
+    core: FeedStatus,
+    mqttEnabled: Boolean,
+    coreEnabled: Boolean,
+    messages: Long,
+    lastMessageAt: Long,
+    nodes: Int,
+    now: Long,
+): FeedStatus {
+    if (!mqttEnabled && !coreEnabled) {
+        return FeedStatus(false, "mesh feed off", now, nodes)
+    }
+    val mqttLive = mqttEnabled && mqtt.ok == true
+    val coreLive = coreEnabled && core.ok == true
+    val parts = ArrayList<String>(3)
+    if (mqttEnabled) parts += if (mqttLive) "mqtt live" else "mqtt " + mqtt.detail.ifBlank { "down" }
+    if (coreEnabled) parts += if (coreLive) "core live" else "core " + core.detail.ifBlank { "down" }
+    if (mqttLive || coreLive) {
+        // The age is what separates "connected" from "working": a feed can hold a socket open
+        // and carry nothing for hours.
+        val age = if (lastMessageAt <= 0L) null else ((now - lastMessageAt) / 1000L).coerceAtLeast(0L)
+        parts += when {
+            messages == 0L -> "no data yet"
+            age == null -> "$messages msgs"
+            else -> "$messages msgs · ${age}s ago"
+        }
+    }
+    return FeedStatus(mqttLive || coreLive, parts.joinToString(" · "), now, nodes)
 }

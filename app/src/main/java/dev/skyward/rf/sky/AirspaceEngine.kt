@@ -67,6 +67,8 @@ class AirspaceEngine(
         val cameras: List<CameraView> = emptyList(),
         val satStatus: FeedStatus = FeedStatus(),
         val acStatus: FeedStatus = FeedStatus(),
+        /** The mesh feeds as their clients report them: connection, refusals and message age. */
+        val meshStatus: FeedStatus = FeedStatus(),
         val camStatus: FeedStatus = FeedStatus(),
         val tleCount: Int = 0,
         val tleAgeMs: Long = 0L,
@@ -293,6 +295,7 @@ class AirspaceEngine(
                 watch = emptyList(),
                 cameras = emptyList(),
                 camStatus = FeedStatus(false, "offline mode", now, 0),
+                meshStatus = FeedStatus(false, "offline mode", now, 0),
                 observer = observer.value,
                 lastTick = now,
             )
@@ -441,6 +444,7 @@ class AirspaceEngine(
             cells = cells,
             esp32 = boards,
             watch = watch,
+            meshStatus = mesh.status(now),
             observer = obs,
             lastTick = now,
         )
