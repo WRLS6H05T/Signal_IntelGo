@@ -99,6 +99,10 @@ The globe is shaded like a lit ball: radial-gradient ocean, 15° graticule, ever
 one hue curved by the same light, and an atmospheric rim. Anything on the far hemisphere is
 dropped, so the back of the world never shows through. Drag to spin it.
 
+Mesh nodes do not shrink with the zoom: on the ball a dish drawn at street weight is three pixels
+on a continent, so a node there becomes a filled core in a ring over a dark backing. Without it a
+green node on a green landmass read as a node that had disappeared when the map was zoomed out.
+
 **Height is drawn as height.** Every marker is put on the sphere and then pushed outward along
 its radius by its altitude, with a thin tether and a ground dot back to where it really is:
 

@@ -2186,8 +2186,12 @@ private fun TacticalMap(
 
                 // Mesh has a size of its own, and it is half the entity size: a feed can hold
                 // dozens of nodes at once, and at full weight they crowded out the aircraft and
-                // the watch hits instead of sitting behind them as infrastructure.
+                // the watch hits instead of sitting behind them as infrastructure. It grows
+                // back on the ball instead of shrinking with the zoom: at planet scale the whole
+                // mesh is one city on a continent, and a dish drawn at street weight is three
+                // pixels - which is why zooming out made the nodes look like they had gone.
                 val r = when {
+                    m.layer == Layer.MESH && cull -> 7.2f * density
                     m.layer == Layer.MESH && m.logged -> 4.6f * density
                     m.layer == Layer.MESH -> 4.1f * density
                     m.logged -> 5.4f * density
@@ -2224,7 +2228,13 @@ private fun TacticalMap(
                     // A gold halo under the glyph, so the station reads gold logged or not.
                     drawCircle(color = IssGold.copy(alpha = 0.22f * a), radius = iconR * 1.8f, center = p)
                 }
-                if (m.layer == Layer.MESH || m.layer == Layer.CAMERA) {
+                if (m.layer == Layer.MESH && cull) {
+                    // On the ball the node sits on a continent painted in its own colour family:
+                    // a dark backing is what keeps a green dish off a green landmass, and the
+                    // wider halo is what gives it weight at planet scale.
+                    drawCircle(color = Sky.bg.copy(alpha = 0.85f * a), radius = r * 1.15f, center = p)
+                    drawCircle(color = base.copy(alpha = 0.30f * a), radius = r * 1.55f, center = p)
+                } else if (m.layer == Layer.MESH || m.layer == Layer.CAMERA) {
                     // A disc under the glyph: on the ball a dish is a few thin lines over a
                     // continent, and an unlogged node has no ring to give it any weight.
                     drawCircle(color = base.copy(alpha = 0.18f * a), radius = r * 1.75f, center = p)
@@ -2234,8 +2244,15 @@ private fun TacticalMap(
                     Layer.SATELLITE -> if (isIss(m)) drawStationIcon(p, iconR, color) else drawSatelliteIcon(p, r, color)
                     Layer.CELL -> drawTowerIcon(p, r, color)
                     // One shape for the whole layer: a repeater is a node that repeats, and its
-                    // role is in its card rather than in a second glyph this small.
-                    Layer.MESH -> drawDishIcon(p, r, color)
+                    // role is in its card rather than in a second glyph this small. On the ball
+                    // the dish's thin lines are lost, so it becomes a filled core in a ring:
+                    // the same node, legible at any zoom.
+                    Layer.MESH -> if (cull) {
+                        drawCircle(color = color, radius = r * 0.45f, center = p)
+                        drawCircle(color = color, radius = r * 0.95f, center = p, style = ringStroke)
+                    } else {
+                        drawDishIcon(p, r, color)
+                    }
                     Layer.ESP32 -> drawChipIcon(p, r, color)
                     // A plate reader keeps the lens-on-a-bracket the watch layer uses; a CCTV
                     // dome gets its own glyph so the two do not read as the same box.
