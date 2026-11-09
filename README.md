@@ -82,6 +82,19 @@ app can play it. The `CAM` row in INTEL switches the layer.
 Volunteer mapping is a lower bound: an unmapped camera is not an absent camera, and Flock
 publishes no map of its own. Camera positions are © OpenStreetMap contributors, ODbL.
 
+**Public KiwiSDR receivers** are the other layer nothing on this phone hears. The Kiwi project
+publishes a directory of HF receivers their owners have put on the internet, keyless, and the app
+reads it when the `KIWI` row in INTEL is switched on - one read per half hour at most, because the
+mirror that serves the list asks for a request per human action rather than a poll. The nearest
+eighty are plotted as an indigo globe-under-a-mast glyph, with the antenna, advertised coverage,
+user count and SNR in the card.
+
+Tuning is a link, not a player: a Kiwi streams its spectrum and audio over its own browser
+connection, so each band button opens the operator's page already tuned with Kiwi's `?f=` form
+(`?f=7100lsb`). The buttons are filtered against the coverage that receiver advertises, so one
+that stops at 10 MHz is never offered 15 m. Audio, waterfall and time limits belong to whoever
+owns the receiver; this app only points you at it.
+
 ---
 
 ## Zoom behaviour
@@ -209,8 +222,8 @@ Unit tests (orbit math, Remote ID parser, colour scale, exports):
 ## Using it
 
 1. **Map** — the INTEL box is one table, drawn the same on the map and on the globe, with a row
-   per category - **SAT**, **AIR**, **UAV**, **MESH**, **CELL**, **WATCH**, **WIFI**, **BLE**,
-   **SUB**, **PATH**, **SIG**, **PEER**, **ESP** - and two counts on each. **LIVE**, beside the
+   per category - **SAT**, **AIR**, **UAV**, **MESH**, **CELL**, **WATCH**, **CAM**, **KIWI**,
+   **WIFI**, **BLE**, **SUB**, **PATH**, **SIG**, **PEER**, **ESP** - and two counts on each. **LIVE**, beside the
    label, is what is heard now, read as counts, because the screen is read for "how many" and a
    number is the honest way to say it when one category is in the hundreds and another is two.
    **LOGGED** sits at the right side of the table as its own column: what this phone has caught,

@@ -6,6 +6,7 @@ import dev.skyward.rf.core.CellView
 import dev.skyward.rf.core.DroneView
 import dev.skyward.rf.core.Esp32Node
 import dev.skyward.rf.core.FeedStatus
+import dev.skyward.rf.core.KiwiSdrView
 import dev.skyward.rf.core.Geo
 import dev.skyward.rf.core.LatLon
 import dev.skyward.rf.core.Layer
@@ -46,6 +47,7 @@ class AirspaceEngine(
     private val sat: SatTracker,
     private val aircraftSource: AircraftSource,
     private val cameraSource: CameraSource,
+    private val kiwiSource: KiwiSource,
     private val mesh: MeshSource,
     private val esp32: Esp32Source,
     private val rf: RfScanner,
@@ -65,11 +67,14 @@ class AirspaceEngine(
         val watch: List<WatchView> = emptyList(),
         /** Mapped Flock and CCTV cameras: read from OpenStreetMap, never logged as a catch. */
         val cameras: List<CameraView> = emptyList(),
+        /** Public KiwiSDR receivers: HF stations elsewhere, read from the Kiwi directory. */
+        val kiwi: List<KiwiSdrView> = emptyList(),
         val satStatus: FeedStatus = FeedStatus(),
         val acStatus: FeedStatus = FeedStatus(),
         /** The mesh feeds as their clients report them: connection, refusals and message age. */
         val meshStatus: FeedStatus = FeedStatus(),
         val camStatus: FeedStatus = FeedStatus(),
+        val kiwiStatus: FeedStatus = FeedStatus(),
         val tleCount: Int = 0,
         val tleAgeMs: Long = 0L,
         val lastTick: Long = 0L,
@@ -119,6 +124,28 @@ class AirspaceEngine(
         tickJob?.cancel()
         aircraftJob?.cancel()
         cameraJob?.cancel()
+    }
+
+    /**
+     * The public KiwiSDR list, read when the layer is switched on and never on a timer.
+     *
+     * Every other feed here is polled because it is a live picture. This one is a directory:
+     * receivers are listed for hours or days, the mirror that serves the list asks for one read
+     * per human action rather than a poll, and switching the layer on or tapping refresh is that
+     * action. The source keeps its own half-hour floor, so toggling it twice asks once.
+     */
+    fun refreshKiwi(force: Boolean = false) {
+        if (settings.current.offlineMode) return
+        scope.launch(Dispatchers.IO) {
+            kiwiSource.refresh(observer.value, force)
+            val result = kiwiSource.status.value
+            // A refused read keeps the receivers already listed: the status says so, and the
+            // map does not lose pins over a transient failure.
+            _state.value = _state.value.copy(
+                kiwi = kiwiSource.kiwis.value,
+                kiwiStatus = result,
+            )
+        }
     }
 
     /**
@@ -295,6 +322,8 @@ class AirspaceEngine(
                 watch = emptyList(),
                 cameras = emptyList(),
                 camStatus = FeedStatus(false, "offline mode", now, 0),
+                kiwi = emptyList(),
+                kiwiStatus = FeedStatus(false, "offline mode", now, 0),
                 meshStatus = FeedStatus(false, "offline mode", now, 0),
                 observer = observer.value,
                 lastTick = now,

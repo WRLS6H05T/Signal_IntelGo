@@ -469,3 +469,42 @@ fun DrawScope.drawDroneIcon(at: Offset, r: Float, tint: Color) {
     // the gimbal, which is what a drone is looking through
     drawCircle(color = tint.dim(0.35f), radius = r * 0.12f, center = at)
 }
+
+/**
+ * A public KiwiSDR: a globe under a whip antenna.
+ *
+ * The glyph has to say "somewhere else". The mesh dish is a radio you or a neighbour put up, the
+ * tower is a mast the handset hears, and this is a receiver on the far side of the internet, so it
+ * gets the planet with a mast rather than a third dish.
+ */
+fun DrawScope.drawKiwiIcon(at: Offset, r: Float, tint: Color) {
+    val c = Offset(at.x, at.y + r * 0.2f)
+    drawCircle(color = tint, radius = r * 0.82f, center = c, style = Stroke(width = r * 0.2f))
+    // One meridian: enough to read as a globe at a few pixels, and cheap enough for a hundred of
+    // them on the ball at once.
+    drawArc(
+        color = tint.copy(alpha = tint.alpha * 0.7f),
+        startAngle = 0f,
+        sweepAngle = 360f,
+        useCenter = false,
+        topLeft = Offset(c.x - r * 0.34f, c.y - r * 0.82f),
+        size = Size(r * 0.68f, r * 1.64f),
+        style = Stroke(width = r * 0.14f),
+    )
+    // The mast, then one arc of whatever it is hearing: what makes it a receiver and not a planet.
+    drawLine(
+        color = tint,
+        start = Offset(at.x, c.y - r * 0.8f),
+        end = Offset(at.x, at.y - r * 1.25f),
+        strokeWidth = r * 0.16f,
+    )
+    drawArc(
+        color = tint.copy(alpha = tint.alpha * 0.55f),
+        startAngle = -40f,
+        sweepAngle = 80f,
+        useCenter = false,
+        topLeft = Offset(at.x - r * 0.5f, at.y - r * 1.75f),
+        size = Size(r * 1.0f, r * 1.0f),
+        style = Stroke(width = r * 0.13f),
+    )
+}

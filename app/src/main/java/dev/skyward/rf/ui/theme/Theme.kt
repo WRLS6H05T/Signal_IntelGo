@@ -42,6 +42,12 @@ object Sky {
      */
     val cctv = Color(0xFF94A3B8)
 
+    /**
+     * A public KiwiSDR: indigo, the one hue nothing else on the map uses. It has to read as
+     * "a receiver somewhere else" at a glance, not as another dish or another tower.
+     */
+    val kiwi = Color(0xFF818CF8)
+
     /** A CC1101 carrier: yellow, because it is a different band and a different kind of thing. */
     val subGhz = Color(0xFFFDE047)
 

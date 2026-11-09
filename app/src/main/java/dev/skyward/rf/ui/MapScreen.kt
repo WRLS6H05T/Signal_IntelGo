@@ -75,6 +75,7 @@ import dev.skyward.rf.core.CameraKind
 import dev.skyward.rf.core.CameraView
 import dev.skyward.rf.core.CellView
 import dev.skyward.rf.core.CrashLog
+import dev.skyward.rf.core.KiwiSdrView
 import dev.skyward.rf.core.Geo
 import dev.skyward.rf.core.DroneView
 import dev.skyward.rf.core.Esp32Node
@@ -98,6 +99,7 @@ import dev.skyward.rf.net.compassPoint
 import dev.skyward.rf.sky.AirspaceEngine
 import dev.skyward.rf.ui.theme.Sky
 import dev.skyward.rf.sdr.SdrCapture
+import dev.skyward.rf.sky.KiwiSource
 import dev.skyward.rf.wardrive.LoggedSignal
 import dev.skyward.rf.wardrive.WardrivePoint
 import dev.skyward.rf.wardrive.WardriveSession
@@ -138,6 +140,8 @@ data class MapMarker(
     val camera: CameraKind? = null,
     /** A mapped camera's own feed: opened outside the app, null when none is mapped. */
     val feedUrl: String? = null,
+    /** The public KiwiSDR this marker is, when it is a receiver rather than a catch. */
+    val kiwi: KiwiSdrView? = null,
     /** How many nodes this one marker stands for: see [foldCoincident]. */
     val stack: Int = 1,
 
@@ -314,6 +318,8 @@ private fun markerColor(m: MapMarker, entityRing: Color = Sky.logged): Color = w
     // Two families of mapped camera, two colours: a Flock plate reader is the surveillance the
     // radios already hunt for, while a CCTV camera is street furniture that happens to watch.
     m.layer == Layer.CAMERA -> if (m.camera == CameraKind.CCTV) Sky.cctv else Sky.watchFlock
+    // A KiwiSDR is not a catch either: it is a receiver standing somewhere else, to be tuned.
+    m.layer == Layer.KIWI -> Sky.kiwi
     m.layer == Layer.WATCH -> when (m.watch) {
         WatchKind.FLOCK -> Sky.watchFlock
         WatchKind.AXON -> Sky.watchAxon
@@ -371,6 +377,8 @@ fun buildMarkers(
     showWatch: Boolean,
     /** Mapped Flock and CCTV cameras: no radio hears them, they are read from a web map. */
     showCameras: Boolean = true,
+    /** Public KiwiSDR receivers: read from the Kiwi directory, heard by nobody on this phone. */
+    showKiwi: Boolean = true,
     /** "km" or "mi": the marker card is the only place a distance is written down. */
     distanceUnit: String,
     minScore: Int,
@@ -720,6 +728,40 @@ fun buildMarkers(
             ),
         )
     }
+    // ---- public KiwiSDR receivers: HF, elsewhere in the world, tuned from their own page ----
+    // Nothing here was heard by this phone. A KiwiSDR is somebody else's antenna on the far side
+    // of the internet, so it is plotted where it stands and offered as a frequency to listen on
+    // rather than counted as a catch: no LOGGED number, and the weak-dot filter never hides one.
+    if (showKiwi) sky.kiwi.forEach { k: KiwiSdrView ->
+        out.add(
+            MapMarker(
+                key = "KIWI:${k.id}",
+                layer = Layer.KIWI,
+                kiwi = k,
+                lat = k.lat,
+                lon = k.lon,
+                title = k.name,
+                subtitle = if (k.usersMax > 0) {
+                    "KiwiSDR \u00b7 ${k.users}/${k.usersMax} listening"
+                } else {
+                    "KiwiSDR \u00b7 public receiver"
+                },
+                score = 100,
+                logged = false,
+                lines = listOf(
+                    "Source" to "KiwiSDR public list",
+                    "Hardware" to k.hardware.ifBlank { "\u2014" },
+                    "Bands" to k.coverage,
+                    "Listening" to if (k.usersMax > 0) "${k.users}/${k.usersMax}" else "${k.users}",
+                    "SNR" to if (k.snr > 0) "${k.snr} dB" else "\u2014",
+                    "Antenna" to k.antenna.ifBlank { "\u2014" },
+                    "Grid" to k.grid.ifBlank { "\u2014" },
+                    "Distance" to Units.distance(k.distanceKm, distanceUnit, 0),
+                    "Address" to k.url.removePrefix("http://").removePrefix("https://"),
+                ),
+            ),
+        )
+    }
     // One non-finite coordinate would poison the frame's transform and take every marker
     // after it with it, so a bad fix is dropped here rather than in the draw loop.
     return out.filter { it.lat.isFinite() && it.lon.isFinite() }
@@ -786,6 +828,12 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
     var showWatch by remember { mutableStateOf(true) }
     // Mapped cameras are their own layer: they are read from a web map, not heard here.
     var showCameras by remember { mutableStateOf(true) }
+    // The Kiwi directory is off until it is asked for. Reading somebody else's list is one
+    // fetch per human action, so switching this row on is the only thing that triggers a read.
+    var showKiwi by remember { mutableStateOf(false) }
+    LaunchedEffect(showKiwi) {
+        if (showKiwi) c.airspace.refreshKiwi()
+    }
     // Boards are status, not a layer: they no longer have a switch in the INTEL box.
     val showEsp32 = true
     var showPath by remember { mutableStateOf(true) }
@@ -836,7 +884,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
     val markers by produceState(
         initialValue = emptyList<MapMarker>(),
         sky, showSats, showAir, showDrones, showMesh, showCells, showEsp32, showWatch,
-        showCameras, settings.aircraftEnabled, settings.dropWeakDots, settings.distanceUnit,
+        showCameras, showKiwi, settings.aircraftEnabled, settings.dropWeakDots, settings.distanceUnit,
         peerIntel,
         crew, loggedMesh,
     ) {
@@ -851,6 +899,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 showEsp32 = showEsp32,
                 showWatch = showWatch,
                 showCameras = showCameras,
+                showKiwi = showKiwi,
                 distanceUnit = settings.distanceUnit,
                 minScore = if (settings.dropWeakDots) 20 else 0,
                 peerEntities = peerIntel,
@@ -1277,6 +1326,9 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 // Mapped, not caught: the camera layer has no LOGGED column because nothing here
                 // was heard, and a dash is the honest number for it.
                 IntelPairRow("CAM", sky.cameras.size, null, showCameras) { showCameras = !showCameras }
+                // Same absence of a LOGGED column as CAM: a listed receiver was never caught
+                // here. Switching it on is also what asks for the list.
+                IntelPairRow("KIWI", sky.kiwi.size, null, showKiwi) { showKiwi = !showKiwi }
                 // One table for both phones, keyed by device: a network heard by either is a
                 // single row, so the two devices print the same numbers. Adding the peer's
                 // total to this phone's own counted every shared network twice, which is why
@@ -1694,6 +1746,65 @@ private fun MarkerCard(
                 )
             }
         }
+        marker.kiwi?.let { k -> KiwiTunes(k) }
+    }
+}
+
+/**
+ * Tuning a public KiwiSDR: a band, a mode, and the operator's page.
+ *
+ * There is no player here on purpose. A Kiwi sends its spectrum and audio over its own browser
+ * connection, so the receiver's page is the only place the sound actually comes out - a button
+ * that "played the feed" in this app would play nothing. Each band opens that page already tuned,
+ * using Kiwi's documented `?f=` parameter, and is only offered when the receiver's advertised
+ * coverage reaches it: a Kiwi that stops at 10 MHz is never handed a 15 m button.
+ */
+@Composable
+private fun KiwiTunes(k: KiwiSdrView) {
+    val context = LocalContext.current
+    val presets = KiwiSource.presetsFor(k.loHz, k.hiHz)
+    Spacer(Modifier.height(10.dp))
+    Text(
+        if (presets.isEmpty()) "NO KNOWN BAND IN ITS COVERAGE" else "TUNE \u00b7 OPENS THE RECEIVER",
+        style = SkywardThemeLabel(),
+        fontSize = 8.sp,
+        color = Sky.textDim,
+    )
+    Spacer(Modifier.height(6.dp))
+    for (row in presets.chunked(3)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            for (p in row) {
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Sky.surfaceHigh)
+                        .border(1.dp, Sky.outline, RoundedCornerShape(8.dp))
+                        .clickable {
+                            openFeed(context, KiwiSource.tuneUrl(k.url, p.kHz, p.mode))
+                        }
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                ) {
+                    Text(
+                        p.label + " " + p.mode.uppercase(Locale.US),
+                        color = Sky.kiwi,
+                        fontSize = 9.sp,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+    }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(9.dp))
+            .background(Sky.kiwi)
+            .clickable { openFeed(context, k.url) }
+            .padding(vertical = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("OPEN RECEIVER", color = Sky.bg, fontSize = 11.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -2254,6 +2365,7 @@ private fun TacticalMap(
                         drawDishIcon(p, r, color)
                     }
                     Layer.ESP32 -> drawChipIcon(p, r, color)
+                    Layer.KIWI -> drawKiwiIcon(p, r, color)
                     // A plate reader keeps the lens-on-a-bracket the watch layer uses; a CCTV
                     // dome gets its own glyph so the two do not read as the same box.
                     Layer.CAMERA -> if (m.camera == CameraKind.CCTV) {

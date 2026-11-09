@@ -43,11 +43,12 @@ data class RfObservation(
 /**
  * Airspace layers that can be "logged" during a drive.
  *
- * CAMERA is the one layer this app never writes: those positions come from a public map, not
- * from a radio, so they are fetched and listed rather than caught.
+ * CAMERA and KIWI are the two layers this app never writes: a mapped camera and a public
+ * KiwiSDR are positions read from somebody else's list, not a radio catch, so they are fetched
+ * and listed rather than caught.
  */
 @Serializable
-enum class Layer { SATELLITE, AIRCRAFT, DRONE, MESH, CELL, ESP32, WATCH, CAMERA }
+enum class Layer { SATELLITE, AIRCRAFT, DRONE, MESH, CELL, ESP32, WATCH, CAMERA, KIWI }
 
 /**
  * The two kinds of camera a street carries: a plate reader and a surveillance camera.
@@ -89,6 +90,53 @@ data class CameraView(
     /** How [liveFeed] can be opened: "HLS stream", "MJPEG stream", "video file", "web page". */
     val feedKind: String = "",
 )
+
+/**
+ * A public KiwiSDR: an HF receiver its owner put on the internet and listed.
+ *
+ * Nothing here is heard by this phone. The receiver stands somewhere else entirely, and [url] is
+ * the operator's own page - which is also where the audio comes out, because a Kiwi streams its
+ * spectrum and sound over a browser connection rather than over a link this app could play.
+ *
+ * [loHz] and [hiHz] are the coverage the receiver advertises, so the card only offers a band it
+ * can actually hear.
+ */
+data class KiwiSdrView(
+    val id: String,
+    val name: String,
+    /** The operator's own address, e.g. `http://host:8073`. */
+    val url: String,
+    val lat: Double,
+    val lon: Double,
+    val loHz: Long = 0L,
+    val hiHz: Long = 30_000_000L,
+    val users: Int = 0,
+    val usersMax: Int = 0,
+    /** HF signal-to-noise as the receiver reports it, in dB. */
+    val snr: Int = 0,
+    val antenna: String = "",
+    /** What the operator runs: "KiwiSDR 1 v1.832" and so on. */
+    val hardware: String = "",
+    val grid: String = "",
+    val distanceKm: Double = 0.0,
+) {
+    /** True when every channel is taken, so a listener would be queued or refused. */
+    val full: Boolean get() = usersMax > 0 && users >= usersMax
+
+    /** Advertised coverage as a band label: `0-30 MHz`, `0.5-1.7 MHz`. */
+    val coverage: String
+        get() {
+            fun mhz(hz: Long): String {
+                val m = hz / 1_000_000.0
+                return if (m >= 10.0) {
+                    String.format(java.util.Locale.US, "%.0f", m)
+                } else {
+                    String.format(java.util.Locale.US, "%.1f", m).trimEnd('0').trimEnd('.')
+                }
+            }
+            return mhz(loHz) + "\u2013" + mhz(hiHz) + " MHz"
+        }
+}
 
 data class SatView(
     val noradId: String,

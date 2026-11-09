@@ -25,6 +25,7 @@ import dev.skyward.rf.sdr.SdrStream
 import dev.skyward.rf.sky.AircraftSource
 import dev.skyward.rf.sky.AirspaceEngine
 import dev.skyward.rf.sky.CameraSource
+import dev.skyward.rf.sky.KiwiSource
 import dev.skyward.rf.scan.EspTerminal
 import dev.skyward.rf.sky.Esp32Source
 import dev.skyward.rf.sky.MeshSource
@@ -113,6 +114,9 @@ class Container(context: Context) {
 
     /** Mapped Flock ALPR and CCTV cameras: positions from OpenStreetMap, keyless. */
     val cameras = CameraSource(http)
+
+    /** Public KiwiSDR receivers: the Kiwi directory, keyless, read only when asked for. */
+    val kiwi = KiwiSource(http)
     val mesh = MeshSource { settingsStore.current }
     val esp32Usb = UsbBoards(appContext)
     val esp32 = Esp32Source({ settingsStore.current }, esp32Usb)
@@ -221,6 +225,7 @@ class Container(context: Context) {
         sat = sat,
         aircraftSource = aircraft,
         cameraSource = cameras,
+        kiwiSource = kiwi,
         mesh = mesh,
         esp32 = esp32,
         rf = rf,
