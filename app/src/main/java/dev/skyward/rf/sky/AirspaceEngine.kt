@@ -111,6 +111,10 @@ class AirspaceEngine(
     private var cameraJob: Job? = null
     private var started = false
 
+    /** True once the receiver list has been read with a fix in hand, so "nearest" means it. */
+    @Volatile
+    private var kiwiHadFix = false
+
     fun start() {
         if (started) return
         started = true
@@ -139,6 +143,7 @@ class AirspaceEngine(
         scope.launch(Dispatchers.IO) {
             kiwiSource.refresh(observer.value, force)
             val result = kiwiSource.status.value
+            kiwiHadFix = result.ok == true && observer.value != null
             // A refused read keeps the receivers already listed: the status says so, and the
             // map does not lose pins over a transient failure.
             _state.value = _state.value.copy(
@@ -181,10 +186,24 @@ class AirspaceEngine(
     private suspend fun tickLoop() {
         var lastSat = 0L
         var lastTleRefresh = 0L
+        // When the receiver list was last re-read for a fix. A failed read must not turn this
+        // into a per-tick launch: the loop runs about once a second.
+        var kiwiRefixAt = 0L
         while (scope.isActive && started) {
             val now = System.currentTimeMillis()
             val cfg = settings.current
             val obs = observer.value
+
+            // The first read happens at launch, which can be before the phone has a fix - and
+            // without one there is no "nearest", only an alphabetical slice of the world. One
+            // re-read when the fix arrives makes the list mean what the layer claims; the
+            // source's own half-hour floor still applies, so this cannot become a poll.
+            if (!kiwiHadFix && obs != null && _state.value.kiwi.isNotEmpty() &&
+                now - kiwiRefixAt > 5 * 60_000L
+            ) {
+                kiwiRefixAt = now
+                refreshKiwi(force = true)
+            }
 
             // Element sets: refresh at most every 15 minutes; the tracker caches for 6 h.
             // Offline mode never asks: it draws whatever sets are already on the phone.

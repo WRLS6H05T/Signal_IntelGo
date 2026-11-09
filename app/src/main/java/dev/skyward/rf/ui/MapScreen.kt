@@ -828,9 +828,10 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
     var showWatch by remember { mutableStateOf(true) }
     // Mapped cameras are their own layer: they are read from a web map, not heard here.
     var showCameras by remember { mutableStateOf(true) }
-    // The Kiwi directory is off until it is asked for. Reading somebody else's list is one
-    // fetch per human action, so switching this row on is the only thing that triggers a read.
-    var showKiwi by remember { mutableStateOf(false) }
+    // On by default, and read once at launch: a layer nobody can see is a layer nobody knows is
+    // there. The source's own half-hour floor is what keeps the read polite, and the KIWI card
+    // says whether the list was ever fetched.
+    var showKiwi by remember { mutableStateOf(true) }
     LaunchedEffect(showKiwi) {
         if (showKiwi) c.airspace.refreshKiwi()
     }
@@ -1213,6 +1214,17 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                         maxLines = 2,
                     )
                 }
+                // The one case the numbers above do not explain on their own: nodes are arriving
+                // and none of them shares a position, so there is nothing a map can pin. Said
+                // here because it is indistinguishable from a broken layer from the outside.
+                if (meshNoPos > 0 && meshPlotted == 0) {
+                    Text(
+                        meshNoPos.toString() + " node(s) heard with no position shared - nothing to pin",
+                        color = Sky.warn,
+                        fontSize = 9.sp,
+                        maxLines = 2,
+                    )
+                }
                 // The address itself. "Broker on" says nothing about what it is on, and the
                 // topic is only half of what had to be typed to get here: a broker one letter
                 // wrong looks exactly like a broker that is working.
@@ -1252,6 +1264,51 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 }
                 if (!meshOpen && sky.mesh.size > 2) {
                     Text("+${sky.mesh.size - 2} more", color = Sky.textDim, fontSize = 9.sp)
+                }
+            }
+
+            // KiwiSDR receivers. The list is a read, not a feed, so "no pins" has to say
+            // whether the read happened at all: an empty layer because nobody asked looks
+            // exactly like a layer that asked and found nothing.
+            if (showKiwi) {
+                var kiwiOpen by remember { mutableStateOf(false) }
+                val ks = sky.kiwiStatus
+                StatusCard(
+                    title = "KIWI",
+                    accent = Sky.kiwi,
+                    trailing = sky.kiwi.size.toString(),
+                    open = kiwiOpen,
+                    onToggle = { kiwiOpen = !kiwiOpen },
+                ) {
+                    Text(
+                        when {
+                            ks.ok == true -> sky.kiwi.size.toString() + " public receivers"
+                            ks.ok == false -> "read failed \u00b7 " + ks.detail
+                            else -> "not read yet"
+                        },
+                        color = if (ks.ok == false) Sky.danger else Sky.textDim,
+                        fontSize = 9.sp,
+                        maxLines = 2,
+                    )
+                    Text(
+                        if (ks.ok == false) "TRY AGAIN" else "READ LIST",
+                        color = Sky.kiwi,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Sky.surfaceHigh)
+                            .clickable { c.airspace.refreshKiwi(force = true) }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                    sky.kiwi.take(if (kiwiOpen) 5 else 0).forEach { k ->
+                        Text(
+                            k.name.take(22) + " \u00b7 " + k.users + "/" + k.usersMax,
+                            color = Sky.text,
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
         }
