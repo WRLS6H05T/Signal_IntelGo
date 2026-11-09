@@ -1267,6 +1267,49 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 }
             }
 
+            // Mapped cameras, read from OpenStreetMap rather than heard. Same rule as the
+            // receiver list: a layer that never got an answer - a rate limit, a timeout - used
+            // to look exactly like a street with no cameras on it, and the ring the read
+            // covered was nowhere on screen.
+            if (showCameras) {
+                var camOpen by remember { mutableStateOf(false) }
+                val cs = sky.camStatus
+                StatusCard(
+                    title = "CAM",
+                    accent = Sky.watchFlock,
+                    trailing = sky.cameras.size.toString(),
+                    open = camOpen,
+                    onToggle = { camOpen = !camOpen },
+                ) {
+                    Text(
+                        cs.detail.ifBlank { "no read yet" },
+                        color = if (cs.ok == false) Sky.danger else Sky.textDim,
+                        fontSize = 9.sp,
+                        maxLines = 2,
+                    )
+                    Text(
+                        if (cs.ok == false) "TRY AGAIN" else "READ AGAIN",
+                        color = Sky.watchFlock,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Sky.surfaceHigh)
+                            .clickable { c.airspace.refreshCameras() }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                    sky.cameras.take(if (camOpen) 5 else 0).forEach { cam ->
+                        Text(
+                            cam.name.take(20) + " \u00b7 " +
+                                Units.distance(cam.distanceKm, settings.distanceUnit, 1),
+                            color = Sky.text,
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+
             // KiwiSDR receivers. The list is a read, not a feed, so "no pins" has to say
             // whether the read happened at all: an empty layer because nobody asked looks
             // exactly like a layer that asked and found nothing.
@@ -2362,6 +2405,11 @@ private fun TacticalMap(
                     m.layer == Layer.MESH && cull -> 7.2f * density
                     m.layer == Layer.MESH && m.logged -> 4.6f * density
                     m.layer == Layer.MESH -> 4.1f * density
+                    // A receiver is not infrastructure on this street: it is an antenna
+                    // elsewhere in the world, and on the ball it has to survive the same
+                    // shrinking every glyph does. Same weight as a node, one size up flat.
+                    m.layer == Layer.KIWI && cull -> 7.0f * density
+                    m.layer == Layer.KIWI -> 5.2f * density
                     m.logged -> 5.4f * density
                     else -> 4.4f * density
                 }
@@ -2402,6 +2450,12 @@ private fun TacticalMap(
                     // wider halo is what gives it weight at planet scale.
                     drawCircle(color = Sky.bg.copy(alpha = 0.85f * a), radius = r * 1.15f, center = p)
                     drawCircle(color = base.copy(alpha = 0.30f * a), radius = r * 1.55f, center = p)
+                } else if (m.layer == Layer.KIWI) {
+                    // The receiver glyph is thin strokes and no fill, which is unreadable over a
+                    // photo basemap and worse on the ball - so it gets the same dark backing a
+                    // mesh node has. This is the part that makes it visible at every zoom.
+                    drawCircle(color = Sky.bg.copy(alpha = 0.78f * a), radius = r * 1.2f, center = p)
+                    drawCircle(color = base.copy(alpha = 0.22f * a), radius = r * 1.8f, center = p)
                 } else if (m.layer == Layer.MESH || m.layer == Layer.CAMERA) {
                     // A disc under the glyph: on the ball a dish is a few thin lines over a
                     // continent, and an unlogged node has no ring to give it any weight.

@@ -184,8 +184,11 @@ class CameraSourceTest {
     fun `the query asks for surveillance and ALPR around the fix`() {
         val q = CameraSource.query(here)
 
-        assertTrue(q.contains("""node(around:3000,51.50000,-0.10000)["man_made"="surveillance"]"""))
-        assertTrue(q.contains("""way(around:3000,51.50000,-0.10000)["surveillance:type"~"ALPR",i]"""))
+        // Read from the source rather than written out: the ring is a decision this class makes,
+        // and a literal here turned widening it into a failing test instead of a covered one.
+        val ring = CameraSource.RADIUS_M
+        assertTrue(q.contains("""node(around:$ring,51.50000,-0.10000)["man_made"="surveillance"]"""))
+        assertTrue(q.contains("""way(around:$ring,51.50000,-0.10000)["surveillance:type"~"ALPR",i]"""))
         assertTrue(q.contains("out center;"))
     }
 

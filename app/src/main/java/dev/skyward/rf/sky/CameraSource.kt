@@ -48,11 +48,21 @@ class CameraSource(private val http: OkHttpClient) {
     companion object {
         const val ENDPOINT = "https://overpass-api.de/api/interpreter"
 
-        /** The ring cameras are read for. A camera three miles away is not watching this street. */
-        const val RADIUS_M = 3_000
+        /**
+         * The ring cameras are read for.
+         *
+         * Three kilometres was "this street", and it is why the layer looked half-empty: the
+         * cameras on the next arterial, in the next town and at the edge of the county were
+         * never asked for at all. Twelve kilometres is a city - the distance a camera map is
+         * actually browsed at - and it is still one Overpass request.
+         */
+        const val RADIUS_M = 12_000
 
-        /** A city centre can hold thousands; the map needs the nearest slice, not all of them. */
-        const val MAX_CAMERAS = 400
+        /**
+         * How many of the nearest are kept. A dense downtown can hold more than this inside the
+         * ring; the cap is there so one answer cannot turn the layer into a wall of pins.
+         */
+        const val MAX_CAMERAS = 1_500
 
         const val MIN_GAP_MS = 10 * 60_000L
         const val RETRY_MS = 60_000L
@@ -218,12 +228,18 @@ class CameraSource(private val http: OkHttpClient) {
         }
         out.sortBy { it.distanceKm }
         val kept = if (out.size > MAX_CAMERAS) out.subList(0, MAX_CAMERAS).toList() else out
+        // The ring and the truncation are both in the line: "12 mapped cameras" said nothing
+        // about whether that was the whole answer or a slice of a much busier one.
+        val ring = RADIUS_M / 1000
         return Result(
             kept,
             FeedStatus(
                 true,
-                if (kept.isEmpty()) "no cameras mapped within ${RADIUS_M / 1000} km"
-                else "${kept.size} mapped cameras",
+                when {
+                    kept.isEmpty() -> "no cameras mapped within $ring km"
+                    out.size > kept.size -> "${kept.size} of ${out.size} mapped cameras within $ring km"
+                    else -> "${kept.size} mapped cameras within $ring km"
+                },
                 System.currentTimeMillis(),
                 kept.size,
             ),

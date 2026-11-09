@@ -56,10 +56,11 @@ class KiwiSource(private val http: OkHttpClient) {
         const val ENDPOINT = "https://cdn.aethersdr.com/kiwi.json"
 
         /**
-         * Nine hundred receivers worldwide is nine hundred pins on one planet. The nearest are
-         * the ones whose propagation actually resembles this street, so those are what is kept.
+         * Nine hundred receivers worldwide is nine hundred pins on one planet. Nearest first is
+         * what makes the list useful at street zoom; the larger cap is what keeps the globe from
+         * being a few pins bunched on one continent when it is zoomed right out.
          */
-        const val MAX_KIWI = 80
+        const val MAX_KIWI = 300
 
         /** One read per half hour, and only when asked: this list is not a ticker. */
         const val MIN_GAP_MS = 30 * 60_000L

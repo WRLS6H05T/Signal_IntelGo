@@ -154,6 +154,26 @@ class AirspaceEngine(
     }
 
     /**
+     * Re-reads the camera ring now, for the card's own retry.
+     *
+     * The loop asks every twenty seconds but the source answers at most every ten minutes, and a
+     * refused answer backs off a further minute: without this, a rate limit looks like a button
+     * that does nothing. Offline mode never asks, and neither does a phone with no fix to ask
+     * around.
+     */
+    fun refreshCameras() {
+        if (settings.current.offlineMode) return
+        val obs = observer.value ?: return
+        scope.launch(Dispatchers.IO) {
+            cameraSource.refresh(obs, force = true)
+            _state.value = _state.value.copy(
+                cameras = cameraSource.cameras.value,
+                camStatus = cameraSource.status.value,
+            )
+        }
+    }
+
+    /**
      * Mapped surveillance cameras.
      *
      * Flock plate readers and CCTV cameras are read from OpenStreetMap's Overpass API: there is

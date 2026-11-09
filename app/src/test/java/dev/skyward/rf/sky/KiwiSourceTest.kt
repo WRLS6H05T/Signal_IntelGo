@@ -83,9 +83,11 @@ class KiwiSourceTest {
     @Test
     fun `the nearest receivers come first and the list is bounded`() {
         val rows = (0 until KiwiSource.MAX_KIWI + 30).map { i ->
-            // Half a degree further south each time, so distance from the fix grows with the
-            // index and the ordering (and the cut at the cap) is unambiguous.
-            receiver("r$i", name = "R$i", url = "http://r$i:8073", lat = 51.5 - i * 0.5)
+            // A tenth of a degree further south each time, so distance from the fix grows with
+            // the index and the ordering (and the cut at the cap) is unambiguous. A tenth, not
+            // a half: a cap large enough to walk past the south pole would drop the rows that
+            // have no latitude, and the test would be measuring that instead.
+            receiver("r$i", name = "R$i", url = "http://r$i:8073", lat = 51.5 - i * 0.1)
         }.toTypedArray()
         val result = source.parse(list(*rows), here)
         assertEquals(KiwiSource.MAX_KIWI, result.kiwis.size)
