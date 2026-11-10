@@ -175,11 +175,21 @@ class Container(context: Context) {
     init {
         // A wired board is a second radio: what it sweeps joins the handset's Wi-Fi/BLE tables,
         // so its networks reach the layer counts, the map and the drive record.
+        // Which radios a board sweeps is the assignment in its own card; the poller asks for the
+        // verbs that assignment names and for nothing else.
+        esp32Usb.planOf = { key -> settings.scanAssign[key] }
         esp32.onSweep = { sweep ->
             rf.ingestSweep(sweep)
-            // A wired board is a second radio on the same dashboard: its networks are
-            // logged where the board is, which is the observer when the handset has no fix.
-            val here = _observer.value
+            // A wired board is a second radio on the same dashboard: its networks are logged
+            // where it stood - its own fix when it has one, because a sensor on a windowsill is
+            // not where the phone is - and at the handset's position when it has none. With
+            // neither, nothing is recorded: a signal with no place cannot be drawn or counted.
+            val boardFix = esp32.bestFix()
+            val here = _observer.value ?: boardFix?.let { b ->
+                val lat = b.lat
+                val lon = b.lon
+                if (lat != null && lon != null) LatLon(lat, lon) else null
+            }
             if (here != null) {
                 val now = System.currentTimeMillis()
                 signalLog.record(

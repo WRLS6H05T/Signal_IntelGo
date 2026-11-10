@@ -89,6 +89,9 @@ object Esp32Console {
         // accepted, which is why every cycle opens with stopscan.
         BoardFamily.GHOSTESP -> listOf("stopscan\r\n", "gps\r\n", "scanap\r\n", "bledetect\r\n")
         BoardFamily.MARAUDER -> listOf("stopscan\r\n", "gps\r\n", "scanap\r\n", "blescan\r\n")
+        // The project's own sensor sweeps once per verb and has finished printing before the
+        // next command is read, so there is never a sweep left running to stop.
+        BoardFamily.SIGNALSENSOR -> listOf("gps\r\n", "scanap\r\n", "blescan\r\n")
         BoardFamily.BISCUIT, BoardFamily.ESP32 -> emptyList()
     }
 
@@ -100,10 +103,28 @@ object Esp32Console {
      * builds and Marauder revisions, and a board that does not know it would print an error into
      * the middle of a sweep transcript.
      */
-    fun commandsFor(family: BoardFamily, subGhzCommand: String?): List<String> {
+    fun commandsFor(family: BoardFamily, subGhzCommand: String?, plan: String? = null): List<String> {
         val base = commands(family)
-        if (base.isEmpty() || subGhzCommand.isNullOrBlank()) return base
-        return base + (subGhzCommand.trim() + "\r\n")
+        if (base.isEmpty()) return base
+        // The assignment owns the sweeps: a BLE-only plan must not start an AP scan, because the
+        // board spends the poll window listing networks nobody asked for and the BLE sweep is
+        // what gets cut off. A stop and a fix request are always worth sending - neither fills
+        // the transcript.
+        val asked = if (plan.isNullOrBlank()) {
+            base
+        } else {
+            base.filter { line ->
+                val verb = line.trim()
+                when {
+                    verb.startsWith("stop") -> true
+                    verb.startsWith("ble") -> dev.skyward.rf.core.ScanPlan.hasBle(plan)
+                    verb.startsWith("scan") -> dev.skyward.rf.core.ScanPlan.hasWifi(plan)
+                    else -> true
+                }
+            }
+        }
+        if (subGhzCommand.isNullOrBlank()) return asked
+        return asked + (subGhzCommand.trim() + "\r\n")
     }
 
     // ---------------- text fields ----------------

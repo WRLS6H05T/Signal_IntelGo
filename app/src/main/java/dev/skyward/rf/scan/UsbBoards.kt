@@ -24,8 +24,13 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.ReentrantLock
 
-/** Which firmware family a board turned out to be. */
-enum class BoardFamily { MARAUDER, GHOSTESP, BISCUIT, ESP32 }
+/**
+ * Which firmware family a board turned out to be.
+ *
+ * [SIGNALSENSOR] is this project's own sketch (`firmware/SignalSensor`): the one firmware that
+ * answers sweeps in the shapes [Esp32Console] reads without pretending to be somebody else's.
+ */
+enum class BoardFamily { MARAUDER, GHOSTESP, BISCUIT, SIGNALSENSOR, ESP32 }
 
 /**
  * Turns a serial console transcript into a board identity.
@@ -61,13 +66,23 @@ object UsbBoardMatch {
     fun classify(text: String, dualPort: Boolean, descriptor: String = ""): Hit? {
         // USB strings are free: a board that sets its product name names itself without the
         // console being read at all.
-        val d = descriptor.lowercase()
+        // The sketch sets its own product string ("Signal_IntelGo sensor"), and an underscore
+        // is not a word break: folded to a space so the name matches however it is spelled.
+        val d = descriptor.lowercase().replace('_', ' ')
         if (d.contains("ghost")) return Hit(BoardFamily.GHOSTESP, versionOf(text))
         if (d.contains("marauder")) return Hit(BoardFamily.MARAUDER, versionOf(text))
         if (d.contains("biscuit")) return Hit(BoardFamily.BISCUIT, versionOf(text))
+        if (d.contains("signal intelgo")) return Hit(BoardFamily.SIGNALSENSOR, versionOf(text))
         val t = text.trim()
         if (t.isEmpty()) return if (dualPort) Hit(BoardFamily.BISCUIT, "") else null
         val lower = t.lowercase()
+
+        // The project's own sensor firmware names itself, and has to be taken before the verb
+        // vocabulary below: its help text lists scanap and bledetect on purpose, so that an app
+        // build that predates this family still finds two GhostESP words and polls it.
+        if (lower.contains("signal intelgo sensor") || lower.contains("sig-sensor")) {
+            return Hit(BoardFamily.SIGNALSENSOR, versionOf(t))
+        }
 
         val marauder = lower.contains("@marauder:{") ||
             lower.contains("esp32 marauder") ||
@@ -210,6 +225,7 @@ class UsbBoards(private val context: Context) {
                 BoardFamily.MARAUDER -> "ESP32 Marauder"
                 BoardFamily.GHOSTESP -> "GhostESP"
                 BoardFamily.BISCUIT -> "Biscuit"
+                BoardFamily.SIGNALSENSOR -> "SignalSensor"
                 BoardFamily.ESP32 -> "ESP32"
             }
 
@@ -253,6 +269,15 @@ class UsbBoards(private val context: Context) {
      */
     @Volatile
     var subGhzCommand: String? = null
+
+    /**
+     * The sweep this board has been assigned, or null while nothing has been chosen.
+     *
+     * Pushed in from settings for the same reason [subGhzCommand] is: which radios a board
+     * sweeps is the user's choice, and the poller has no business owning a preference.
+     */
+    @Volatile
+    var planOf: ((String) -> String?)? = null
 
     private val manager: UsbManager? by lazy {
         context.getSystemService(Context.USB_SERVICE) as? UsbManager
@@ -581,7 +606,13 @@ class UsbBoards(private val context: Context) {
             // Only a board that reported a CC1101 is asked to sweep sub-GHz: sending the verb
             // to a board without the radio is how a poll transcript fills with errors.
             val subGhz = if (devices[device.deviceId]?.reading?.subGhz == true) subGhzCommand else null
-            return exchange(opened, port.second, port.third, Esp32Console.commandsFor(family, subGhz))
+            val plan = planOf?.invoke("usb:${device.deviceId}")
+            return exchange(
+                opened,
+                port.second,
+                port.third,
+                Esp32Console.commandsFor(family, subGhz, plan),
+            )
         } catch (t: Throwable) {
             return ""
         } finally {
@@ -956,6 +987,7 @@ class UsbBoards(private val context: Context) {
             BoardFamily.MARAUDER -> "ESP32 Marauder"
             BoardFamily.GHOSTESP -> "GhostESP"
             BoardFamily.BISCUIT -> "Biscuit"
+            BoardFamily.SIGNALSENSOR -> "SignalSensor"
             BoardFamily.ESP32 -> chip.ifBlank { "ESP32 board" }
         }
         val label = when {

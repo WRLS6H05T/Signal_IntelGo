@@ -240,7 +240,10 @@ private fun buildHardware(
                 assignKey = b.key,
                 dualBand = n?.dualBand ?: false,
                 bleCap = n?.hasBle ?: true,
-                gpsCap = n?.hasGps ?: (r.gps == true),
+                // The module being fitted is what the GPS switch is for, so a board that
+                // answered "no fix" but has a receiver still gets the switch: hasGps alone is
+                // a fix that has already happened.
+                gpsCap = r.gps ?: n?.hasGps ?: false,
             ),
         )
     }
