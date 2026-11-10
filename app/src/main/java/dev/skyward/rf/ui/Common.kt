@@ -191,7 +191,7 @@ fun IntelPairHeader() {
         val slot = countSlot()
         Spacer(Modifier.width(LABEL_W.dp))
         Text(
-            "LIVE",
+            "LOGGED",
             style = SkywardThemeLabel(),
             fontSize = 8.sp,
             color = Sky.textDim,
@@ -199,8 +199,11 @@ fun IntelPairHeader() {
             modifier = Modifier.width(slot),
         )
         Spacer(Modifier.width(GAP_W.dp))
+        // LIVE holds the right edge of the box rather than sitting beside LOGGED: it is the
+        // number that moves while you watch, so it gets the corner the eye returns to.
+        Spacer(Modifier.weight(1f))
         Text(
-            "LOGGED",
+            "LIVE",
             style = SkywardThemeLabel(),
             fontSize = 8.sp,
             color = Sky.textDim,
@@ -284,19 +287,6 @@ fun IntelPairRow(
         // One line, no wrap, clipped: a count that somehow outgrew its six slots must not push
         // the other column sideways, because a shifted table is unreadable rather than tight.
         Text(
-            live?.toString() ?: DASH,
-            fontFamily = FontFamily.Monospace,
-            fontSize = COUNT_SP.sp,
-            fontWeight = FontWeight.Bold,
-            color = if (on && live != null) Sky.cyan else Sky.textDim,
-            textAlign = TextAlign.End,
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Clip,
-            modifier = Modifier.width(slot),
-        )
-        Spacer(Modifier.width(GAP_W.dp))
-        Text(
             logged?.toString() ?: DASH,
             fontFamily = FontFamily.Monospace,
             fontSize = COUNT_SP.sp,
@@ -308,7 +298,22 @@ fun IntelPairRow(
             overflow = TextOverflow.Clip,
             modifier = Modifier.width(slot),
         )
+        Spacer(Modifier.width(GAP_W.dp))
+        // The right-hand edge belongs to LIVE, past whatever room the label column leaves, so
+        // the moving number is in the same place on every row and at every font scale.
         Spacer(Modifier.weight(1f))
+        Text(
+            live?.toString() ?: DASH,
+            fontFamily = FontFamily.Monospace,
+            fontSize = COUNT_SP.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (on && live != null) Sky.cyan else Sky.textDim,
+            textAlign = TextAlign.End,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Clip,
+            modifier = Modifier.width(slot),
+        )
     }
 }
 

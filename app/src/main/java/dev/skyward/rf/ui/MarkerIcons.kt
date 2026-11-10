@@ -131,32 +131,31 @@ fun DrawScope.drawPlaneArrow(
     }
 }
 
-/** A mesh node of any role: a satellite dish on a short mast. */
+/**
+ * A mesh node of any role: a filled dish, facing up, on a short mast.
+ *
+ * The dish used to be a stroked arc with a feed arm a fifth of a pixel wide. An aircraft is a
+ * solid triangle and reads at four pixels; the same dish in hairline strokes read as dirt on the
+ * photo basemap, which is why the nodes looked wrong beside the planes that draw perfectly well.
+ * Fill is what survives the size, so the node is drawn the way the triangles are.
+ */
 fun DrawScope.drawDishIcon(at: Offset, r: Float, tint: Color) {
-    val size = Size(r * 1.7f, r * 1.7f)
-    val topLeft = Offset(at.x - r * 0.85f, at.y - r * 1.05f)
+    // The dish itself: a filled sector open at the top, the shape a parabolic dish turns into at
+    // this size. No feed arm - at four pixels it was the same width as the outline it sat inside.
     drawArc(
         color = tint,
-        startAngle = 195f,
-        sweepAngle = 150f,
-        useCenter = false,
-        topLeft = topLeft,
-        size = size,
-        style = Stroke(width = r * 0.42f),
+        startAngle = 200f,
+        sweepAngle = 140f,
+        useCenter = true,
+        topLeft = Offset(at.x - r * 0.95f, at.y - r * 1.15f),
+        size = Size(r * 1.9f, r * 1.9f),
     )
-    // feed horn on an arm, then the mast
+    // The mast, filled to the same weight, anchors the dish on the point it stands for.
     drawLine(
         color = tint,
         start = Offset(at.x, at.y - r * 0.25f),
-        end = Offset(at.x + r * 0.62f, at.y - r * 1.0f),
-        strokeWidth = r * 0.16f,
-    )
-    drawCircle(color = tint.dim(1.5f), radius = r * 0.17f, center = Offset(at.x + r * 0.62f, at.y - r * 1.0f))
-    drawLine(
-        color = tint.dim(0.8f),
-        start = Offset(at.x, at.y - r * 0.2f),
-        end = Offset(at.x, at.y + r * 0.95f),
-        strokeWidth = r * 0.2f,
+        end = Offset(at.x, at.y + r * 1.0f),
+        strokeWidth = r * 0.3f,
     )
 }
 
@@ -471,40 +470,34 @@ fun DrawScope.drawDroneIcon(at: Offset, r: Float, tint: Color) {
 }
 
 /**
- * A public KiwiSDR: a globe under a whip antenna.
+ * A public KiwiSDR: a filled globe under a whip antenna.
  *
  * The glyph has to say "somewhere else". The mesh dish is a radio you or a neighbour put up, the
  * tower is a mast the handset hears, and this is a receiver on the far side of the internet, so it
  * gets the planet with a mast rather than a third dish.
+ *
+ * Filled for the same reason the dish now is: a hollow circle with a hairline meridian vanished
+ * into the basemap at four pixels, and the receiver read as a smudge next to the aircraft pins
+ * that draw cleanly. A solid disc with a darker meridian keeps the read at any size.
  */
 fun DrawScope.drawKiwiIcon(at: Offset, r: Float, tint: Color) {
-    val c = Offset(at.x, at.y + r * 0.2f)
-    drawCircle(color = tint, radius = r * 0.82f, center = c, style = Stroke(width = r * 0.2f))
-    // One meridian: enough to read as a globe at a few pixels, and cheap enough for a hundred of
-    // them on the ball at once.
+    drawCircle(color = tint, radius = r * 0.9f, center = at)
+    // One meridian, darkened rather than drawn in the outside colour: a notch that says globe
+    // without a second stroke thin enough to disappear.
     drawArc(
-        color = tint.copy(alpha = tint.alpha * 0.7f),
+        color = tint.dim(0.35f),
         startAngle = 0f,
         sweepAngle = 360f,
         useCenter = false,
-        topLeft = Offset(c.x - r * 0.34f, c.y - r * 0.82f),
-        size = Size(r * 0.68f, r * 1.64f),
-        style = Stroke(width = r * 0.14f),
+        topLeft = Offset(at.x - r * 0.36f, at.y - r * 0.9f),
+        size = Size(r * 0.72f, r * 1.8f),
+        style = Stroke(width = r * 0.26f),
     )
-    // The mast, then one arc of whatever it is hearing: what makes it a receiver and not a planet.
+    // The whip, filled to the same weight: what makes it a receiver and not a planet.
     drawLine(
         color = tint,
-        start = Offset(at.x, c.y - r * 0.8f),
-        end = Offset(at.x, at.y - r * 1.25f),
-        strokeWidth = r * 0.16f,
-    )
-    drawArc(
-        color = tint.copy(alpha = tint.alpha * 0.55f),
-        startAngle = -40f,
-        sweepAngle = 80f,
-        useCenter = false,
-        topLeft = Offset(at.x - r * 0.5f, at.y - r * 1.75f),
-        size = Size(r * 1.0f, r * 1.0f),
-        style = Stroke(width = r * 0.13f),
+        start = Offset(at.x, at.y - r * 0.8f),
+        end = Offset(at.x, at.y - r * 1.6f),
+        strokeWidth = r * 0.3f,
     )
 }

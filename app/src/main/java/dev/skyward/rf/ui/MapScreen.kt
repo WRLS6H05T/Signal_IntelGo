@@ -2404,18 +2404,11 @@ private fun TacticalMap(
                     )
                 }
 
-                // Mesh has a size of its own, and it is half the entity size: a feed can hold
-                // dozens of nodes at once, and at full weight they crowded out the aircraft and
-                // the watch hits instead of sitting behind them as infrastructure. It grows
-                // back on the ball instead of shrinking with the zoom: at planet scale the whole
-                // mesh is one city on a continent, and a dish drawn at street weight is three
-                // pixels - which is why zooming out made the nodes look like they had gone.
+                // One size for every entity, with a caught one a step up. A mesh dish and an
+                // aircraft triangle at the same weight is what makes the map one picture: the
+                // nodes used to be drawn half size, which over a photo basemap is a smudge the
+                // eye skips while the planes beside it read cleanly.
                 val r = when {
-                    m.layer == Layer.MESH && m.logged -> 4.6f * density
-                    m.layer == Layer.MESH -> 4.1f * density
-                    // A receiver is one size up from a node: it is an antenna, drawn at street
-                    // scale on the flat map, and never on the ball.
-                    m.layer == Layer.KIWI -> 5.2f * density
                     m.logged -> 5.4f * density
                     else -> 4.4f * density
                 }
@@ -2450,15 +2443,9 @@ private fun TacticalMap(
                     // A gold halo under the glyph, so the station reads gold logged or not.
                     drawCircle(color = IssGold.copy(alpha = 0.22f * a), radius = iconR * 1.8f, center = p)
                 }
-                if (m.layer == Layer.KIWI) {
-                    // The receiver glyph is thin strokes and no fill, which is unreadable over a
-                    // photo basemap, so it sits on a dark disc with a halo. That backing is what
-                    // makes it findable on the flat map.
-                    drawCircle(color = Sky.bg.copy(alpha = 0.78f * a), radius = r * 1.2f, center = p)
-                    drawCircle(color = base.copy(alpha = 0.22f * a), radius = r * 1.8f, center = p)
-                } else if (m.layer == Layer.MESH || m.layer == Layer.CAMERA) {
-                    // A disc under the glyph: on the ball a dish is a few thin lines over a
-                    // continent, and an unlogged node has no ring to give it any weight.
+                if (m.layer == Layer.CAMERA) {
+                    // A disc under the glyph: a camera is a few bracket strokes, and an unlogged
+                    // one has no ring to give it any weight over the photo basemap.
                     drawCircle(color = base.copy(alpha = 0.18f * a), radius = r * 1.75f, center = p)
                 }
                 when (m.layer) {
@@ -2466,15 +2453,8 @@ private fun TacticalMap(
                     Layer.SATELLITE -> if (isIss(m)) drawStationIcon(p, iconR, color) else drawSatelliteIcon(p, r, color)
                     Layer.CELL -> drawTowerIcon(p, r, color)
                     // One shape for the whole layer: a repeater is a node that repeats, and its
-                    // role is in its card rather than in a second glyph this small. On the ball
-                    // the dish's thin lines are lost, so it becomes a filled core in a ring:
-                    // the same node, legible at any zoom.
-                    Layer.MESH -> if (cull) {
-                        drawCircle(color = color, radius = r * 0.45f, center = p)
-                        drawCircle(color = color, radius = r * 0.95f, center = p, style = ringStroke)
-                    } else {
-                        drawDishIcon(p, r, color)
-                    }
+                    // role is in its card rather than in a second glyph this small.
+                    Layer.MESH -> drawDishIcon(p, r, color)
                     Layer.ESP32 -> drawChipIcon(p, r, color)
                     Layer.KIWI -> drawKiwiIcon(p, r, color)
                     // A plate reader keeps the lens-on-a-bracket the watch layer uses; a CCTV

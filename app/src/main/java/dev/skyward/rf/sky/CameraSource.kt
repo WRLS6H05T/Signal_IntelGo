@@ -22,6 +22,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlin.math.cos
 
@@ -41,7 +42,7 @@ import kotlin.math.cos
  * are bolted to posts; re-asking because the phone moved across a street is a request for
  * nothing.
  */
-class CameraSource(private val http: OkHttpClient) {
+class CameraSource(http: OkHttpClient) {
 
     data class Result(val cameras: List<CameraView>, val status: FeedStatus)
 
@@ -113,6 +114,21 @@ class CameraSource(private val http: OkHttpClient) {
         }
     }
 
+    /**
+     * This source's own client, because an Overpass answer is slower than anything else here.
+     *
+     * The shared client gives up at 35 seconds, and a measured camera query for a 3 km ring took
+     * 39 seconds: Overpass queues the request before it even starts scanning, and the queue wait
+     * is not what the query's own `[timeout:25]` covers. So every camera read was cancelled
+     * before its answer arrived, the layer stayed at zero, and the card could only say
+     * "timeout" - which is exactly what a layer that never loaded looks like. The limits here
+     * are sized for an Overpass queue, not for a feed that streams.
+     */
+    private val client: OkHttpClient = http.newBuilder()
+        .callTimeout(120, TimeUnit.SECONDS)
+        .readTimeout(90, TimeUnit.SECONDS)
+        .build()
+
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     private val _cameras = MutableStateFlow<List<CameraView>>(emptyList())
@@ -143,7 +159,7 @@ class CameraSource(private val http: OkHttpClient) {
                 .build()
             val req = Request.Builder().url(url).header("User-Agent", UA).get().build()
             withContext(Dispatchers.IO) {
-                http.newCall(req).execute().use { resp ->
+                client.newCall(req).execute().use { resp ->
                     val body = resp.body?.string().orEmpty()
                     if (!resp.isSuccessful) {
                         // Keep the cameras already on the map: a rate-limited request is not a
