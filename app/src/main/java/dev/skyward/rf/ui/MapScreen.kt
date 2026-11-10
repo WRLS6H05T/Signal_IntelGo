@@ -1267,93 +1267,11 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                 }
             }
 
-            // Mapped cameras, read from OpenStreetMap rather than heard. Same rule as the
-            // receiver list: a layer that never got an answer - a rate limit, a timeout - used
-            // to look exactly like a street with no cameras on it, and the ring the read
-            // covered was nowhere on screen.
-            if (showCameras) {
-                var camOpen by remember { mutableStateOf(false) }
-                val cs = sky.camStatus
-                StatusCard(
-                    title = "CAM",
-                    accent = Sky.watchFlock,
-                    trailing = sky.cameras.size.toString(),
-                    open = camOpen,
-                    onToggle = { camOpen = !camOpen },
-                ) {
-                    Text(
-                        cs.detail.ifBlank { "no read yet" },
-                        color = if (cs.ok == false) Sky.danger else Sky.textDim,
-                        fontSize = 9.sp,
-                        maxLines = 2,
-                    )
-                    Text(
-                        if (cs.ok == false) "TRY AGAIN" else "READ AGAIN",
-                        color = Sky.watchFlock,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Sky.surfaceHigh)
-                            .clickable { c.airspace.refreshCameras() }
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                    )
-                    sky.cameras.take(if (camOpen) 5 else 0).forEach { cam ->
-                        Text(
-                            cam.name.take(20) + " \u00b7 " +
-                                Units.distance(cam.distanceKm, settings.distanceUnit, 1),
-                            color = Sky.text,
-                            fontSize = 10.sp,
-                            maxLines = 1,
-                        )
-                    }
-                }
-            }
-
-            // KiwiSDR receivers. The list is a read, not a feed, so "no pins" has to say
-            // whether the read happened at all: an empty layer because nobody asked looks
-            // exactly like a layer that asked and found nothing.
-            if (showKiwi) {
-                var kiwiOpen by remember { mutableStateOf(false) }
-                val ks = sky.kiwiStatus
-                StatusCard(
-                    title = "KIWI",
-                    accent = Sky.kiwi,
-                    trailing = sky.kiwi.size.toString(),
-                    open = kiwiOpen,
-                    onToggle = { kiwiOpen = !kiwiOpen },
-                ) {
-                    Text(
-                        when {
-                            ks.ok == true -> sky.kiwi.size.toString() + " public receivers"
-                            ks.ok == false -> "read failed \u00b7 " + ks.detail
-                            else -> "not read yet"
-                        },
-                        color = if (ks.ok == false) Sky.danger else Sky.textDim,
-                        fontSize = 9.sp,
-                        maxLines = 2,
-                    )
-                    Text(
-                        if (ks.ok == false) "TRY AGAIN" else "READ LIST",
-                        color = Sky.kiwi,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Sky.surfaceHigh)
-                            .clickable { c.airspace.refreshKiwi(force = true) }
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                    )
-                    sky.kiwi.take(if (kiwiOpen) 5 else 0).forEach { k ->
-                        Text(
-                            k.name.take(22) + " \u00b7 " + k.users + "/" + k.usersMax,
-                            color = Sky.text,
-                            fontSize = 10.sp,
-                            maxLines = 1,
-                        )
-                    }
-                }
-            }
+            // Cameras and KiwiSDRs have no card here on purpose: this column is for what is
+            // attached to this phone - the peer's link, a dongle on a cable, the mesh feed -
+            // and a mapped camera or a public receiver you cannot plug in was taking room from
+            // those. Both still have their pins and their INTEL rows, where their counts and
+            // their on/off live.
         }
 
         // ---- one collapsible box: counts, layer toggles and the legend ----
