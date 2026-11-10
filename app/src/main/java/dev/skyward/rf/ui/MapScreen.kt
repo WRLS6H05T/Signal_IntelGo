@@ -2158,6 +2158,10 @@ private fun TacticalMap(
                         for (m in latestMarkers) {
                             val pp = vp.elevated(m.lat, m.lon, m.altM)
                             if (gt > 0.5f && pp.front < 0.2f) continue
+                            // The ball does not draw mesh nodes or receivers, so it must not
+                            // answer a tap for them either: an invisible pin taking the tap
+                            // would open a card for something that is not on screen.
+                            if (gt > 0.5f && (m.layer == Layer.MESH || m.layer == Layer.KIWI)) continue
                             val p = Offset(pp.x, pp.y)
                             if (p.x < -40f || p.y < -40f || p.x > w + 40f || p.y > h + 40f) continue
                             val d = sqrt((p.x - tap.x) * (p.x - tap.x) + (p.y - tap.y) * (p.y - tap.y))
@@ -2363,6 +2367,11 @@ private fun TacticalMap(
                 // rings they sit among - while each still costs a projection and a glyph. The
                 // skip is before the projection so the globe does not pay for them at all.
                 if (cull && m.layer == Layer.AIRCRAFT) continue
+                // A node and a listed receiver are places on the ground, not traffic overhead:
+                // on the ball the whole mesh is one city on a continent and the receivers are
+                // pins in countries nobody is looking at. Both belong to the flat map, so the
+                // skip is here, before the projection, and they cost the globe nothing.
+                if (cull && (m.layer == Layer.MESH || m.layer == Layer.KIWI)) continue
                 vp.elevatedNormInto(m.lat, m.nx, m.ny, m.altM, pa)
                 // whatever has rotated round the back of the sphere is not drawn
                 if (cull && pa.front <= 0.02f) continue
@@ -2402,13 +2411,10 @@ private fun TacticalMap(
                 // mesh is one city on a continent, and a dish drawn at street weight is three
                 // pixels - which is why zooming out made the nodes look like they had gone.
                 val r = when {
-                    m.layer == Layer.MESH && cull -> 7.2f * density
                     m.layer == Layer.MESH && m.logged -> 4.6f * density
                     m.layer == Layer.MESH -> 4.1f * density
-                    // A receiver is not infrastructure on this street: it is an antenna
-                    // elsewhere in the world, and on the ball it has to survive the same
-                    // shrinking every glyph does. Same weight as a node, one size up flat.
-                    m.layer == Layer.KIWI && cull -> 7.0f * density
+                    // A receiver is one size up from a node: it is an antenna, drawn at street
+                    // scale on the flat map, and never on the ball.
                     m.layer == Layer.KIWI -> 5.2f * density
                     m.logged -> 5.4f * density
                     else -> 4.4f * density
@@ -2444,16 +2450,10 @@ private fun TacticalMap(
                     // A gold halo under the glyph, so the station reads gold logged or not.
                     drawCircle(color = IssGold.copy(alpha = 0.22f * a), radius = iconR * 1.8f, center = p)
                 }
-                if (m.layer == Layer.MESH && cull) {
-                    // On the ball the node sits on a continent painted in its own colour family:
-                    // a dark backing is what keeps a green dish off a green landmass, and the
-                    // wider halo is what gives it weight at planet scale.
-                    drawCircle(color = Sky.bg.copy(alpha = 0.85f * a), radius = r * 1.15f, center = p)
-                    drawCircle(color = base.copy(alpha = 0.30f * a), radius = r * 1.55f, center = p)
-                } else if (m.layer == Layer.KIWI) {
+                if (m.layer == Layer.KIWI) {
                     // The receiver glyph is thin strokes and no fill, which is unreadable over a
-                    // photo basemap and worse on the ball - so it gets the same dark backing a
-                    // mesh node has. This is the part that makes it visible at every zoom.
+                    // photo basemap, so it sits on a dark disc with a halo. That backing is what
+                    // makes it findable on the flat map.
                     drawCircle(color = Sky.bg.copy(alpha = 0.78f * a), radius = r * 1.2f, center = p)
                     drawCircle(color = base.copy(alpha = 0.22f * a), radius = r * 1.8f, center = p)
                 } else if (m.layer == Layer.MESH || m.layer == Layer.CAMERA) {
