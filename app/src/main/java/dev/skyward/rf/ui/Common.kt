@@ -21,9 +21,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.skyward.rf.ui.theme.Sky
@@ -185,14 +188,15 @@ fun IntelPairHeader() {
         Modifier.fillMaxWidth().padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Spacer(Modifier.width(46.dp))
+        val slot = countSlot()
+        Spacer(Modifier.width(LABEL_W.dp))
         Text(
             "LIVE",
             style = SkywardThemeLabel(),
             fontSize = 8.sp,
             color = Sky.textDim,
             textAlign = TextAlign.End,
-            modifier = Modifier.width(LIVE_W.dp),
+            modifier = Modifier.width(slot),
         )
         Spacer(Modifier.width(GAP_W.dp))
         Text(
@@ -201,17 +205,41 @@ fun IntelPairHeader() {
             fontSize = 8.sp,
             color = Sky.textDim,
             textAlign = TextAlign.End,
-            modifier = Modifier.width(LOGGED_W.dp),
+            modifier = Modifier.width(slot),
         )
     }
 }
 
-/** The live count's column: wide enough for four digits, narrow enough to sit beside its twin. */
-private const val LIVE_W = 34
+/** The label column, shared by the header and the rows so the two lines start together. */
+private const val LABEL_W = 46
 
-/** The logged count's column, and the gap that keeps the two numbers from reading as one. */
-private const val LOGGED_W = 40
+/** The gap that keeps the two numbers from reading as one. */
 private const val GAP_W = 8
+
+/**
+ * The count font, and the six slots each number gets.
+ *
+ * Six slots because a count is printed right-aligned: "3" and "12,345" have to land on the same
+ * edge for the two columns to stay side by side, and six monospace digits covers every count the
+ * table can hold. Eight characters shoved the logged number into the row below it.
+ */
+private const val COUNT_SP = 12
+private const val COUNT_SLOTS = 6
+
+/** How wide one monospace digit is, in em. Every monospace face here is a little over half. */
+private const val MONO_ADVANCE = 0.62f
+
+/**
+ * One number column, measured from the count's own font size instead of written as fixed dp.
+ *
+ * Six monospace digits at 12sp are about 45dp, and the same six at a larger system font scale
+ * are wider still: a hard-coded width overflowed exactly when a count grew or the phone's text
+ * size did, which is how the right number ended up out of its column.
+ */
+@Composable
+private fun countSlot(): Dp = with(LocalDensity.current) {
+    (COUNT_SP.sp * (COUNT_SLOTS * MONO_ADVANCE)).toDp()
+}
 
 /**
  * One row of the INTEL table: a one-word label and the two numbers that belong to it.
@@ -245,31 +273,40 @@ fun IntelPairRow(
             .padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        val slot = countSlot()
         Text(
             label,
             style = SkywardThemeLabel(),
             fontSize = 9.sp,
             color = if (on) Sky.text else Sky.textDim,
-            modifier = Modifier.width(46.dp),
+            modifier = Modifier.width(LABEL_W.dp),
         )
+        // One line, no wrap, clipped: a count that somehow outgrew its six slots must not push
+        // the other column sideways, because a shifted table is unreadable rather than tight.
         Text(
             live?.toString() ?: DASH,
             fontFamily = FontFamily.Monospace,
-            fontSize = 12.sp,
+            fontSize = COUNT_SP.sp,
             fontWeight = FontWeight.Bold,
             color = if (on && live != null) Sky.cyan else Sky.textDim,
             textAlign = TextAlign.End,
-            modifier = Modifier.width(LIVE_W.dp),
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Clip,
+            modifier = Modifier.width(slot),
         )
         Spacer(Modifier.width(GAP_W.dp))
         Text(
             logged?.toString() ?: DASH,
             fontFamily = FontFamily.Monospace,
-            fontSize = 12.sp,
+            fontSize = COUNT_SP.sp,
             fontWeight = FontWeight.Bold,
             color = if (logged != null && logged > 0) Sky.logged else Sky.textDim,
             textAlign = TextAlign.End,
-            modifier = Modifier.width(LOGGED_W.dp),
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Clip,
+            modifier = Modifier.width(slot),
         )
         Spacer(Modifier.weight(1f))
     }
