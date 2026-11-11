@@ -52,6 +52,7 @@
 #include <cstring>
 
 #include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
@@ -122,6 +123,13 @@ static const unsigned long GPS_STALE_MS = 12000;
 // enough that a `scanap` and a `blescan` in the same poll both finish inside the app's read
 // window.
 static const int BLE_SCAN_MS = 2000;
+
+// How long one band's scan may take before the radio is told to stop. The scan is started
+// asynchronously and waited on with this deadline, never with the driver's blocking form: on this
+// chip a blocking scan stops returning when the band switch or a busy controller gets in its
+// way, and a blocked app_main stops pumping the console - the board then looks bricked instead of
+// out of range, which is exactly what a silent ESP32-C5 did.
+static const unsigned long WIFI_SCAN_DEADLINE_MS = 4500;
 
 // Marker before each blocking call: a board that stops answering names the sweep it died in
 // instead of just going quiet. Off by default, because every trace line is a line the app's
@@ -356,6 +364,18 @@ struct ApEntry {
 static ApEntry apTop[MAX_AP_LINES];
 static int apTopCount = 0;
 
+/** Signalled by the driver when a scan it was asked to start has finished. */
+static EventGroupHandle_t wifiEvents = nullptr;
+static const EventBits_t SCAN_DONE_BIT = BIT0;
+
+static void onWifiEvent(void *arg, esp_event_base_t base, int32_t id, void *data) {
+  (void)arg;
+  (void)data;
+  if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE && wifiEvents != nullptr) {
+    xEventGroupSetBits(wifiEvents, SCAN_DONE_BIT);
+  }
+}
+
 /**
  * Keeps the strongest findings, in order, without an allocation.
  *
@@ -404,10 +424,20 @@ static bool wifiBandScan(bool list, int &total) {
   scan.scan_type = WIFI_SCAN_TYPE_ACTIVE;
   scan.scan_time.active.min = 80;
   scan.scan_time.active.max = 240;
-  // The driver's own blocking call, with a per-channel ceiling: a scan that never returns would
-  // leave the board deaf, which on this hardware looks exactly like a board that cannot boot.
-  if (esp_wifi_scan_start(&scan, true) != ESP_OK) {
+  xEventGroupClearBits(wifiEvents, SCAN_DONE_BIT);
+  if (esp_wifi_scan_start(&scan, false) != ESP_OK) {
     TRACE("trace: scan would not start\r\n");
+    return false;
+  }
+  EventBits_t done = xEventGroupWaitBits(wifiEvents, SCAN_DONE_BIT, pdTRUE, pdTRUE,
+                                         pdMS_TO_TICKS(WIFI_SCAN_DEADLINE_MS));
+  if ((done & SCAN_DONE_BIT) == 0) {
+    // The radio refused to finish - a 5 GHz pass while the controller is busy is the usual
+    // reason. Stop it and let the sweep carry on: an empty band is a finding, a wedged board is
+    // not.
+    esp_wifi_scan_stop();
+    esp_wifi_clear_ap_list();
+    TRACE("trace: scan timed out\r\n");
     return false;
   }
   uint16_t found = 0;
@@ -871,6 +901,9 @@ static const char *resetReasonName() {
 static void wifiBegin() {
   ESP_ERROR_CHECK(esp_netif_init());
   ESP_ERROR_CHECK(esp_event_loop_create_default());
+  wifiEvents = xEventGroupCreate();
+  ESP_ERROR_CHECK(
+      esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, &onWifiEvent, nullptr));
   esp_netif_create_default_wifi_sta();
   wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
   ESP_ERROR_CHECK(esp_wifi_init(&init));

@@ -7,9 +7,11 @@ CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 
-# The app reads this console as a transcript, so the firmware owns every byte on it: no IDF
-# console, no log lines, only the lines Esp32Console parses.
-CONFIG_ESP_CONSOLE_NONE=y
+# The app reads this console as a transcript, so the log is off: only the lines Esp32Console
+# parses are printed. The USB-Serial-JTAG console stays enabled regardless, because a panic has
+# to be able to reach the cable - a board that dies silently is indistinguishable from one that
+# hung, and both look like "it never ran scans" from the phone.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_LOG_DEFAULT_LEVEL_NONE=y
 
 # 3 MB factory app: see partitions.csv.
