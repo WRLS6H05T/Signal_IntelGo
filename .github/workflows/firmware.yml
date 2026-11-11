@@ -1,8 +1,9 @@
 name: firmware
 
-# Builds the two sensor images for a bare C3/C5 board. The app does not bundle or write them, so
-# this workflow exists to produce them on a machine with no Arduino toolchain: download the
-# artifacts and flash one from a PC with `esptool write-flash 0x0`.
+# Builds the two sensor images for a bare C3/C5 board from the ESP-IDF project in
+# firmware/SignalSensor. The app does not bundle or write them, so this workflow exists to produce
+# them on a machine with no ESP-IDF toolchain: download the artifacts and flash one from a PC with
+# `esptool write-flash 0x0`.
 
 on:
   workflow_dispatch:
@@ -17,19 +18,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: arduino/setup-arduino-cli@v2
-
-      - name: Install the esp32 core
-        run: |
-          arduino-cli config init --overwrite
-          arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
-          arduino-cli core install esp32:esp32 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
-
-      - name: Install esptool
-        run: pip install "esptool>=5,<6"
-
+      # The same IDF the project is developed against: the band-mode API and the NimBLE host are
+      # what the port is for, and building it with a different release than the one that compiles
+      # here would hide a break behind a version.
       - name: Compile both images
-        run: bash firmware/build.sh
+        run: |
+          docker run --rm \
+            -v "$PWD:/project" \
+            -w /project \
+            espressif/idf:release-v6.1 \
+            bash firmware/build.sh
 
       - name: Show what was built
         run: ls -l firmware/out

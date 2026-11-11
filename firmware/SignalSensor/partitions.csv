@@ -1,0 +1,7 @@
+# Wi-Fi (both bands), NimBLE and the GPS parser do not fit the default 1.2 MB OTA slot, and this
+# board is never updated over the air: the cable the app already opens is the only channel. One
+# 3 MB factory app and a plain NVS is therefore the whole table.
+# Name,     Type, SubType, Offset,   Size,     Flags
+nvs,        data, nvs,     0x9000,   0x6000,
+phy_init,   data, phy,     0xf000,   0x1000,
+factory,    app,  factory, 0x10000,  0x300000,

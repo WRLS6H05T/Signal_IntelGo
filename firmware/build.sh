@@ -1,29 +1,45 @@
 #!/usr/bin/env bash
-# Builds the two sensor images for a bare C3/C5 board. The app does not flash them - a board
-# arrives running Marauder or GhostESP - so the output stays out of the app.
+# Builds the two sensor images for a bare C3/C5 board from the ESP-IDF project in
+# firmware/SignalSensor. The app does not flash them - a board arrives running Marauder or
+# GhostESP - so the output stays out of the app.
 #
 #   firmware/build.sh            both chips
 #   firmware/build.sh c3         one chip
 #
-# Needs arduino-cli with the esp32 core (3.3.x) and esptool on PATH:
+# Needs an ESP-IDF checkout on IDF_PATH (v5.5 or newer; the C5 and its band mode arrived there)
+# with the toolchain for the target installed:
 #
-#   arduino-cli core install esp32:esp32 \
-#     --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
-#   pip install esptool
+#   . "$IDF_PATH/export.sh"
+#   firmware/build.sh
 #
-# Each image is merged: bootloader at 0x0, partition table at 0x8000 and the application at
-# 0x10000, so one `esptool write-flash 0x0` brings a bare board up. The partition scheme is Huge APP (3 MB, no OTA) because the sketch with
-# Wi-Fi, BLE and GPS does not fit the default 1.2 MB OTA slot, and updates arrive over the cable
-# from the phone rather than over the air.
+# Each image is the merged binary IDF produces (`idf.py merge-bin`), which already places the
+# bootloader at the offset the chip wants - 0x0 on the C3, 0x2000 on the C5 - the partition table
+# at 0x8000 and the application at 0x10000, so one `esptool write-flash 0x0` brings a bare board
+# up. The partition table is firmware/SignalSensor/partitions.csv: one 3 MB factory app, because
+# Wi-Fi, BLE and GPS do not fit the default 1.2 MB OTA slot and updates arrive over the cable.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-root="$(cd "$here/.." && pwd)"
-cli="${ARDUINO_CLI:-arduino-cli}"
-esptool_bin="${ESPTOOL:-esptool}"
+project="$here/SignalSensor"
 out="$here/out"
 build="$here/build"
 mkdir -p "$out" "$build"
+
+# A shell that has not sourced export.sh yet still gets a usable idf.py, from whichever install
+# this machine has, instead of a "command not found" that says nothing about what is missing.
+if [ -z "${IDF_PATH:-}" ] || ! command -v idf.py >/dev/null 2>&1; then
+  for candidate in "$HOME/esp/esp-idf" "/c/esp/esp-idf-v6.1" "/opt/esp-idf" "$HOME/esp-idf"; do
+    if [ -f "$candidate/export.sh" ]; then
+      # shellcheck disable=SC1091
+      . "$candidate/export.sh" >/dev/null
+      break
+    fi
+  done
+fi
+if ! command -v idf.py >/dev/null 2>&1; then
+  echo "idf.py not found: source \$IDF_PATH/export.sh first" >&2
+  exit 1
+fi
 
 targets=("$@")
 if [ ${#targets[@]} -eq 0 ]; then
@@ -32,28 +48,24 @@ fi
 
 for chip in "${targets[@]}"; do
   case "$chip" in
-    c3) fqbn="esp32:esp32:esp32c3"; merged="esp32c3.bin" ;;
-    c5) fqbn="esp32:esp32:esp32c5"; merged="esp32c5.bin" ;;
+    c3) target="esp32c3"; merged="esp32c3.bin" ;;
+    c5) target="esp32c5"; merged="esp32c5.bin" ;;
     *) echo "unknown chip: $chip (expected c3 or c5)" >&2; exit 2 ;;
   esac
 
-  echo "== $chip ($fqbn)"
-  "$cli" compile \
-    --fqbn "$fqbn" \
-    --board-options PartitionScheme=huge_app,CDCOnBoot=cdc \
-    --output-dir "$build/$chip" \
-    "$here/SignalSensor"
+  echo "== $chip ($target)"
+  # A per-target build directory and sdkconfig: the two chips share one project, and letting them
+  # share a build tree is how a C3 image ends up linked with a C5 sdkconfig.
+  idf.py -C "$project" \
+    -B "$build/$chip" \
+    -D "IDF_TARGET=$target" \
+    -D "SDKCONFIG=$build/$chip/sdkconfig" \
+    -D "SDKCONFIG_DEFAULTS=$project/sdkconfig.defaults" \
+    build merge-bin
 
-  part="$build/$chip/SignalSensor.ino"
-  for f in ".bootloader.bin" ".partitions.bin" ".bin"; do
-    [ -f "$part$f" ] || { echo "missing build output: $part$f" >&2; exit 1; }
-  done
-
-  # Huge APP has no OTA slots, so there is no boot_app0 to write: three pieces, one image.
-  args=(--chip "esp32$chip" merge-bin -o "$out/$merged" --flash-mode dio --flash-freq 80m --flash-size 4MB)
-  args+=(0x0 "$part.bootloader.bin" 0x8000 "$part.partitions.bin" 0x10000 "$part.bin")
-  "$esptool_bin" "${args[@]}"
-
+  merged_bin="$build/$chip/merged-binary.bin"
+  [ -f "$merged_bin" ] || { echo "missing build output: $merged_bin" >&2; exit 1; }
+  cp "$merged_bin" "$out/$merged"
   echo "wrote $out/$merged ($(wc -c < "$out/$merged") bytes)"
 done
 
@@ -61,7 +73,7 @@ done
 python - "$out" "$here" <<'PY'
 import hashlib, json, os, sys, datetime
 out, here = sys.argv[1], sys.argv[2]
-manifest = {"version": "1.0.0", "built": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"), "images": {}}
+manifest = {"version": "1.3.0", "built": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"), "images": {}}
 for chip, name in (("c3", "esp32c3.bin"), ("c5", "esp32c5.bin")):
     path = os.path.join(out, name)
     if not os.path.exists(path):

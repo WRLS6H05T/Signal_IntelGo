@@ -643,18 +643,26 @@ Uninstalling deletes that folder along with the app, so copy it off before unins
 ## Sensor firmware
 
 `firmware/SignalSensor` is the sensor firmware for the two mini boards this project targets,
-**ESP32-C3 Mini** and **ESP32-C5 Mini**. One sketch, both chips, compiled per target:
+**ESP32-C3 Mini** and **ESP32-C5 Mini**. One ESP-IDF project, both chips, compiled per target:
 
 ```
 firmware/build.sh          # both images
 firmware/build.sh c3       # one of them
 ```
 
-It needs `arduino-cli` with the `esp32` core (3.3.x) and `esptool` on `PATH`; the script compiles
-each board with the **Huge APP** partition scheme (Wi-Fi, BLE and GPS do not fit the default
-1.2 MB OTA slot), merges bootloader at `0x0`, partition table at `0x8000` and application at
-`0x10000`, and writes `firmware/out/esp32c3.bin`, `esp32c5.bin` and a `firmware.json` manifest.
-`.github/workflows/firmware.yml` does the same in CI and uploads the two images.
+It needs an ESP-IDF checkout on `IDF_PATH` with `export.sh` sourced, so `idf.py` is on `PATH`. The
+project uses `firmware/SignalSensor/partitions.csv` - one 3 MB factory app, because Wi-Fi, BLE and
+GPS do not fit the default 1.2 MB OTA slot and updates arrive over the cable - and
+`idf.py merge-bin` produces the image, which already places the bootloader at the offset the chip
+wants (`0x0` on the C3, `0x2000` on the C5), the partition table at `0x8000` and the application
+at `0x10000`. The script writes `firmware/out/esp32c3.bin`, `esp32c5.bin` and a `firmware.json`
+manifest. `.github/workflows/firmware.yml` does the same in CI and uploads the two images.
+
+It was an Arduino sketch, and the port is about the radio: the wrapper only ever scanned the band
+it happened to leave the radio in, so a C5 never reported 5 GHz. Under IDF the band is selected
+with `esp_wifi_set_band_mode()` between two scans and BLE runs on NimBLE, so the advertisement
+payload and the scan window are the numbers written in the firmware. The sketch is kept in
+`firmware/SignalSensor/arduino/` as the reference for the wire format and is no longer built.
 
 The app neither bundles nor writes these images: a board arrives already running **Marauder** or
 **GhostESP**, and that is what the app talks to. These are for a bare board that has neither, and
@@ -668,12 +676,13 @@ What the firmware does, on the same wire format the app already decodes:
 
 - advertises the telemetry as manufacturer data (company id `0xFFFF`, magic `SG`), refreshed
   every two seconds, with the fix flag only set once the GPS has one;
-- sweeps Wi-Fi every fifteen seconds and BLE every twenty, printing the lines the app's console
+- sweeps Wi-Fi and BLE every thirty seconds, printing the lines the app's console
   parser reads (address, RSSI, channel, SSID) so a board's networks join the same tables;
-- on an **ESP32-C5** sweeps **both** Wi-Fi bands: the radio is switched to 2.4 GHz and then to
-  5 GHz for each sweep, because `WiFi.scanNetworks()` only scans the band the radio is currently
-  in and the C5 defaults to 2.4 GHz. 5 GHz networks arrive with their own channel numbers (36
-  and up). A C3 has no 5 GHz radio, so it sweeps 2.4 GHz only, as before;
+- on an **ESP32-C5** sweeps **both** Wi-Fi bands: one pass with the radio in 2.4 GHz and one in
+  5 GHz, because a scan only covers the band the radio is currently in. 5 GHz networks arrive
+  with their own channel numbers (36 and up). The advertisement is parked for those two passes,
+  because a 5 GHz scan start is refused while BLE is advertising. A C3 has no 5 GHz radio, so
+  the band code is compiled out and it sweeps 2.4 GHz only, as before;
 - reads NMEA on the GPS pin and prints `APs found:`, `BLE devices:`, `GPS: fix 3D, Sats:`,
   `HDOP:`, `Lat:`, `Lon:` and `Alt:` in the shapes `Esp32Console` parses.
 

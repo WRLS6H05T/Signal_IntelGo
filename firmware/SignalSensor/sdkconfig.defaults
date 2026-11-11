@@ -1,0 +1,35 @@
+# Defaults for both mini boards. build.sh passes IDF_TARGET per chip; everything else is the
+# same on a C3 and a C5, so it lives here rather than in two sdkconfig files.
+
+# 4 MB flash, the size every C3/C5 mini board ships with. DIO/80 MHz is what the merged image is
+# written with, and a mismatch here is a board that boots into a flash error.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+# The app reads this console as a transcript, so the firmware owns every byte on it: no IDF
+# console, no log lines, only the lines Esp32Console parses.
+CONFIG_ESP_CONSOLE_NONE=y
+CONFIG_LOG_DEFAULT_LEVEL_NONE=y
+
+# 3 MB factory app: see partitions.csv.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
+
+# NimBLE advertising (the telemetry advert) and scanning (the BLE sweep) in one host.
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_ROLE_BROADCASTER=y
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=y
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=y
+CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=4096
+
+# 1 kHz ticks: the poll gaps and the GPS staleness window are in milliseconds.
+CONFIG_FREERTOS_HZ=1000
+
+# The main task parses NMEA and sweep listings on its own stack; the default is tight for that
+# plus the Wi-Fi scan record list.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
