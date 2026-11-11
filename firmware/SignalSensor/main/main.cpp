@@ -631,7 +631,7 @@ static int onDisc(struct ble_gap_event *event, void *arg) {
       char addr[18];
       char name[33];
       addrText(event->disc.addr, addr, sizeof(addr));
-      nameFromAdv(event->disc.data, event->disc.data_len, name, sizeof(name));
+      nameFromAdv(event->disc.data, event->disc.length_data, name, sizeof(name));
       bleSeen++;
       bleRemember(addr, name, strlen(name), event->disc.rssi);
       return 0;
