@@ -62,6 +62,6 @@ class SubGhzParseTest {
         assertEquals("subghz rx\r\n", withRadio.last())
 
         // A board with no console gets nothing appended: there is nothing to send it to.
-        assertTrue(Esp32Console.commandsFor(BoardFamily.ESP32, "subghz rx").isEmpty())
+        assertTrue(Esp32Console.commandsFor(BoardFamily.BISCUIT, "subghz rx").isEmpty())
     }
 }

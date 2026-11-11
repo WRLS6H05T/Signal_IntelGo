@@ -52,6 +52,23 @@ class Esp32RadioTest {
     }
 
     @Test
+    fun `a poll transcript does not erase the silicon the banner named`() {
+        // The card's 5 GHz choices come from the banner, and the poll replaces raw with a sweep
+        // listing every few seconds: the banner has to be kept apart from it.
+        val board = UsbBoards.Board(
+            deviceId = 1,
+            vendorId = 0x303A,
+            productId = 0x1001,
+            label = "SignalSensor v1.2.0",
+            family = BoardFamily.SIGNALSENSOR,
+            chip = "USB JTAG/serial debug unit",
+            banner = "Signal IntelGo sensor v1.2.0 esp32 (ESP32-C5)",
+            raw = "APs found: 12 AP 3C:84:6A:11:22:33 RSSI -47 CH 6 SSID=home",
+        )
+        assertEquals("ESP32-C5", board.silicon)
+    }
+
+    @Test
     fun `a chip that does not appear in the banner is not guessed at`() {
         val board = UsbBoards.Board(
             deviceId = 2,

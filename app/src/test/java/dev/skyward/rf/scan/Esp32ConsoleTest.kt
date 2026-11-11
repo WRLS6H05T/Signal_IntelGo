@@ -91,6 +91,10 @@ class Esp32ConsoleTest {
     fun `clis that can sweep get commands and bare bridges do not`() {
         assertTrue(Esp32Console.commands(BoardFamily.GHOSTESP).any { it.startsWith("scanap") })
         assertTrue(Esp32Console.commands(BoardFamily.MARAUDER).any { it.startsWith("gps") })
-        assertTrue(Esp32Console.commands(BoardFamily.ESP32).isEmpty())
+        // A board that has not said what it is gets asked that, and nothing it might not answer:
+        // ordering a sweep from an unknown CLI only fills the transcript with errors.
+        val unknown = Esp32Console.commands(BoardFamily.ESP32)
+        assertTrue(unknown.any { it.startsWith("status") })
+        assertTrue(unknown.none { it.startsWith("scan") })
     }
 }

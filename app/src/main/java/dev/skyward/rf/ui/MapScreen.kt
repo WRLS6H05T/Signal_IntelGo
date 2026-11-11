@@ -1096,7 +1096,7 @@ fun MapScreen(c: Container, modifier: Modifier = Modifier, onOpenDrive: () -> Un
                             if (h.assignKey.isNotBlank()) {
                                 Spacer(Modifier.height(4.dp))
                                 val assign = settings.scanAssign[h.assignKey].orEmpty()
-                                    .ifBlank { ScanPlan.defaultBand(h.dualBand, h.bleCap) }
+                                    .ifBlank { ScanPlan.defaultBand(h.dualBand) }
                                 ScanLine(
                                     code = assign,
                                     options = ScanPlan.bandOptions(h.dualBand, h.bleCap),
@@ -1693,10 +1693,10 @@ private fun ScanLine(
                         text = { Text(ScanPlan.label(option), color = Sky.text, fontSize = 11.sp) },
                         onClick = {
                             open = false
-                            // Keep the GPS switch as it was when only the band changes.
-                            if (ScanPlan.band(option) != ScanPlan.band(code)) {
-                                onPick(ScanPlan.withGps(option, ScanPlan.hasGps(code)))
-                            }
+                            // Every option that differs is applied, keeping the GPS switch as
+                            // it was. Comparing bands instead made "+ BLE" - the same band with
+                            // another suffix - a menu entry that could never be chosen.
+                            if (option != code) onPick(ScanPlan.withGps(option, ScanPlan.hasGps(code)))
                         },
                     )
                 }

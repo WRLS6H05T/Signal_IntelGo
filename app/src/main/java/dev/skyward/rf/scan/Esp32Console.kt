@@ -81,8 +81,8 @@ object Esp32Console {
      * Commands that make a board sweep and report.
      *
      * Both CLIs answer `gps` with the current fix and `scanap` with an AP sweep; GhostESP and
-     * Marauder differ only in the BLE verb. A bare ESP32 or a Biscuit has no CLI at all, so it
-     * gets no commands and the poll simply listens, which is enough for NMEA.
+     * Marauder differ only in the BLE verb. A board that never identified itself is sent the
+     * same sweeps: silence during a probe is a busy console, not an absent one.
      */
     fun commands(family: BoardFamily): List<String> = when (family) {
         // A sweep left running from the last poll would have to be stopped before a new one is
@@ -92,7 +92,14 @@ object Esp32Console {
         // The project's own sensor sweeps once per verb and has finished printing before the
         // next command is read, so there is never a sweep left running to stop.
         BoardFamily.SIGNALSENSOR -> listOf("gps\r\n", "scanap\r\n", "blescan\r\n")
-        BoardFamily.BISCUIT, BoardFamily.ESP32 -> emptyList()
+        // An unidentified board is not a board without a console: it is usually one that was
+        // mid-sweep for the whole probe window. It is asked who it is - `status` is answered with
+        // the banner that names the firmware - and given a fix request, which is all a headless
+        // NMEA board needs. Asking it to sweep before it has said what it is orders a verb it
+        // may not know; the answer to `status` upgrades it onto its real sweeps next cycle.
+        BoardFamily.ESP32 -> listOf("status\r\n", "gps\r\n")
+        // A Biscuit really has no CLI, only ESP-IDF logs, which no verb belongs in.
+        BoardFamily.BISCUIT -> emptyList()
     }
 
     /**

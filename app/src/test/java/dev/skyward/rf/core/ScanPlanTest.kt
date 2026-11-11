@@ -101,6 +101,22 @@ class ScanPlanTest {
     }
 
     @Test
+    fun `an unassigned board sweeps wi-fi, never ble alone`() {
+        assertEquals(ScanPlan.DUAL, ScanPlan.defaultBand(dualBand = true))
+        assertEquals(ScanPlan.W24, ScanPlan.defaultBand(dualBand = false))
+    }
+
+    @Test
+    fun `a board the probe never identified is asked who it is, not to sweep blind`() {
+        // A board that was mid-sweep while it was probed is silent, not absent: `status` is what
+        // gets its banner back, and the banner is what moves it onto its real sweeps.
+        assertEquals(
+            listOf("status\r\n", "gps\r\n"),
+            Esp32Console.commands(BoardFamily.ESP32),
+        )
+    }
+
+    @Test
     fun `no assignment keeps every verb the board family answers`() {
         assertEquals(
             Esp32Console.commands(BoardFamily.SIGNALSENSOR),

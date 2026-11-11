@@ -134,15 +134,28 @@ class UsbBoards(private val context: Context) {
         /** Rates a bridge is normally flashed at, in the order the status panel steps them. */
         val BAUD_RATES = listOf(9_600, 19_200, 38_400, 57_600, 115_200, 230_400, 460_800, 921_600)
 
-        /** How long to listen for a banner. Marauder answers immediately, GhostESP within ~1 s. */
-        private const val LISTEN_MS = 4_000L
+        /**
+         * How long to listen for a banner.
+         *
+         * Marauder answers immediately and GhostESP within ~1 s, but a board that booted just
+         * before it was plugged in runs its first Wi-Fi and BLE sweeps from `loop()` before it
+         * reads its console, and a blocking sweep keeps the port deaf for up to seven seconds.
+         * Four seconds heard nothing on exactly that board and filed it as a bare ESP32.
+         */
+        private const val LISTEN_MS = 9_000L
         private const val READ_TIMEOUT_MS = 200
         private const val PROBE_GAP_MS = 380L
         private const val MAX_TEXT = 6_000
         /** How often the roster is reconciled against the bus when no broadcast arrives. */
         private const val WATCH_MS = 3_000L
-        /** How long each telemetry poll listens after its commands go out. */
-        private const val POLL_READ_MS = 6_000L
+        /**
+         * How long each telemetry poll listens after its commands go out.
+         *
+         * A board answers its commands one after another, and a Wi-Fi sweep alone can hold it
+         * for five seconds before the BLE sweep even starts. A six-second window cut the BLE
+         * listing off every cycle that asked for both, so the window covers the whole queue.
+         */
+        private const val POLL_READ_MS = 11_000L
         /** Gap between the poll's commands, so an AP sweep can finish before BLE starts. */
         private const val COMMAND_GAP_MS = 1_200L
         /** Gap between telemetry polls: a Wi-Fi sweep needs time to finish printing. */
@@ -187,8 +200,17 @@ class UsbBoards(private val context: Context) {
         val version: String = "",
         val transport: Transport = Transport.OTHER,
         val chip: String = "",
-        /** Sanitised console snippet: what an unidentified board actually said. */
+        /** Sanitised console snippet: what the board said on its last poll. */
         val raw: String = "",
+        /**
+         * The console text that identified the board, kept apart from [raw].
+         *
+         * [raw] is the latest poll transcript, which is what the card shows, but the banner that
+         * names the silicon is only printed at boot and by `help`/`status`. Letting a poll
+         * overwrite it is how a C5 stopped being dual band one cycle after it was plugged in,
+         * which took the 5 GHz choices out of its card with it.
+         */
+        val banner: String = "",
         /** Numbers the board reported on its own console; empty until it answers a poll. */
         val reading: Esp32Console.Reading = Esp32Console.Reading(),
         /** The networks and advertisers the board's last sweep named. */
@@ -210,7 +232,7 @@ class UsbBoards(private val context: Context) {
          */
         val silicon: String
             get() {
-                val text = chip + " " + raw + " " + label
+                val text = chip + " " + banner + " " + raw + " " + label
                 return when {
                     Regex("(?i)esp32[- _]?c5\\b|\\bc5[- _]?mini\\b").containsMatchIn(text) -> "ESP32-C5"
                     Regex("(?i)esp32[- _]?c6\\b").containsMatchIn(text) -> "ESP32-C6"
@@ -552,15 +574,45 @@ class UsbBoards(private val context: Context) {
             poller.execute {
                 try {
                     while (id in polling) {
+                        // Read the family every cycle rather than once: a board that names itself
+                        // on a poll stops being the fallback it was filed as when the probe
+                        // heard only the silence of its own boot sweep.
+                        val current = devices[id]?.family ?: family
                         // Poll first: a board plugged in should start reporting within seconds,
                         // not after the gap that keeps consecutive sweeps from overlapping.
-                        val text = poll(device, family)
+                        val text = poll(device, current)
                         if (id !in polling) break
                         if (text.isNotBlank()) {
                             val reading = Esp32Console.parse(text)
                             val sweep = Esp32Console.parseScan(text)
                             val board = devices[id] ?: break
+                            // A transcript that names the firmware is a better identification
+                            // than the silence the probe heard. Only the fallback is upgraded: a
+                            // Marauder whose lore mentions `scanap` must not be relabelled by a
+                            // sweep listing.
+                            val better = if (board.family == BoardFamily.ESP32) {
+                                UsbBoardMatch.classify(text, dualPortPresent(device), describe(device))
+                                    ?.takeIf { it.family != BoardFamily.ESP32 }
+                            } else {
+                                null
+                            }
+                            val familyNow = better?.family ?: board.family
+                            val version = better?.version?.takeIf { it.isNotBlank() } ?: board.version
                             devices[id] = board.copy(
+                                family = familyNow,
+                                version = version,
+                                label = if (better == null) {
+                                    board.label
+                                } else {
+                                    labelOf(familyNow, version, board.chip)
+                                },
+                                // Only a transcript that actually identified the board becomes
+                                // its banner; a sweep listing names nothing.
+                                banner = if (board.banner.isBlank() && better != null) {
+                                    text.replace('\n', ' ').trim().take(200)
+                                } else {
+                                    board.banner
+                                },
                                 reading = board.reading.merge(reading),
                                 sweep = sweep,
                                 raw = text.replace('\n', ' ').trim().take(160),
@@ -966,6 +1018,22 @@ class UsbBoards(private val context: Context) {
 
     // ---------------- roster ----------------
 
+    /** What the roster calls a board: its family, with a version the name does not already carry. */
+    private fun labelOf(family: BoardFamily, version: String, chip: String): String {
+        val base = when (family) {
+            BoardFamily.MARAUDER -> "ESP32 Marauder"
+            BoardFamily.GHOSTESP -> "GhostESP"
+            BoardFamily.BISCUIT -> "Biscuit"
+            BoardFamily.SIGNALSENSOR -> "SignalSensor"
+            BoardFamily.ESP32 -> chip.ifBlank { "ESP32 board" }
+        }
+        return when {
+            version.isBlank() -> base
+            base.endsWith(version) -> base
+            else -> "$base v$version"
+        }
+    }
+
     private fun upsert(
         device: UsbDevice,
         hit: UsbBoardMatch.Hit,
@@ -983,18 +1051,7 @@ class UsbBoards(private val context: Context) {
         val transport = transportOf(device)
         val chip = runCatching { device.productName }.getOrNull().orEmpty()
             .ifBlank { runCatching { device.manufacturerName }.getOrNull().orEmpty() }
-        val base = when (hit.family) {
-            BoardFamily.MARAUDER -> "ESP32 Marauder"
-            BoardFamily.GHOSTESP -> "GhostESP"
-            BoardFamily.BISCUIT -> "Biscuit"
-            BoardFamily.SIGNALSENSOR -> "SignalSensor"
-            BoardFamily.ESP32 -> chip.ifBlank { "ESP32 board" }
-        }
-        val label = when {
-            hit.version.isBlank() -> base
-            base.endsWith(hit.version) -> base
-            else -> "$base v${hit.version}"
-        }
+        val label = labelOf(hit.family, hit.version, chip)
         val board = Board(
             deviceId = device.deviceId,
             vendorId = device.vendorId,
@@ -1005,6 +1062,8 @@ class UsbBoards(private val context: Context) {
             transport = transport,
             chip = chip,
             raw = console.replace('\n', ' ').trim().take(160),
+            // The probe's transcript, kept: it is the only text that may name the silicon.
+            banner = console.replace('\n', ' ').trim().take(200),
         )
         attached[device.deviceId] = device
         devices[device.deviceId] = board

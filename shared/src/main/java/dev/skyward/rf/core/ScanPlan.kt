@@ -77,9 +77,12 @@ object ScanPlan {
         return base + ble + gps
     }
 
-    fun defaultBand(dualBand: Boolean, ble: Boolean): String = when {
-        dualBand -> DUAL
-        ble -> BLE
-        else -> W24
-    }
+    /**
+     * What a board nobody has assigned sweeps: the Wi-Fi bands it can hear.
+     *
+     * BLE is never the default. A card that has not been touched has to be doing the sweep that
+     * puts networks on the map; defaulting a board to BLE left it hearing nothing but advertisers
+     * while its card said it was scanning, which reads as the scans never having run.
+     */
+    fun defaultBand(dualBand: Boolean): String = if (dualBand) DUAL else W24
 }
