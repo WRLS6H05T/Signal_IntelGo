@@ -238,7 +238,10 @@ private fun buildHardware(
                     "Console" to b.raw.ifBlank { "\u2014" },
                 ),
                 assignKey = b.key,
-                dualBand = n?.dualBand ?: false,
+                // The board's own chip wins when the node table has no entry for it: a card
+                // that lost its 5 GHz choices because a node lookup missed is exactly the bug
+                // this flag exists to prevent.
+                dualBand = n?.dualBand ?: b.dualBand,
                 bleCap = n?.hasBle ?: true,
                 // The module being fitted is what the GPS switch is for, so a board that
                 // answered "no fix" but has a receiver still gets the switch: hasGps alone is

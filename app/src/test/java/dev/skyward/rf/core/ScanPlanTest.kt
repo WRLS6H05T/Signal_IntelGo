@@ -117,6 +117,23 @@ class ScanPlanTest {
     }
 
     @Test
+    fun `a board with no chip reported is asked who it is on every poll`() {
+        val identified = Esp32Console.commandsFor(
+            BoardFamily.SIGNALSENSOR,
+            null,
+            ScanPlan.W24,
+            identify = true,
+        )
+        assertEquals("status\r\n", identified.first())
+        assertTrue(identified.any { it.startsWith("scanap") })
+        // Only while the chip is unknown: a board that has named itself is not asked again.
+        assertFalse(
+            Esp32Console.commandsFor(BoardFamily.SIGNALSENSOR, null, ScanPlan.W24)
+                .any { it.startsWith("status") },
+        )
+    }
+
+    @Test
     fun `no assignment keeps every verb the board family answers`() {
         assertEquals(
             Esp32Console.commands(BoardFamily.SIGNALSENSOR),

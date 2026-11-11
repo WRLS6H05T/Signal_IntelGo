@@ -110,7 +110,12 @@ object Esp32Console {
      * builds and Marauder revisions, and a board that does not know it would print an error into
      * the middle of a sweep transcript.
      */
-    fun commandsFor(family: BoardFamily, subGhzCommand: String?, plan: String? = null): List<String> {
+    fun commandsFor(
+        family: BoardFamily,
+        subGhzCommand: String?,
+        plan: String? = null,
+        identify: Boolean = false,
+    ): List<String> {
         val base = commands(family)
         if (base.isEmpty()) return base
         // The assignment owns the sweeps: a BLE-only plan must not start an AP scan, because the
@@ -130,9 +135,23 @@ object Esp32Console {
                 }
             }
         }
-        if (subGhzCommand.isNullOrBlank()) return asked
-        return asked + (subGhzCommand.trim() + "\r\n")
+        if (subGhzCommand.isNullOrBlank()) return askedWithStatus(asked, identify)
+        return askedWithStatus(asked, identify) + (subGhzCommand.trim() + "\r\n")
     }
+
+    /**
+     * Adds the identification verb while the board's chip is still unknown.
+     *
+     * `status` is the only verb that prints the banner, and the banner is the only thing that
+     * says which chip is on the cable - so a board that stayed silent through its probe is asked
+     * who it is once per poll until it answers, instead of being filed as single band forever.
+     */
+    private fun askedWithStatus(asked: List<String>, identify: Boolean): List<String> =
+        if (identify && asked.none { it.startsWith("status") }) {
+            listOf("status\r\n") + asked
+        } else {
+            asked
+        }
 
     // ---------------- text fields ----------------
 

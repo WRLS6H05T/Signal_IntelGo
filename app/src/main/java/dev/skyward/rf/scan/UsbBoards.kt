@@ -242,6 +242,14 @@ class UsbBoards(private val context: Context) {
                 }
             }
 
+        /**
+         * True when the console named a 5 GHz radio: the C5 is the only mini board with one.
+         *
+         * Kept on the board, not only on the [Esp32Node] the roster is mirrored into, so a card
+         * whose node lookup missed still knows what the cable is attached to.
+         */
+        val dualBand: Boolean get() = silicon.contains("C5", ignoreCase = true)
+
         val familyLabel: String
             get() = when (family) {
                 BoardFamily.MARAUDER -> "ESP32 Marauder"
@@ -659,11 +667,15 @@ class UsbBoards(private val context: Context) {
             // to a board without the radio is how a poll transcript fills with errors.
             val subGhz = if (devices[device.deviceId]?.reading?.subGhz == true) subGhzCommand else null
             val plan = planOf?.invoke("usb:${device.deviceId}")
+            // The band choices on the card come from the chip, and the chip only appears in the
+            // banner: a board that was busy for the whole probe window is asked again on every
+            // poll until it names itself.
+            val unknownChip = devices[device.deviceId]?.silicon.isNullOrEmpty()
             return exchange(
                 opened,
                 port.second,
                 port.third,
-                Esp32Console.commandsFor(family, subGhz, plan),
+                Esp32Console.commandsFor(family, subGhz, plan, identify = unknownChip),
             )
         } catch (t: Throwable) {
             return ""

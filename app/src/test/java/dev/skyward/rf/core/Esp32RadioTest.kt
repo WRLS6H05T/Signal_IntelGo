@@ -69,6 +69,35 @@ class Esp32RadioTest {
     }
 
     @Test
+    fun `a board that named a C5 is dual band without the node table`() {
+        // The card reads the node table first, but a node can be missing while the cable is
+        // there; the board's own banner has to be enough on its own.
+        val board = UsbBoards.Board(
+            deviceId = 3,
+            vendorId = 0x303A,
+            productId = 0x1001,
+            label = "SignalSensor v1.3.0",
+            family = BoardFamily.SIGNALSENSOR,
+            chip = "USB JTAG/serial debug unit",
+            banner = "Signal IntelGo sensor v1.3.0 esp32 (ESP32-C5)",
+        )
+        assertTrue(board.dualBand)
+    }
+
+    @Test
+    fun `a board that has not named its chip is not guessed at`() {
+        val board = UsbBoards.Board(
+            deviceId = 4,
+            vendorId = 0x303A,
+            productId = 0x1001,
+            label = "SignalSensor",
+            family = BoardFamily.SIGNALSENSOR,
+            chip = "USB JTAG/serial debug unit",
+        )
+        assertFalse(board.dualBand)
+    }
+
+    @Test
     fun `a chip that does not appear in the banner is not guessed at`() {
         val board = UsbBoards.Board(
             deviceId = 2,
