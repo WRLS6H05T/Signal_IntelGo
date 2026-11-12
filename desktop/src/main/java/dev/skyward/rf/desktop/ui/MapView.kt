@@ -495,13 +495,17 @@ private fun DrawScope.drawMap(
     // taken in catalogue order, so the same satellites are plotted on every tick instead of a
     // different random subset popping in and out.
     val satStep = if (sats.size > 3_000) sats.size / 3_000 + 1 else 1
+    // The line down to the ground is what makes the ball read as a shell rather than a sticker,
+    // but one per satellite crossed into a lattice of wires that looked like a checkered texture
+    // laid over the map. A share of them carries the same sense of depth with no visible grid.
+    val tetherStep = if (sats.size > 3_000) 5 else 1
     sats.forEachIndexed { index, sat ->
         if (index % satStep != 0) return@forEachIndexed
         val lift = (ln(1.0 + sat.altKm * 1000.0 / 500.0) * 0.022).coerceIn(0.0, 0.30)
         if (!place(sat.lat, sat.lon, lift)) return@forEachIndexed
         val at = Offset(pt[0], pt[1])
-        if (t > 0.5f && place(sat.lat, sat.lon, 0.0)) {
-            drawLine(Desk.cyan.copy(alpha = 0.20f), Offset(pt[0], pt[1]), at, 1f)
+        if (t > 0.5f && index % (satStep * tetherStep) == 0 && place(sat.lat, sat.lon, 0.0)) {
+            drawLine(Desk.cyan.copy(alpha = 0.18f), Offset(pt[0], pt[1]), at, 1f)
         }
         drawCircle(Desk.cyan, radius = 1.7.dp.toPx(), center = at)
     }
@@ -587,19 +591,45 @@ private fun DrawScope.drawGlobeSphere(
             }
             if (visible == 0) continue
 
-            // Clip the ring to the near side of the horizon by cutting every edge that crosses it.
-            // Filling a ring that straddles the horizon used to mean inventing a closing edge - a
-            // chord across the ball swept a land-coloured wash over the whole face as the globe
-            // turned, and closing along the limb picked the wrong way round often enough to flood
-            // the disc. Clipping invents nothing: the polygon handed to the canvas is exactly the
-            // visible part of the ring, and it fills the same way at every rotation.
-            val land = Path()
-            var started = false
+            // Cut the ring at the horizon and fill each visible run on its own.
+            //
+            // Cut the ring at the horizon, then stroke each visible run and, when the whole ring
+            // is on the near side, fill it.
+            //
+            // Filling a ring that crosses the horizon is what produced the checkered pattern. Once
+            // part of a ring is behind the horizon its far half lands mirrored on the near half, so
+            // a fill covers places the coast does not: pale land-coloured blocks scattered over
+            // open ocean, one per fold, worst for a big ring like the Americas as it straddles the
+            // limb. So a ring is filled only when every vertex is on the near side; otherwise its
+            // visible runs are drawn as outline only, which still reads as coastline rolling round
+            // the edge of the ball.
+            val run = ArrayList<Float>(64)
             fun put(x: Float, y: Float) {
-                if (started) land.lineTo(x, y) else { land.moveTo(x, y); started = true }
+                run.add(x)
+                run.add(y)
             }
-            for (k in 0 until n) {
-                val m = (k + 1) % n
+            fun flush() {
+                if (run.size >= 6) {
+                    val path = Path()
+                    path.moveTo(run[0], run[1])
+                    var i = 2
+                    while (i < run.size) {
+                        path.lineTo(run[i], run[i + 1])
+                        i += 2
+                    }
+                    path.close()
+                    if (visible == n) drawPath(path, Color(0xFF2C4C68), alpha = alpha)
+                    coast.addPath(path)
+                }
+                run.clear()
+            }
+            // Start from a hidden vertex so a run that wraps past index zero stays whole.
+            var start = 0
+            while (start < n && d[start] > HORIZON) start++
+            if (start >= n) start = 0
+            for (step in 0 until n) {
+                val k = (start + step) % n
+                val m = (start + step + 1) % n
                 val inK = d[k] > HORIZON
                 val inM = d[m] > HORIZON
                 if (inK) {
@@ -617,14 +647,11 @@ private fun DrawScope.drawGlobeSphere(
                         center.x + radius * iu,
                         (center.y - radius * (iv * cosTilt - ic * sinTilt)).toFloat(),
                     )
+                    // Leaving the visible side ends this run; the next one starts fresh.
+                    if (inK && !inM) flush()
                 }
             }
-            if (!started) continue
-            land.close()
-            drawPath(land, Color(0xFF2C4C68), alpha = alpha)
-            // The outline follows the same clipped polygon, so the coast stops at the limb exactly
-            // where the fill does.
-            coast.addPath(land)
+            flush()
         }
         drawPath(coast, Color(0xFF86BCDF).copy(alpha = 0.8f * alpha), style = Stroke(width = 0.8.dp.toPx()))
     }
