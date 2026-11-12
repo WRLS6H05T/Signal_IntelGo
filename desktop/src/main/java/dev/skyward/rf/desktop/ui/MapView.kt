@@ -619,6 +619,9 @@ private fun DrawScope.drawGlobeSphere(
             }
             fun flush() {
                 if (run.size >= 6) {
+                    // Left open on purpose: closing it would stroke a straight line from the end
+                    // of the coastline back to its start, which is the stray line across the map.
+                    // The fill comes from the land mesh, not from this path.
                     val path = Path()
                     path.moveTo(run[0], run[1])
                     var i = 2
@@ -626,7 +629,6 @@ private fun DrawScope.drawGlobeSphere(
                         path.lineTo(run[i], run[i + 1])
                         i += 2
                     }
-                    path.close()
                     coast.addPath(path)
                 }
                 run.clear()
@@ -801,14 +803,23 @@ private fun DrawScope.drawLandMesh(
             color = argb
             isAntiAlias = false
         }
-        canvas.nativeCanvas.drawVertices(
-            org.jetbrains.skia.VertexMode.TRIANGLES,
-            positions,
-            null,
-            null,
-            indices.copyOf(used),
-            org.jetbrains.skia.BlendMode.SRC_OVER,
-            paint,
-        )
+        // Drawing straight onto the Skia canvas leaves its state changed for whatever is painted
+        // next, and the panels and their glyphs came out blank because of it. Save and restore it
+        // so this draw stays a closed box.
+        val native = canvas.nativeCanvas
+        val save = native.save()
+        try {
+            native.drawVertices(
+                org.jetbrains.skia.VertexMode.TRIANGLES,
+                positions,
+                null,
+                null,
+                indices.copyOf(used),
+                org.jetbrains.skia.BlendMode.SRC_OVER,
+                paint,
+            )
+        } finally {
+            native.restoreToCount(save)
+        }
     }
 }
