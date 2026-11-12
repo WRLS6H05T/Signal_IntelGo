@@ -220,11 +220,19 @@ the desk.
 
 ![Desktop command centre](docs/screenshots/desktop-command-center.png)
 
-The tabs are the app's own four. **MAP** is the globe: the same Natural Earth outline, the same
-20 degree tilt and altitude lift, and the same layers - satellites propagated locally from
-CelesTrak element sets, aircraft from api.adsb.lol's 30 mile ring, and the Wi-Fi and BLE the
-desk's own boards hear, drawn at the fix the board reported. **BOARD** is the console, **LOG** is
-what the session caught, and **SETUP** holds the observer, the feeds and the satellite groups.
+The tabs are the app's own four, with the app's own glyphs. **MAP** is the globe turning under its
+own momentum (`SPIN OFF` / `1X` / `3X`, the phone's 4.5 degrees per second per step) and, zoomed
+past the hand-off, OpenStreetMap street tiles: the ball's radius is derived from the same zoom as
+the map's scale and the two meet where they agree on pixels per degree, so the curl into a plane
+has nothing to jump. Layers are satellites propagated locally from CelesTrak element sets,
+aircraft from api.adsb.lol's 30 mile ring, the Wi-Fi and BLE the desk's own boards hear at the fix
+the board reported, mesh nodes from the same Meshtastic and MeshCore MQTT brokers the app reads,
+and BLE Remote ID drones decoded by the app's own parser. **BOARD** is the console, **LOG** is what
+the session caught, and **SETUP** holds the observer, the feeds and the satellite groups.
+
+**INTEL** is a dropdown at the top of the sensor rail rather than a panel over the map: a header
+line that opens over the boards, so switching a layer never covers the map being read. Each row
+carries the app's two numbers - drawn now, and written into the session - and its own glyph.
 
 ```bash
 ./gradlew :desktop:run          # the window
@@ -234,6 +242,7 @@ what the session caught, and **SETUP** holds the observer, the feeds and the sat
 
 | Panel | What it does |
 | --- | --- |
+| **INTEL** | the layer switches, opened from the header over the rail: `SAT`, `AIR`, `UAV`, `MESH`, `ESP`, `WIFI`, `BLE`, live and logged counts, the feed's own status line, and the globe spin |
 | **SENSORS** | every serial port on the machine; `LINK` opens one at 115200 and keeps it open, so a board that re-enumerates does not lose its banner. The chip, firmware and family are read from the console text only, so a C3 and a C5 are never confused |
 | **SCAN** | the board's assignment, as the same plan strings the app writes (`WI-FI 2.4`, `WI-FI 2.4+5`, `BLE`, `WI-FI 2.4+5 + BLE`); 5 GHz is offered only when the banner named a C5 |
 | **CONSOLE** | the live transcript, a verb box and the firmware's own quick verbs (`help`, `status`, `scanap`, `blescan`, `gps`, `reboot`) |

@@ -1,0 +1,609 @@
+package dev.skyward.rf.desktop.ui
+
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import dev.skyward.rf.core.AircraftView
+import dev.skyward.rf.core.DroneView
+import dev.skyward.rf.core.Geo
+import dev.skyward.rf.core.MeshNode
+import dev.skyward.rf.core.LatLon
+import dev.skyward.rf.core.SatView
+import dev.skyward.rf.core.SignalScale
+import dev.skyward.rf.desktop.hardware.BoardState
+import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.ln
+import kotlin.math.min
+import kotlin.math.roundToInt
+import kotlin.math.sin
+import kotlin.math.sqrt
+
+/** Which layers are drawn. The INTEL rows switch them, exactly as the app's table does. */
+data class GlobeLayers(
+    val sats: Boolean = true,
+    val aircraft: Boolean = true,
+    val boards: Boolean = true,
+    val wifi: Boolean = true,
+    val ble: Boolean = true,
+    /** The mesh feeds cost a broker connection, so they are off until asked for. */
+    val mesh: Boolean = false,
+    /** BLE Remote ID costs a scanner process on this machine; also off by default. */
+    val drones: Boolean = false,
+)
+
+object WorldLand {
+
+    private var rings: Array<FloatArray> = emptyArray()
+
+    /**
+     * Natural Earth 110m land, the same asset the phone bundles.
+     *
+     * On the phone it is an Android asset; here it is a classpath resource, so the desk ships
+     * the identical world outline instead of a second, differently simplified one.
+     */
+    fun rings(): Array<FloatArray> {
+        if (rings.isNotEmpty()) return rings
+        rings = runCatching {
+            val stream = WorldLand::class.java.getResourceAsStream("/world_land.txt") ?: return emptyArray()
+            stream.bufferedReader().useLines { lines ->
+                val out = ArrayList<FloatArray>(160)
+                var first = true
+                for (raw in lines) {
+                    if (first) { first = false; continue }
+                    val parts = raw.trim().split(' ')
+                    if (parts.size < 6 || parts.size % 2 != 0) continue
+                    val arr = FloatArray(parts.size)
+                    var ok = true
+                    for (i in parts.indices) {
+                        val v = parts[i].toFloatOrNull()
+                        if (v == null) { ok = false; break }
+                        arr[i] = v / 100f
+                    }
+                    if (ok) out.add(arr)
+                }
+                out.toTypedArray()
+            }
+        }.getOrDefault(emptyArray())
+        return rings
+    }
+}
+
+/**
+ * The map: a globe at world zoom, a street map when you zoom in.
+ *
+ * It is one camera and one set of markers. The ball's radius is derived from the same zoom as
+ * the map's scale and the two meet at [MapMath.HANDOFF], so the projection can be blended on
+ * every point without anything jumping: the sphere and the plane agree on pixels per degree at
+ * the centre of the screen, and only the curvature dissolves.
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+fun MapView(
+    modifier: Modifier,
+    sats: List<SatView>,
+    aircraft: List<AircraftView>,
+    mesh: List<MeshNode>,
+    drones: List<DroneView>,
+    boards: List<BoardState>,
+    observer: LatLon?,
+    layers: GlobeLayers,
+    onLayer: (String, Boolean) -> Unit,
+    spin: Int,
+    onSpin: () -> Unit,
+) {
+    var camLat by remember { mutableStateOf(20.0) }
+    var camLon by remember { mutableStateOf(0.0) }
+    // 4.0 puts the ball at a comfortable size: the hand-off is 5.5, where it fills the viewport.
+    var zoom by remember { mutableStateOf(4.0) }
+    val rings = remember { WorldLand.rings() }
+    val scope = rememberCoroutineScope()
+    val tiles = remember { TileStore(scope) }
+    val generation = tiles.generation
+
+    // A spinning ball cannot also be pinned to a fix, and a drag is the operator taking hold of
+    // it: both stop the spin for as long as they last, as the phone's camera does.
+    var dragging by remember { mutableStateOf(false) }
+    val globeMode = MapMath.globeBlend(zoom) > 0.5f
+    LaunchedEffect(spin, globeMode) {
+        if (spin <= 0 || !globeMode) return@LaunchedEffect
+        // Same rate as the phone: 1x and 3x of one base turn, so the two speeds read as slow and
+        // fast on a sphere rather than as four settings that are nearly the same.
+        val degreesPerSecond = 4.5 * spin
+        var last = 0L
+        while (true) {
+            withFrameNanos { now ->
+                if (last != 0L && !dragging) {
+                    val dt = ((now - last) / 1_000_000_000.0).coerceIn(0.0, 0.1)
+                    camLon = wrapLon(camLon + degreesPerSecond * dt)
+                }
+                last = now
+            }
+        }
+    }
+
+    // The first real fix puts the map where the board is, once. After that the camera belongs
+    // to the operator: a map that recentres itself on every fix cannot be panned.
+    var centred by remember { mutableStateOf(false) }
+    LaunchedEffect(observer?.lat, observer?.lon) {
+        val where = observer
+        if (!centred && where != null) {
+            camLat = where.lat
+            camLon = where.lon
+            centred = true
+        }
+    }
+
+    Box(modifier.background(Color(0xFF070C12))) {
+        Canvas(
+            Modifier
+                .fillMaxSize()
+                // Compose does not clip a canvas to its bounds, and a tile at a negative offset
+                // was being drawn over the sensors rail and the title bar.
+                .clipToBounds()
+                .pointerInput(Unit) {
+                    // One loop for both gestures, because they must never be confused: with
+                    // detectDragGestures a wheel notch zoomed the map *and* dragged it, since a
+                    // scroll can open a drag on the desktop. Scroll only zooms here, and a drag
+                    // needs the primary button actually held.
+                    awaitPointerEventScope {
+                        // A drag is anchored to real press and release events. The wheel on this
+                        // platform arrives as Move changes that claim to be pressed, which is how
+                        // zooming the map kept dragging it across the world.
+                        var pressedAt = 0L
+                        var last = Offset.Zero
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            when (event.type) {
+                                PointerEventType.Press -> {
+                                    dragging = true
+                                    pressedAt = System.nanoTime()
+                                    last = event.changes.firstOrNull()?.position ?: Offset.Zero
+                                }
+
+                                PointerEventType.Release -> dragging = false
+
+                                PointerEventType.Scroll -> {
+                                    val delta = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
+                                    // Wheel-up arrives as a negative delta in Compose on Windows,
+                                    // so subtracting it means "wheel up zooms in", as on the phone.
+                                    if (delta != 0f) {
+                                        zoom = (zoom - delta * 0.5).coerceIn(MapMath.MIN_ZOOM, MapMath.MAX_ZOOM)
+                                    }
+                                }
+
+                                PointerEventType.Move -> {
+                                    val change = event.changes.firstOrNull() ?: continue
+                                    val drag = change.position - last
+                                    last = change.position
+                                    // Windows reports a wheel notch as a press plus one large jump,
+                                    // which panned the world while zooming it. A hand dragging the
+                                    // map holds the button for longer than a frame and moves in
+                                    // small steps, so both of those are required here.
+                                    val heldMs = (System.nanoTime() - pressedAt) / 1_000_000L
+                                    if (!dragging || heldMs < 120L) continue
+                                    if (abs(drag.x) > 40f || abs(drag.y) > 40f) continue
+                                    if (drag.x == 0f && drag.y == 0f) continue
+                                    change.consume()
+                                    if (MapMath.globeBlend(zoom) > 0.5f) {
+                                        // On the ball a drag turns it; the rate slows as you zoom
+                                        // in, so the surface moves with the cursor.
+                                        val rate = 0.22 * (4.0 / zoom)
+                                        camLon = wrapLon(camLon - drag.x * rate)
+                                        camLat = (camLat + drag.y * rate).coerceIn(-80.0, 80.0)
+                                    } else {
+                                        val world = MapMath.worldSize(zoom)
+                                        camLon = wrapLon(camLon - drag.x / world * 360.0)
+                                        camLat = Geo.normToLat((Geo.latToNorm(camLat) - drag.y / world).coerceIn(0.0, 1.0))
+                                    }
+                                }
+
+                                else -> Unit
+                            }
+                        }
+                    }
+                },
+        ) {
+            // Reading the tile counter here is what redraws the frame in which a new tile lands.
+            drawMap(
+                rings = rings,
+                tiles = tiles,
+                generation = generation,
+                camLat = camLat,
+                camLon = camLon,
+                zoom = zoom,
+                sats = if (layers.sats) sats else emptyList(),
+                aircraft = if (layers.aircraft) aircraft else emptyList(),
+                mesh = if (layers.mesh) mesh else emptyList(),
+                drones = if (layers.drones) drones else emptyList(),
+                boards = boards,
+                observer = observer,
+                layers = layers,
+            )
+        }
+
+        Text(
+            "© OpenStreetMap contributors",
+            color = Desk.dim.copy(alpha = 0.8f),
+            fontSize = 9.sp,
+            fontFamily = Desk.mono,
+            modifier = Modifier.align(Alignment.BottomStart).padding(14.dp),
+        )
+
+        Row(
+            Modifier.align(Alignment.BottomEnd).padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                (if (MapMath.globeBlend(zoom) > 0.5f) "GLOBE" else "MAP") +
+                    " ${String.format("%.1f", zoom)} · ${String.format("%.3f, %.3f", camLat, camLon)}",
+                color = Desk.dim,
+                fontSize = 10.sp,
+                fontFamily = Desk.mono,
+            )
+            Spacer(Modifier.width(8.dp))
+            MapButton(if (spin > 0) "SPIN ${if (spin == 2) "3X" else "1X"}" else "SPIN") { onSpin() }
+            Spacer(Modifier.width(6.dp))
+            MapButton("−") { zoom = (zoom - 1.0).coerceIn(MapMath.MIN_ZOOM, MapMath.MAX_ZOOM) }
+            Spacer(Modifier.width(6.dp))
+            MapButton("+") { zoom = (zoom + 1.0).coerceIn(MapMath.MIN_ZOOM, MapMath.MAX_ZOOM) }
+            Spacer(Modifier.width(6.dp))
+            MapButton("◎") {
+                zoom = 4.0
+                camLat = 20.0
+                camLon = 0.0
+            }
+        }
+    }
+}
+
+@Composable
+private fun MapButton(label: String, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .background(Desk.panel.copy(alpha = 0.92f), RoundedCornerShape(6.dp))
+            .border(1.dp, Desk.line, RoundedCornerShape(6.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    ) {
+        Text(label, color = Desk.text, fontSize = 12.sp, fontFamily = Desk.mono)
+    }
+}
+
+
+private fun wrapLon(lon: Double): Double = ((lon + 180.0) % 360.0 + 360.0) % 360.0 - 180.0
+
+private fun DrawScope.drawMap(
+    rings: Array<FloatArray>,
+    tiles: TileStore,
+    generation: Int,
+    camLat: Double,
+    camLon: Double,
+    zoom: Double,
+    sats: List<SatView>,
+    aircraft: List<AircraftView>,
+    mesh: List<MeshNode>,
+    drones: List<DroneView>,
+    boards: List<BoardState>,
+    observer: LatLon?,
+    layers: GlobeLayers,
+) {
+    @Suppress("UNUSED_EXPRESSION")
+    generation
+
+    val t = MapMath.globeBlend(zoom)
+    val width = size.width
+    val height = size.height
+    // The ball and the plane are two views of one zoom: the ball's radius follows it, and the
+    // map runs at the zoom whose scale matches the ball's surface at the hand-off.
+    val minSide = min(width, height)
+    val ball = MapMath.globeRadius(zoom, minSide)
+    val flatZoom = MapMath.mapZoom(zoom, minSide)
+    val world = MapMath.worldSize(flatZoom)
+    val camNx = Geo.lonToNorm(camLon)
+    val camNy = Geo.latToNorm(camLat)
+
+    drawRect(if (t > 0.5f) Color(0xFF04090F) else Color(0xFF0B1219))
+
+    // ---- the flat map: OSM tiles, faded in as the ball turns into a plane ----
+    if (t < 0.999f) {
+        val view = MapMath.tileView(flatZoom, camNx, camNy, width, height)
+        val sizePx = view.size.roundToInt().coerceAtLeast(1)
+        val alpha = 1f - t
+        for (ty in view.minY..view.maxY) {
+            for (tx in view.minX..view.maxX) {
+                val image = tiles.image(view.z, tx, ty) ?: continue
+                drawImage(
+                    image = image,
+                    dstOffset = IntOffset(
+                        (view.originX + tx * view.size).roundToInt(),
+                        (view.originY + ty * view.size).roundToInt(),
+                    ),
+                    dstSize = IntSize(sizePx, sizePx),
+                    alpha = alpha,
+                )
+            }
+        }
+        // A grid where tiles have not arrived yet, so an empty map reads as "not downloaded
+        // yet" rather than "nothing there".
+        if (alpha > 0.3f) {
+            val grid = Path()
+            var gx = view.originX
+            while (gx < width) { grid.moveTo(gx, 0f); grid.lineTo(gx, height); gx += view.size }
+            var gy = view.originY
+            while (gy < height) { grid.moveTo(0f, gy); grid.lineTo(width, gy); gy += view.size }
+            drawPath(grid, Color(0xFF16212C).copy(alpha = 0.5f * alpha), style = Stroke(1f))
+        }
+    }
+
+    if (t > 0.02f) {
+        drawGlobeSphere(rings, camLat, camLon, width, height, ball, t)
+    }
+
+    // ---- one projection for every marker, blended by the same t ----
+    val sinLat0 = sin(Math.toRadians(camLat))
+    val cosLat0 = cos(Math.toRadians(camLat))
+    val lon0 = Math.toRadians(camLon)
+    val tilt = Math.toRadians(20.0)
+    val cosTilt = cos(tilt)
+    val sinTilt = sin(tilt)
+    val radius = ball
+    val center = Offset(width * 0.5f, height * 0.5f)
+    val pt = FloatArray(3)
+
+    fun place(lat: Double, lon: Double, lift: Double): Boolean {
+        val la = Math.toRadians(lat.coerceIn(-89.9, 89.9))
+        val dLon = Math.toRadians(lon) - lon0
+        val cosLat = cos(la)
+        val cosc = sinLat0 * sin(la) + cosLat0 * cosLat * cos(dLon)
+        val x3 = cosLat * sin(dLon)
+        val y3 = cosLat0 * sin(la) - sinLat0 * cosLat * cos(dLon)
+        val front = (y3 * sinTilt + cosc * cosTilt)
+        val k = radius * (1.0 + lift)
+        val gx = (center.x + k * x3).toFloat()
+        val gy = (center.y - k * (y3 * cosTilt - cosc * sinTilt)).toFloat()
+        val fx = (width / 2.0 + (Geo.lonToNorm(lon) - camNx) * world).toFloat()
+        val fy = (height / 2.0 + (Geo.latToNorm(lat.coerceIn(-85.0, 85.0)) - camNy) * world).toFloat()
+        pt[0] = fx + (gx - fx) * t
+        pt[1] = fy + (gy - fy) * t
+        pt[2] = if (t <= 0.02f) 1f else (1f - (1f - front.coerceIn(0.0, 1.0).toFloat()) * t)
+        return pt[2] > 0.02f
+    }
+
+    // ---- observer ----
+    if (layers.boards && observer != null && place(observer.lat, observer.lon, 0.0)) {
+        drawCircle(Desk.accent, radius = 3.5.dp.toPx(), center = Offset(pt[0], pt[1]))
+        drawCircle(Desk.accent.copy(alpha = 0.35f), radius = 9.dp.toPx(), center = Offset(pt[0], pt[1]), style = Stroke(1.dp.toPx()))
+    }
+
+    // ---- the Wi-Fi and BLE the boards hear, fanned around the fix that heard them ----
+    if ((layers.wifi || layers.ble) && observer != null) {
+        val spots = ArrayList<Int>()
+        if (layers.wifi) boards.forEach { b -> b.sweep.aps.forEach { spots.add(it.rssi) } }
+        if (layers.ble) boards.forEach { b -> b.sweep.devices.forEach { spots.add(it.rssi) } }
+        if (place(observer.lat, observer.lon, 0.0)) {
+            val baseX = pt[0]
+            val baseY = pt[1]
+            spots.take(160).forEachIndexed { index, rssi ->
+                val angle = index * 2.399963
+                val r = 4.0 + (index % 7) * 1.6
+                val x = baseX + (cos(angle) * r).toFloat()
+                val y = baseY + (sin(angle) * r).toFloat()
+                drawCircle(Color(SignalScale.colorOfDbm(rssi)), radius = 1.6.dp.toPx(), center = Offset(x, y))
+            }
+        }
+    }
+
+    // ---- mesh nodes: one square per node, coloured by the link the way the phone colours it ----
+    mesh.forEach { node ->
+        val lat = node.lat ?: return@forEach
+        val lon = node.lon ?: return@forEach
+        if (!place(lat, lon, 0.0)) return@forEach
+        val at = Offset(pt[0], pt[1])
+        val color = Color(SignalScale.colorOfScore(node.score))
+        drawRect(color, topLeft = Offset(at.x - 2.5f, at.y - 2.5f), size = Size(5f, 5f))
+        // A relayed node is drawn open: it is on the mesh, but not on the air this desk can hear.
+        if (node.hops > 0) {
+            drawCircle(color.copy(alpha = 0.45f), radius = 5.5.dp.toPx(), center = at, style = Stroke(1f))
+        }
+    }
+
+    // ---- drones: a triangle along its track, plus the operator it is broadcasting ----
+    drones.forEach { drone ->
+        val lat = drone.lat ?: return@forEach
+        val lon = drone.lon ?: return@forEach
+        if (!place(lat, lon, 0.0)) return@forEach
+        val at = Offset(pt[0], pt[1])
+        val heading = Math.toRadians(drone.headingDeg ?: 0.0)
+        val nose = 6.5.dp.toPx()
+        val wing = 4.0.dp.toPx()
+        val tri = Path().apply {
+            moveTo(at.x + cos(heading).toFloat() * nose, at.y + sin(heading).toFloat() * nose)
+            lineTo(at.x + cos(heading + 2.5).toFloat() * wing, at.y + sin(heading + 2.5).toFloat() * wing)
+            lineTo(at.x + cos(heading - 2.5).toFloat() * wing, at.y + sin(heading - 2.5).toFloat() * wing)
+            close()
+        }
+        drawPath(tri, Desk.warn)
+    }
+
+    // ---- aircraft ----
+    aircraft.forEach { plane ->
+        val lift = (ln(1.0 + ((plane.altFt ?: 0) * 0.3048) / 500.0) * 0.022).coerceIn(0.0, 0.30)
+        if (!place(plane.lat, plane.lon, lift)) return@forEach
+        val at = Offset(pt[0], pt[1])
+        if (t > 0.5f && place(plane.lat, plane.lon, 0.0)) {
+            drawLine(Desk.text.copy(alpha = 0.18f), Offset(pt[0], pt[1]), at, 1f)
+        }
+        drawCircle(Desk.text, radius = 1.8.dp.toPx(), center = at)
+        val heading = Math.toRadians(plane.trackDeg)
+        drawLine(
+            Desk.text.copy(alpha = 0.8f),
+            at,
+            Offset(at.x + (cos(heading) * 6).toFloat(), at.y + (sin(heading) * 6).toFloat()),
+            strokeWidth = 1.2.dp.toPx(),
+        )
+    }
+
+    // ---- satellites, lifted by their altitude on the ball and flat on the map ----
+    sats.forEach { sat ->
+        val lift = (ln(1.0 + sat.altKm * 1000.0 / 500.0) * 0.022).coerceIn(0.0, 0.30)
+        if (!place(sat.lat, sat.lon, lift)) return@forEach
+        val at = Offset(pt[0], pt[1])
+        if (t > 0.5f && place(sat.lat, sat.lon, 0.0)) {
+            drawLine(Desk.cyan.copy(alpha = 0.20f), Offset(pt[0], pt[1]), at, 1f)
+        }
+        drawCircle(Desk.cyan, radius = 1.7.dp.toPx(), center = at)
+    }
+}
+
+/** The sphere only: ocean, graticule, continents, rim. Markers are drawn by the caller. */
+private fun DrawScope.drawGlobeSphere(
+    rings: Array<FloatArray>,
+    camLat: Double,
+    camLon: Double,
+    width: Float,
+    height: Float,
+    radius: Float,
+    alpha: Float,
+) {
+    val center = Offset(width * 0.5f, height * 0.5f)
+    val tilt = Math.toRadians(20.0)
+    val sinLat0 = sin(Math.toRadians(camLat))
+    val cosLat0 = cos(Math.toRadians(camLat))
+    val lon0 = Math.toRadians(camLon)
+    val cosTilt = cos(tilt)
+    val sinTilt = sin(tilt)
+    val pt = FloatArray(3)
+
+    drawCircle(Color(0xFF0A1826), radius = radius, center = center, alpha = alpha)
+
+    val disc = Path().apply { addOval(Rect(center.x - radius, center.y - radius, center.x + radius, center.y + radius)) }
+
+    clipPath(disc) {
+        val grid = Path()
+        fun line(latA: Double, lonA: Double, latB: Double, lonB: Double, steps: Int) {
+            var open = false
+            for (step in 0..steps) {
+                val f = step.toDouble() / steps
+                val lat = latA + (latB - latA) * f
+                val lon = lonA + (lonB - lonA) * f
+                val la = Math.toRadians(lat.coerceIn(-89.9, 89.9))
+                val dLon = Math.toRadians(lon) - lon0
+                val cosLat = cos(la)
+                val cosc = sinLat0 * sin(la) + cosLat0 * cosLat * cos(dLon)
+                val y3 = cosLat0 * sin(la) - sinLat0 * cosLat * cos(dLon)
+                pt[2] = (y3 * sinTilt + cosc * cosTilt).toFloat()
+                pt[0] = (center.x + radius * (cosLat * sin(dLon))).toFloat()
+                pt[1] = (center.y - radius * (y3 * cosTilt - cosc * sinTilt)).toFloat()
+                if (pt[2] > 0.02f) {
+                    if (open) grid.lineTo(pt[0], pt[1]) else { grid.moveTo(pt[0], pt[1]); open = true }
+                } else {
+                    open = false
+                }
+            }
+        }
+        var meridian = -180.0
+        while (meridian <= 180.0) { line(-84.0, meridian, 84.0, meridian, 56); meridian += 30.0 }
+        var parallel = -60.0
+        while (parallel <= 60.0) { line(parallel, -180.0, parallel, 180.0, 96); parallel += 30.0 }
+        drawPath(grid, Color(0xFF1E3548).copy(alpha = alpha), style = Stroke(width = 0.7.dp.toPx()))
+
+        val land = Path()
+        val coast = Path()
+        val outside = radius * 1.02f
+        for (ring in rings) {
+            val n = ring.size / 2
+            if (n < 3) continue
+            val xs = FloatArray(n)
+            val ys = FloatArray(n)
+            val front = BooleanArray(n)
+            var frontCount = 0
+            for (k in 0 until n) {
+                val la = Math.toRadians(ring[2 * k + 1].toDouble())
+                val dLon = Math.toRadians(ring[2 * k].toDouble()) - lon0
+                val cosLat = cos(la)
+                val cosc = sinLat0 * sin(la) + cosLat0 * cosLat * cos(dLon)
+                val y3 = cosLat0 * sin(la) - sinLat0 * cosLat * cos(dLon)
+                pt[2] = (y3 * sinTilt + cosc * cosTilt).toFloat()
+                pt[0] = (center.x + radius * (cosLat * sin(dLon))).toFloat()
+                pt[1] = (center.y - radius * (y3 * cosTilt - cosc * sinTilt)).toFloat()
+                val dx = pt[0] - center.x
+                val dy = pt[1] - center.y
+                val len = sqrt(dx * dx + dy * dy)
+                val near = pt[2] > 0.02f
+                front[k] = near
+                if (near) {
+                    xs[k] = pt[0]; ys[k] = pt[1]; frontCount++
+                } else {
+                    // Behind the ball: pushed outside the clip so a closing edge never crosses
+                    // the visible hemisphere and fills the complement with land-coloured water.
+                    val a = if (len > 0.001f) atan2(dy.toDouble(), dx.toDouble()) else 0.0
+                    xs[k] = center.x + outside * cos(a).toFloat()
+                    ys[k] = center.y + outside * sin(a).toFloat()
+                }
+            }
+            if (frontCount == 0) continue
+            land.reset()
+            land.moveTo(xs[0], ys[0])
+            for (k in 1 until n) land.lineTo(xs[k], ys[k])
+            land.close()
+            drawPath(land, Color(0xFF2C4C68), alpha = alpha)
+
+            var pen = false
+            for (k in 0 until n) {
+                val m = (k + 1) % n
+                if (front[k] && front[m]) {
+                    if (!pen) { coast.moveTo(xs[k], ys[k]); pen = true }
+                    coast.lineTo(xs[m], ys[m])
+                } else {
+                    pen = false
+                }
+            }
+        }
+        drawPath(coast, Color(0xFF86BCDF).copy(alpha = 0.8f * alpha), style = Stroke(width = 0.8.dp.toPx()))
+    }
+
+    drawCircle(Desk.cyan.copy(alpha = 0.22f * alpha), radius = radius, center = center, style = Stroke(1.4.dp.toPx()))
+    drawCircle(Color(0xFF5AC8FF).copy(alpha = 0.10f * alpha), radius = radius * 1.01f, center = center, style = Stroke(3.dp.toPx()))
+}

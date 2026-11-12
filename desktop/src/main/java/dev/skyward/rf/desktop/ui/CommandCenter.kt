@@ -89,6 +89,17 @@ fun CommandCenter(host: SensorHost, recorder: SessionRecorder, sky: DeskSky) {
     var tab by remember { mutableStateOf(DeskTab.MAP) }
     var selected by remember { mutableStateOf<String?>(null) }
     var layers by remember { mutableStateOf(GlobeLayers()) }
+    // Spin starts at the phone's 1X: a desk that is watching a globe wants it to be alive, and
+    // a stationary ball is indistinguishable from a frozen app.
+    var spin by remember { mutableStateOf(1) }
+    // The second number in each INTEL row: what has been written into this session so far.
+    val loggedCounts = remember(recorder.count) {
+        val rows = recorder.rows()
+        mapOf(
+            "WIFI" to rows.count { it.kind == SessionRecorder.WIFI },
+            "BLE" to rows.count { it.kind == SessionRecorder.BLE },
+        )
+    }
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
     var sessionName by remember { mutableStateOf("desk") }
     var startedAt by remember { mutableStateOf<Long?>(null) }
@@ -140,6 +151,9 @@ fun CommandCenter(host: SensorHost, recorder: SessionRecorder, sky: DeskSky) {
                 onSelect = { selected = it },
                 skyState = skyState,
                 layers = layers,
+                spin = spin,
+                onSpin = { spin = (spin + 1) % 3 },
+                logged = loggedCounts,
                 onLayer = { key, on ->
                     layers = when (key) {
                         "sat" -> layers.copy(sats = on)
@@ -147,12 +161,17 @@ fun CommandCenter(host: SensorHost, recorder: SessionRecorder, sky: DeskSky) {
                         "boards" -> layers.copy(boards = on)
                         "wifi" -> layers.copy(wifi = on)
                         "ble" -> layers.copy(ble = on)
+                        "mesh" -> layers.copy(mesh = on)
+                        "uav" -> layers.copy(drones = on)
                         else -> layers
                     }
                     // The feeds stop being fetched as well as drawn: a layer that is off should
-                    // not keep spending the community feed's allowance.
+                    // not keep spending the community feed's allowance, and the mesh brokers and
+                    // the BLE scanner should not be left running behind a hidden layer either.
                     if (key == "sat") sky.setLayer("sat", on)
                     if (key == "air") sky.setLayer("air", on)
+                    if (key == "mesh") sky.setLayer("mesh", on)
+                    if (key == "uav") sky.setLayer("uav", on)
                 },
                 active = active,
             )
@@ -249,14 +268,27 @@ private fun TabButton(tab: DeskTab, on: Boolean, onClick: () -> Unit) {
             .clickable { onClick() }
             .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
-        Text(
-            tab.label,
-            color = if (on) Desk.accent else Desk.dim,
-            fontSize = 11.sp,
-            letterSpacing = 1.sp,
-            fontFamily = Desk.mono,
-            fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            LayerIcon(
+                when (tab.label) {
+                    "MAP" -> Glyph.MAP
+                    "BOARD" -> Glyph.BOARD
+                    "LOG" -> Glyph.LOG
+                    else -> Glyph.SETUP
+                },
+                if (on) Desk.accent else Desk.dim,
+                12.dp,
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                tab.label,
+                color = if (on) Desk.accent else Desk.dim,
+                fontSize = 11.sp,
+                letterSpacing = 1.sp,
+                fontFamily = Desk.mono,
+                fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
+            )
+        }
     }
 }
 
@@ -274,27 +306,62 @@ private fun MapPane(
     layers: GlobeLayers,
     onLayer: (String, Boolean) -> Unit,
     active: BoardState?,
+    spin: Int,
+    onSpin: () -> Unit,
+    logged: Map<String, Int>,
 ) {
     Row(modifier.fillMaxWidth()) {
-        SensorsRail(
-            modifier = Modifier.width(280.dp).fillMaxHeight(),
-            ports = ports,
-            boards = boards,
-            activePath = activePath,
-            onSelect = onSelect,
-            host = host,
-        )
+        // The rail and the layer panel share one column: the panel is a header that opens over
+        // the sensors, so switching a layer never covers the map being read.
+        var intelOpen by remember { mutableStateOf(false) }
+        Box(Modifier.width(280.dp).fillMaxHeight()) {
+            SensorsRail(
+                modifier = Modifier.fillMaxSize(),
+                ports = ports,
+                boards = boards,
+                activePath = activePath,
+                onSelect = onSelect,
+                host = host,
+            )
+            IntelDropdown(
+                modifier = Modifier.align(Alignment.TopStart).padding(10.dp),
+                open = intelOpen,
+                onOpen = { intelOpen = it },
+                layers = layers,
+                onLayer = onLayer,
+                counts = mapOf(
+                    "SAT" to skyState.sats.size,
+                    "AIR" to skyState.aircraft.size,
+                    "UAV" to skyState.drones.size,
+                    "MESH" to skyState.mesh.size,
+                    "ESP" to boards.count { it.connected },
+                    "WIFI" to boards.sumOf { it.aps },
+                    "BLE" to boards.sumOf { it.bles },
+                ),
+                logged = logged,
+                notes = mapOf(
+                    "sat" to skyState.satNote,
+                    "air" to skyState.airNote,
+                    "mesh" to skyState.meshNote,
+                    "uav" to skyState.droneNote,
+                ),
+                spin = spin,
+                onSpin = onSpin,
+            )
+        }
         VerticalHairline()
-        GlobeView(
+        MapView(
             modifier = Modifier.weight(1f).fillMaxHeight(),
             sats = skyState.sats,
             aircraft = skyState.aircraft,
+            mesh = skyState.mesh,
+            drones = skyState.drones,
             boards = boards.filter { it.connected },
             observer = skyState.observer,
             layers = layers,
             onLayer = onLayer,
-            satNote = skyState.satNote,
-            airNote = skyState.airNote,
+            spin = spin,
+            onSpin = onSpin,
         )
         VerticalHairline()
         Telemetry(modifier = Modifier.width(420.dp).fillMaxHeight(), board = active)
@@ -867,7 +934,15 @@ private fun SetupPane(modifier: Modifier, sky: DeskSky, skyState: DeskSky.State,
         Spacer(Modifier.height(8.dp))
         Text("CelesTrak · ${skyState.satNote}", color = Desk.text, fontSize = 11.sp, fontFamily = Desk.mono)
         Text("api.adsb.lol · ${skyState.airNote} (30 mi ring)", color = Desk.text, fontSize = 11.sp, fontFamily = Desk.mono)
+        Text("Meshtastic + MeshCore · ${skyState.meshNote} · ${skyState.mesh.size} nodes", color = Desk.text, fontSize = 11.sp, fontFamily = Desk.mono)
+        Text("BLE Remote ID · ${skyState.droneNote} · ${skyState.drones.size} broadcasting", color = Desk.text, fontSize = 11.sp, fontFamily = Desk.mono)
         Text("${skyState.sats.size} satellites propagated · ${skyState.aircraft.size} aircraft in the ring", color = Desk.dim, fontSize = 11.sp, fontFamily = Desk.mono)
+        Text(
+            "Mesh and Remote ID are switched on from the INTEL panel on the map, so a feed only " +
+                "runs while its layer is being looked at.",
+            color = Desk.dim,
+            fontSize = 11.sp,
+        )
         Spacer(Modifier.height(8.dp))
         Row {
             Button(

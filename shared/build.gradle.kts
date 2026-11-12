@@ -18,6 +18,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
     // Live satellite positions: TLE fetch over HTTP, propagation with SGP4/SDP4.
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Meshtastic and MeshCore are read from their public MQTT brokers. The source lives here
+    // because it is plain JVM code, so the desk and the phone read one mesh, not two.
+    implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
     implementation("org.orekit:orekit:12.2.1")
     testImplementation("junit:junit:4.13.2")
 }
