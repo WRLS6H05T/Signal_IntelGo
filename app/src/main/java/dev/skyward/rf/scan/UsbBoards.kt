@@ -25,14 +25,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.ReentrantLock
 
 /**
- * Which firmware family a board turned out to be.
- *
- * [SIGNALSENSOR] is this project's own sketch (`firmware/SignalSensor`): the one firmware that
- * answers sweeps in the shapes [Esp32Console] reads without pretending to be somebody else's.
- */
-enum class BoardFamily { MARAUDER, GHOSTESP, BISCUIT, SIGNALSENSOR, ESP32 }
-
-/**
  * Turns a serial console transcript into a board identity.
  *
  * Kept free of Android types so it can be tested on the JVM: the USB code below only gathers

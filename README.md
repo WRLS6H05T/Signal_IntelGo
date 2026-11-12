@@ -211,6 +211,33 @@ Unit tests (orbit math, Remote ID parser, colour scale, exports):
 ./gradlew :app:testDebugUnitTest
 ```
 
+### Command center on the desk
+
+`desktop/` is the same project as a host: a Compose Desktop application for the machine the
+sensor boards are plugged into. It is the main console - the boards are linked here, the sweeps
+are assigned here, the session is recorded here - and the phone is what you carry when you leave
+the desk.
+
+```bash
+./gradlew :desktop:run          # the window
+./gradlew :desktop:test         # identity, band and session-export tests
+./gradlew :desktop:packageMsi   # installer (packageDeb / packageDmg on the others)
+```
+
+| Panel | What it does |
+| --- | --- |
+| **SENSORS** | every serial port on the machine; `LINK` opens one at 115200 and keeps it open, so a board that re-enumerates does not lose its banner. The chip, firmware and family are read from the console text only, so a C3 and a C5 are never confused |
+| **SCAN** | the board's assignment, as the same plan strings the app writes (`WI-FI 2.4`, `WI-FI 2.4+5`, `BLE`, `WI-FI 2.4+5 + BLE`); 5 GHz is offered only when the banner named a C5 |
+| **CONSOLE** | the live transcript, a verb box and the firmware's own quick verbs (`help`, `status`, `scanap`, `blescan`, `gps`, `reboot`) |
+| **TELEMETRY** | every reply parsed by the app's parser: fix, satellites, HDOP, position, altitude, and the AP and BLE tables sorted by signal on the app's red -> green scale. The **5 GHZ** count is the proof the C5's second pass ran: no single-band radio prints a 5 GHz network |
+| **SESSION** | records every sighting with the board it came from and the fix that board had, then exports CSV or JSON through a native save dialog |
+
+What goes down the cable is not chosen by the desk: the verbs come from the same
+`Esp32Console.commandsFor` the handset calls, and the band menu from the same `ScanPlan`. The
+parser, the plan model and the colour scale are the app's own code in `:shared`, not a copy, so a
+network the desk logs is the same network the phone logs with the same fields. The desk never
+flashes a board - that is still `esptool` and `firmware/build.sh`.
+
 ### Permissions
 
 - **Precise location** — GPS fixes, and Android only returns Wi-Fi/BLE scan results with it.

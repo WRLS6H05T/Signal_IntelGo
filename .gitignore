@@ -10,6 +10,7 @@
 local.properties
 app/build/
 shared/build/
+desktop/build/
 # Per-module build logs
 *-build.log
 dist.log
