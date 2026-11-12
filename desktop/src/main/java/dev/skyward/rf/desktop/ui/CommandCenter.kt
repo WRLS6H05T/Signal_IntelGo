@@ -29,11 +29,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.skyward.rf.core.LatLon
 import dev.skyward.rf.core.ScanPlan
 import dev.skyward.rf.core.SignalScale
 import dev.skyward.rf.desktop.hardware.Bands
@@ -56,25 +57,38 @@ import dev.skyward.rf.desktop.hardware.PortInfo
 import dev.skyward.rf.desktop.hardware.SensorHost
 import dev.skyward.rf.desktop.session.SessionRecorder
 import dev.skyward.rf.desktop.session.SessionSummary
+import dev.skyward.rf.desktop.session.Sighting
+import dev.skyward.rf.desktop.sky.DeskSky
 import kotlinx.coroutines.delay
 import java.io.File
+
+/** The app's own four surfaces, on the desk. */
+enum class DeskTab(val label: String) {
+    MAP("MAP"),
+    BOARD("BOARD"),
+    LOG("LOG"),
+    SETUP("SETUP"),
+}
 
 /**
  * The command centre.
  *
- * One screen, because an operator watching a desk does not hunt for tabs: the boards and their
- * band assignments on the left, the console in the middle where the work happens, the numbers
- * the boards are reporting on the right, and the session that records all of it along the
- * bottom. Every colour that is not grey comes from the app's own signal scale, so a strong
- * network is the same green here as it is on the phone's map.
+ * It is the app with the phone's limits removed: the globe is the same orthographic ball with
+ * the same land outline and the same layers, the boards are plugged into this machine, and the
+ * session is recorded here rather than on a handset that has to stay awake. The tabs are the
+ * app's own - Map, Board (its Drive/scan console), Log and Setup - so nothing has to be learned
+ * twice to use either end.
  */
 @Composable
-fun CommandCenter(host: SensorHost, recorder: SessionRecorder) {
+fun CommandCenter(host: SensorHost, recorder: SessionRecorder, sky: DeskSky) {
     val boards by host.boards.collectAsState()
     val ports by host.ports.collectAsState()
     val console by host.console.collectAsState()
+    val skyState by sky.state.collectAsState()
 
+    var tab by remember { mutableStateOf(DeskTab.MAP) }
     var selected by remember { mutableStateOf<String?>(null) }
+    var layers by remember { mutableStateOf(GlobeLayers()) }
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
     var sessionName by remember { mutableStateOf("desk") }
     var startedAt by remember { mutableStateOf<Long?>(null) }
@@ -96,29 +110,75 @@ fun CommandCenter(host: SensorHost, recorder: SessionRecorder) {
         ?: ordered.firstOrNull { it.connected }
         ?: ordered.firstOrNull()
 
+    // A board's own fix is the observer until somebody types one in Setup: the desk has no GPS
+    // of its own, and borrowing the phone's position would be inventing one.
+    LaunchedEffect(active?.reading?.lat, active?.reading?.lon) {
+        val lat = active?.reading?.lat
+        val lon = active?.reading?.lon
+        if (lat != null && lon != null && sky.state.value.observer == null) sky.setObserver(LatLon(lat, lon))
+    }
+
     Column(Modifier.fillMaxSize().background(Desk.bg)) {
-        TopBar(ordered.size, ordered.count { it.connected }, active, startedAt, now, rows)
+        TopBar(
+            ports = ports.size,
+            connected = ordered.count { it.connected },
+            board = active,
+            tab = tab,
+            onTab = { tab = it },
+            since = startedAt,
+            now = now,
+            rows = rows,
+        )
         Hairline()
-        Row(Modifier.weight(1f).fillMaxWidth()) {
-            SensorsRail(
-                modifier = Modifier.width(310.dp).fillMaxHeight(),
+        when (tab) {
+            DeskTab.MAP -> MapPane(
+                modifier = Modifier.weight(1f),
+                host = host,
                 ports = ports,
                 boards = ordered,
                 activePath = active?.path,
                 onSelect = { selected = it },
-                host = host,
+                skyState = skyState,
+                layers = layers,
+                onLayer = { key, on ->
+                    layers = when (key) {
+                        "sat" -> layers.copy(sats = on)
+                        "air" -> layers.copy(aircraft = on)
+                        "boards" -> layers.copy(boards = on)
+                        "wifi" -> layers.copy(wifi = on)
+                        "ble" -> layers.copy(ble = on)
+                        else -> layers
+                    }
+                    // The feeds stop being fetched as well as drawn: a layer that is off should
+                    // not keep spending the community feed's allowance.
+                    if (key == "sat") sky.setLayer("sat", on)
+                    if (key == "air") sky.setLayer("air", on)
+                },
+                active = active,
             )
-            VerticalHairline()
-            ConsolePane(
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-                board = active,
-                lines = console[active?.path].orEmpty(),
+
+            DeskTab.BOARD -> BoardPane(
+                modifier = Modifier.weight(1f),
                 host = host,
+                ports = ports,
+                boards = ordered,
+                activePath = active?.path,
+                onSelect = { selected = it },
+                active = active,
+                console = console[active?.path].orEmpty(),
             )
-            VerticalHairline()
-            Telemetry(
-                modifier = Modifier.width(480.dp).fillMaxHeight(),
-                board = active,
+
+            DeskTab.LOG -> LogPane(
+                modifier = Modifier.weight(1f),
+                recorder = recorder,
+                boards = ordered,
+            )
+
+            DeskTab.SETUP -> SetupPane(
+                modifier = Modifier.weight(1f),
+                sky = sky,
+                skyState = skyState,
+                boards = ordered,
             )
         }
         Hairline()
@@ -147,7 +207,16 @@ fun CommandCenter(host: SensorHost, recorder: SessionRecorder) {
 // ---------------------------------------------------------------- chrome
 
 @Composable
-private fun TopBar(ports: Int, connected: Int, board: BoardState?, since: Long?, now: Long, rows: Int) {
+private fun TopBar(
+    ports: Int,
+    connected: Int,
+    board: BoardState?,
+    tab: DeskTab,
+    onTab: (DeskTab) -> Unit,
+    since: Long?,
+    now: Long,
+    rows: Int,
+) {
     Row(
         Modifier.fillMaxWidth().height(58.dp).padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -155,14 +224,114 @@ private fun TopBar(ports: Int, connected: Int, board: BoardState?, since: Long?,
         Text("SIGNAL INTELGO", color = Desk.text, fontSize = 15.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
         Spacer(Modifier.width(10.dp))
         Text("COMMAND CENTER", color = Desk.accent, fontSize = 11.sp, letterSpacing = 2.sp, fontFamily = Desk.mono)
+        Spacer(Modifier.width(24.dp))
+        DeskTab.entries.forEach { entry ->
+            TabButton(entry, tab == entry) { onTab(entry) }
+            Spacer(Modifier.width(4.dp))
+        }
         Spacer(Modifier.weight(1f))
         Badge("$connected/$ports BOARDS", if (connected > 0) Desk.accent else Desk.dim)
         Spacer(Modifier.width(8.dp))
-        Badge(board?.chip?.ifBlank { "no board selected" } ?: "no board selected", Desk.violet)
+        Badge(board?.chip?.ifBlank { "no board" } ?: "no board", Desk.violet)
         if (since != null) {
             Spacer(Modifier.width(8.dp))
             Badge("SESSION ${clock(now - since)} · $rows", Desk.warn, filled = true)
         }
+    }
+}
+
+@Composable
+private fun TabButton(tab: DeskTab, on: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .background(if (on) Desk.panelHi else Color.Transparent, RoundedCornerShape(6.dp))
+            .border(1.dp, if (on) Desk.line else Color.Transparent, RoundedCornerShape(6.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    ) {
+        Text(
+            tab.label,
+            color = if (on) Desk.accent else Desk.dim,
+            fontSize = 11.sp,
+            letterSpacing = 1.sp,
+            fontFamily = Desk.mono,
+            fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
+        )
+    }
+}
+
+// ---------------------------------------------------------------- map
+
+@Composable
+private fun MapPane(
+    modifier: Modifier,
+    host: SensorHost,
+    ports: List<PortInfo>,
+    boards: List<BoardState>,
+    activePath: String?,
+    onSelect: (String) -> Unit,
+    skyState: DeskSky.State,
+    layers: GlobeLayers,
+    onLayer: (String, Boolean) -> Unit,
+    active: BoardState?,
+) {
+    Row(modifier.fillMaxWidth()) {
+        SensorsRail(
+            modifier = Modifier.width(280.dp).fillMaxHeight(),
+            ports = ports,
+            boards = boards,
+            activePath = activePath,
+            onSelect = onSelect,
+            host = host,
+        )
+        VerticalHairline()
+        GlobeView(
+            modifier = Modifier.weight(1f).fillMaxHeight(),
+            sats = skyState.sats,
+            aircraft = skyState.aircraft,
+            boards = boards.filter { it.connected },
+            observer = skyState.observer,
+            layers = layers,
+            onLayer = onLayer,
+            satNote = skyState.satNote,
+            airNote = skyState.airNote,
+        )
+        VerticalHairline()
+        Telemetry(modifier = Modifier.width(420.dp).fillMaxHeight(), board = active)
+    }
+}
+
+// ---------------------------------------------------------------- board
+
+@Composable
+private fun BoardPane(
+    modifier: Modifier,
+    host: SensorHost,
+    ports: List<PortInfo>,
+    boards: List<BoardState>,
+    activePath: String?,
+    onSelect: (String) -> Unit,
+    active: BoardState?,
+    console: List<ConsoleLine>,
+) {
+    Row(modifier.fillMaxWidth()) {
+        SensorsRail(
+            modifier = Modifier.width(310.dp).fillMaxHeight(),
+            ports = ports,
+            boards = boards,
+            activePath = activePath,
+            onSelect = onSelect,
+            host = host,
+        )
+        VerticalHairline()
+        ConsolePane(
+            modifier = Modifier.weight(1f).fillMaxHeight(),
+            board = active,
+            lines = console,
+            host = host,
+        )
+        VerticalHairline()
+        Telemetry(modifier = Modifier.width(480.dp).fillMaxHeight(), board = active)
     }
 }
 
@@ -260,19 +429,17 @@ private fun ActiveBoardCard(board: BoardState?, host: SensorHost) {
         Spacer(Modifier.height(6.dp))
         // The menu is the plan model's own: whatever a board's silicon can be given, and nothing
         // it cannot. A C3 is never offered 2.4+5 because its radio is not there to be asked.
-        Column {
-            board.options.forEach { option ->
-                val on = board.plan == option
-                Box(
-                    Modifier.fillMaxWidth()
-                        .padding(bottom = 4.dp)
-                        .background(if (on) Desk.accent.copy(alpha = 0.16f) else Color.Transparent, RoundedCornerShape(6.dp))
-                        .border(1.dp, if (on) Desk.accent.copy(alpha = 0.7f) else Desk.line, RoundedCornerShape(6.dp))
-                        .clickable { host.setPlan(board.path, option) }
-                        .padding(horizontal = 9.dp, vertical = 6.dp),
-                ) {
-                    Text(ScanPlan.label(option), color = if (on) Desk.accent else Desk.dim, fontSize = 11.sp, fontFamily = Desk.mono)
-                }
+        board.options.forEach { option ->
+            val on = board.plan == option
+            Box(
+                Modifier.fillMaxWidth()
+                    .padding(bottom = 4.dp)
+                    .background(if (on) Desk.accent.copy(alpha = 0.16f) else Color.Transparent, RoundedCornerShape(6.dp))
+                    .border(1.dp, if (on) Desk.accent.copy(alpha = 0.7f) else Desk.line, RoundedCornerShape(6.dp))
+                    .clickable { host.setPlan(board.path, option) }
+                    .padding(horizontal = 9.dp, vertical = 6.dp),
+            ) {
+                Text(ScanPlan.label(option), color = if (on) Desk.accent else Desk.dim, fontSize = 11.sp, fontFamily = Desk.mono)
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -288,7 +455,6 @@ private fun ActiveBoardCard(board: BoardState?, host: SensorHost) {
         Spacer(Modifier.height(8.dp))
         Button(
             onClick = {
-                // One sweep now, without waiting for the cycle: the verb is the plan's own.
                 host.send(board.path, if (ScanPlan.hasWifi(board.plan)) "scanap" else "blescan")
             },
             enabled = board.connected,
@@ -521,6 +687,219 @@ private fun RssiBar(rssi: Int) {
 @Composable
 private fun EmptyRow(text: String) {
     Text(text, color = Desk.dim, fontSize = 12.sp)
+}
+
+// ---------------------------------------------------------------- log
+
+@Composable
+private fun LogPane(modifier: Modifier, recorder: SessionRecorder, boards: List<BoardState>) {
+    val rows = remember(recorder.count) { recorder.rows() }
+    val wifi = rows.count { it.kind == SessionRecorder.WIFI }
+    val ble = rows.count { it.kind == SessionRecorder.BLE }
+    val ghz5 = rows.count { it.kind == SessionRecorder.WIFI && it.band == Bands.W5 }
+
+    Column(modifier.padding(18.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SectionLabel("LOG")
+            Spacer(Modifier.weight(1f))
+            Text("${rows.size} rows", color = Desk.dim, fontSize = 11.sp, fontFamily = Desk.mono)
+            Spacer(Modifier.width(10.dp))
+            Badge("$wifi AP", Desk.warn)
+            Spacer(Modifier.width(6.dp))
+            Badge("$ble BLE", Desk.violet)
+            Spacer(Modifier.width(6.dp))
+            Badge("$ghz5 ON 5 GHZ", Desk.accent)
+        }
+        Spacer(Modifier.height(12.dp))
+        if (rows.isEmpty()) {
+            Text(
+                "Nothing recorded yet. START a session, link a board, and every network and advertiser it sweeps is filed here with the board's own fix.",
+                color = Desk.dim,
+                fontSize = 12.sp,
+            )
+            return@Column
+        }
+        Row(Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+            LogCell("TIME", 80.dp, Desk.dim)
+            LogCell("BOARD", 90.dp, Desk.dim)
+            LogCell("KIND", 50.dp, Desk.dim)
+            LogCell("ADDRESS", 150.dp, Desk.dim)
+            LogCell("NAME", 180.dp, Desk.dim)
+            LogCell("RSSI", 60.dp, Desk.dim)
+            LogCell("CH", 40.dp, Desk.dim)
+            LogCell("BAND", 60.dp, Desk.dim)
+        }
+        Hairline()
+        LazyColumn(Modifier.weight(1f)) {
+            items(rows.asReversed().take(500), key = { it.atMillis.toString() + it.address }) { row ->
+                LogRow(row)
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row {
+            Button(
+                onClick = { save("signal-intelgo-session.csv", recorder.csv()) },
+                colors = ButtonDefaults.buttonColors(containerColor = Desk.accent, contentColor = Desk.bg),
+                shape = RoundedCornerShape(6.dp),
+            ) { Text("EXPORT CSV", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+            Spacer(Modifier.width(8.dp))
+            Button(
+                onClick = { save("signal-intelgo-session.json", recorder.json()) },
+                colors = ButtonDefaults.buttonColors(containerColor = Desk.panelHi, contentColor = Desk.text),
+                shape = RoundedCornerShape(6.dp),
+            ) { Text("EXPORT JSON", fontSize = 11.sp) }
+            Spacer(Modifier.width(14.dp))
+            Text(
+                "Boards linked: ${boards.count { it.connected }} · the desk records what it hears, not what it was told",
+                color = Desk.dim,
+                fontSize = 11.sp,
+                fontFamily = Desk.mono,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LogRow(row: Sighting) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        LogCell(clock(row.atMillis % 86_400_000).let { it }, 80.dp, Desk.dim)
+        LogCell(row.board, 90.dp, Desk.dim)
+        LogCell(row.kind, 50.dp, if (row.kind == SessionRecorder.WIFI) Desk.warn else Desk.violet)
+        LogCell(row.address, 150.dp, Desk.text)
+        LogCell(row.name.ifBlank { "—" }, 180.dp, Desk.text)
+        LogCell(row.rssi.toString(), 60.dp, rssiColor(row.rssi))
+        LogCell(if (row.channel > 0) row.channel.toString() else "—", 40.dp, Desk.dim)
+        LogCell(row.band.ifBlank { "—" }, 60.dp, if (row.band == Bands.W5) Desk.accent else Desk.dim)
+    }
+}
+
+@Composable
+private fun LogCell(text: String, width: androidx.compose.ui.unit.Dp, color: Color) {
+    Text(
+        text,
+        color = color,
+        fontSize = 11.sp,
+        fontFamily = Desk.mono,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.width(width),
+    )
+}
+
+// ---------------------------------------------------------------- setup
+
+@Composable
+private fun SetupPane(modifier: Modifier, sky: DeskSky, skyState: DeskSky.State, boards: List<BoardState>) {
+    var latText by remember { mutableStateOf(skyState.observer?.let { String.format("%.5f", it.lat) } ?: "") }
+    var lonText by remember { mutableStateOf(skyState.observer?.let { String.format("%.5f", it.lon) } ?: "") }
+
+    Column(modifier.padding(18.dp)) {
+        SectionLabel("OBSERVER")
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "The globe and the aircraft ring are centred on an observer. A board with a GPS module is the observer when it has a fix; otherwise set one here - the desk has no receiver of its own.",
+            color = Desk.dim,
+            fontSize = 11.sp,
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = latText,
+                onValueChange = { latText = it },
+                singleLine = true,
+                label = { Text("LAT", fontSize = 10.sp) },
+                textStyle = TextStyle(fontFamily = Desk.mono, fontSize = 12.sp, color = Desk.text),
+                modifier = Modifier.width(150.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            OutlinedTextField(
+                value = lonText,
+                onValueChange = { lonText = it },
+                singleLine = true,
+                label = { Text("LON", fontSize = 10.sp) },
+                textStyle = TextStyle(fontFamily = Desk.mono, fontSize = 12.sp, color = Desk.text),
+                modifier = Modifier.width(150.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Button(
+                onClick = {
+                    val lat = latText.trim().toDoubleOrNull()
+                    val lon = lonText.trim().toDoubleOrNull()
+                    if (lat != null && lon != null && lat in -90.0..90.0 && lon in -180.0..180.0) {
+                        sky.setObserver(LatLon(lat, lon))
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Desk.accent, contentColor = Desk.bg),
+                shape = RoundedCornerShape(6.dp),
+            ) { Text("SET", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+            Spacer(Modifier.width(14.dp))
+            Text(
+                skyState.observer?.let { "at ${String.format("%.5f, %.5f", it.lat, it.lon)}" } ?: "no observer",
+                color = Desk.dim,
+                fontSize = 11.sp,
+                fontFamily = Desk.mono,
+            )
+        }
+        Spacer(Modifier.height(20.dp))
+        Hairline()
+        Spacer(Modifier.height(16.dp))
+        SectionLabel("SATELLITE GROUPS")
+        Spacer(Modifier.height(8.dp))
+        Row {
+            listOf("stations", "visual", "weather", "gps-ops", "science", "amateur").forEach { group ->
+                val on = group in skyState.groups
+                Box(
+                    Modifier
+                        .padding(end = 6.dp)
+                        .background(if (on) Desk.cyan.copy(alpha = 0.16f) else Color.Transparent, RoundedCornerShape(6.dp))
+                        .border(1.dp, if (on) Desk.cyan.copy(alpha = 0.6f) else Desk.line, RoundedCornerShape(6.dp))
+                        .clickable { sky.toggleGroup(group) }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                ) {
+                    Text(group, color = if (on) Desk.cyan else Desk.dim, fontSize = 11.sp, fontFamily = Desk.mono)
+                }
+            }
+        }
+        Spacer(Modifier.height(20.dp))
+        Hairline()
+        Spacer(Modifier.height(16.dp))
+        SectionLabel("FEEDS")
+        Spacer(Modifier.height(8.dp))
+        Text("CelesTrak · ${skyState.satNote}", color = Desk.text, fontSize = 11.sp, fontFamily = Desk.mono)
+        Text("api.adsb.lol · ${skyState.airNote} (30 mi ring)", color = Desk.text, fontSize = 11.sp, fontFamily = Desk.mono)
+        Text("${skyState.sats.size} satellites propagated · ${skyState.aircraft.size} aircraft in the ring", color = Desk.dim, fontSize = 11.sp, fontFamily = Desk.mono)
+        Spacer(Modifier.height(8.dp))
+        Row {
+            Button(
+                onClick = { sky.reload() },
+                colors = ButtonDefaults.buttonColors(containerColor = Desk.panelHi, contentColor = Desk.text),
+                shape = RoundedCornerShape(6.dp),
+            ) { Text("RELOAD ELEMENT SETS", fontSize = 11.sp) }
+            Spacer(Modifier.width(10.dp))
+            Text(
+                "A set younger than six hours is reused without a fetch, exactly as on the phone.",
+                color = Desk.dim,
+                fontSize = 11.sp,
+            )
+        }
+        Spacer(Modifier.height(20.dp))
+        Hairline()
+        Spacer(Modifier.height(16.dp))
+        SectionLabel("BOARDS")
+        Spacer(Modifier.height(8.dp))
+        if (boards.isEmpty()) {
+            Text("No serial ports seen. A board on a cable is a radio the desk has and the phone does not always.", color = Desk.dim, fontSize = 11.sp)
+        } else {
+            boards.forEach { board ->
+                Text(
+                    "${board.path} · ${board.identity?.name ?: "unknown"} · ${board.chip.ifBlank { "chip not named" }} · ${board.planLabel}",
+                    color = Desk.text,
+                    fontSize = 11.sp,
+                    fontFamily = Desk.mono,
+                )
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------- session

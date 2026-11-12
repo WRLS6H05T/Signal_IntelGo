@@ -23,6 +23,7 @@ object Desk {
     val text = Color(0xFFE6EDF3)
     val dim = Color(0xFF8B98A5)
     val accent = Color(0xFF5BE49B)
+    val cyan = Color(0xFF38BDF8)
     val violet = Color(0xFFC084FC)
     val warn = Color(0xFFFDAE61)
     val bad = Color(0xFFD73027)

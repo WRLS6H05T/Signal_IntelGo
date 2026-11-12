@@ -1,29 +1,36 @@
 package dev.skyward.rf.desktop
 
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import dev.skyward.rf.desktop.hardware.SensorHost
 import dev.skyward.rf.desktop.session.SessionRecorder
+import dev.skyward.rf.desktop.sky.DeskSky
 import dev.skyward.rf.desktop.ui.CommandCenter
 import dev.skyward.rf.desktop.ui.DeskTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import java.io.File
 
 /**
  * The desk host.
  *
- * It is the main console for the sensors: the boards are plugged in here, the session is
- * recorded here, and the phone is what you carry when you leave the desk. Both ends read the
- * same firmware with the same parser (see `:shared`), so an export from either is the same file
- * with the same columns.
+ * It is the main console for the sensors and for the sky: the boards are plugged in here, the
+ * globe runs on the same element sets and the same aircraft feed as the phone, and the session
+ * is recorded here. The handset is what you carry when you leave the desk - both ends read one
+ * protocol and one sky, because the parser, the plan model, the orbit maths and the feeds all
+ * live in `:shared`.
  */
 fun main() = application {
     val recorder = remember { SessionRecorder() }
     val scope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Default) }
+    val home = remember { File(System.getProperty("user.home"), ".signal-intelgo") }
+    val sky = remember { DeskSky(scope, home) }
     val host = remember {
         SensorHost(scope) { board ->
             // A board's own fix goes on its rows; a board without one records blank coordinates
@@ -32,13 +39,17 @@ fun main() = application {
         }
     }
 
+    LaunchedEffect(Unit) { sky.start() }
+
     Window(
         onCloseRequest = ::exitApplication,
         title = "Signal IntelGo · Command Center",
-        state = rememberWindowState(width = 1440.dp, height = 920.dp),
+        // A command centre opens maximised: the globe wants every pixel, and a fixed size put
+        // the session bar below the screen edge on a 864-pixel-tall display.
+        state = rememberWindowState(placement = WindowPlacement.Maximized),
     ) {
         DeskTheme {
-            CommandCenter(host, recorder)
+            CommandCenter(host, recorder, sky)
         }
     }
 }

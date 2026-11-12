@@ -218,6 +218,14 @@ sensor boards are plugged into. It is the main console - the boards are linked h
 are assigned here, the session is recorded here - and the phone is what you carry when you leave
 the desk.
 
+![Desktop command centre](docs/screenshots/desktop-command-center.png)
+
+The tabs are the app's own four. **MAP** is the globe: the same Natural Earth outline, the same
+20 degree tilt and altitude lift, and the same layers - satellites propagated locally from
+CelesTrak element sets, aircraft from api.adsb.lol's 30 mile ring, and the Wi-Fi and BLE the
+desk's own boards hear, drawn at the fix the board reported. **BOARD** is the console, **LOG** is
+what the session caught, and **SETUP** holds the observer, the feeds and the satellite groups.
+
 ```bash
 ./gradlew :desktop:run          # the window
 ./gradlew :desktop:test         # identity, band and session-export tests
@@ -231,6 +239,9 @@ the desk.
 | **CONSOLE** | the live transcript, a verb box and the firmware's own quick verbs (`help`, `status`, `scanap`, `blescan`, `gps`, `reboot`) |
 | **TELEMETRY** | every reply parsed by the app's parser: fix, satellites, HDOP, position, altitude, and the AP and BLE tables sorted by signal on the app's red -> green scale. The **5 GHZ** count is the proof the C5's second pass ran: no single-band radio prints a 5 GHz network |
 | **SESSION** | records every sighting with the board it came from and the fix that board had, then exports CSV or JSON through a native save dialog |
+| **MAP** | the globe, and the INTEL table over it: SAT, AIR, ESP, WIFI and BLE, each row switching its layer. Drag to spin, `+`/`−` to size it, `◎` to reset |
+| **LOG** | every recorded sighting, newest first, with the per-session counts and the same CSV/JSON exports |
+| **SETUP** | the observer (a board's own fix, or a position typed in - the desk has no receiver of its own), the six CelesTrak groups, and the two feed statuses |
 
 What goes down the cable is not chosen by the desk: the verbs come from the same
 `Esp32Console.commandsFor` the handset calls, and the band menu from the same `ScanPlan`. The
