@@ -33,6 +33,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
@@ -500,7 +501,7 @@ private fun DrawScope.drawMap(
     // one. A constellation is evenly phased, so a stride samples it evenly and the marks line up in
     // rows - a checkered sheet laid over the globe. A hash scatters them, and because the hash is
     // fixed the same satellites are plotted on every tick instead of blinking in and out.
-    val plotted = if (sats.size > 3_000) 500 else sats.size
+    val plotted = if (sats.size > 3_000) 450 else sats.size
     val every = if (sats.size > plotted) sats.size / plotted else 1
     // The line down to the ground is what makes the ball read as a shell rather than a sticker,
     // but one per satellite crossed into a lattice of wires that looked like a checkered texture
@@ -524,23 +525,21 @@ private fun DrawScope.drawMap(
     }
 }
 
-/** The satellite mark: a body with a solar wing either side, at [size] across. */
+/**
+ * The satellite mark: a single diamond, [size] across. It has no straight edge facing a neighbour,
+ * so a sky full of them cannot tile into the checkered sheet that square marks kept forming, and
+ * the wings are gone because rows of horizontal bars read as hatching across the whole globe.
+ */
 private fun DrawScope.drawSatGlyph(at: Offset, size: Float, color: Color) {
-    drawRect(
-        color,
-        topLeft = Offset(at.x - size * 0.16f, at.y - size * 0.16f),
-        size = Size(size * 0.32f, size * 0.32f),
-    )
-    drawRect(
-        color.copy(alpha = 0.85f),
-        topLeft = Offset(at.x - size * 0.5f, at.y - size * 0.09f),
-        size = Size(size * 0.28f, size * 0.18f),
-    )
-    drawRect(
-        color.copy(alpha = 0.85f),
-        topLeft = Offset(at.x + size * 0.22f, at.y - size * 0.09f),
-        size = Size(size * 0.28f, size * 0.18f),
-    )
+    val half = size * 0.34f
+    val diamond = Path().apply {
+        moveTo(at.x, at.y - half)
+        lineTo(at.x + half, at.y)
+        lineTo(at.x, at.y + half)
+        lineTo(at.x - half, at.y)
+        close()
+    }
+    drawPath(diamond, color)
 }
 
 /** The sphere only: ocean, graticule, continents, rim. Markers are drawn by the caller. */
