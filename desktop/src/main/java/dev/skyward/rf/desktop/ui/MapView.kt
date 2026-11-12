@@ -560,100 +560,71 @@ private fun DrawScope.drawGlobeSphere(
         drawPath(grid, Color(0xFF1E3548).copy(alpha = alpha), style = Stroke(width = 0.7.dp.toPx()))
 
         val coast = Path()
+        val HORIZON = 0.02f
         for (ring in rings) {
             val n = ring.size / 2
             if (n < 3) continue
-            val xs = FloatArray(n)
-            val ys = FloatArray(n)
-            val front = BooleanArray(n)
-            var frontCount = 0
+
+            // Rotate the ring into the camera's frame before drawing anything: u runs across the
+            // visible face, v up it, and d is the distance towards the viewer. Seen that way the
+            // horizon is just the plane d = HORIZON, which is what makes clipping possible.
+            val u = FloatArray(n)
+            val v = FloatArray(n)
+            val c = FloatArray(n)
+            val d = FloatArray(n)
+            var visible = 0
             for (k in 0 until n) {
                 val la = Math.toRadians(ring[2 * k + 1].toDouble())
                 val dLon = Math.toRadians(ring[2 * k].toDouble()) - lon0
                 val cosLat = cos(la)
                 val cosc = sinLat0 * sin(la) + cosLat0 * cosLat * cos(dLon)
                 val y3 = cosLat0 * sin(la) - sinLat0 * cosLat * cos(dLon)
-                pt[2] = (y3 * sinTilt + cosc * cosTilt).toFloat()
-                pt[0] = (center.x + radius * (cosLat * sin(dLon))).toFloat()
-                pt[1] = (center.y - radius * (y3 * cosTilt - cosc * sinTilt)).toFloat()
-                val near = pt[2] > 0.02f
-                front[k] = near
-                if (near) {
-                    xs[k] = pt[0]; ys[k] = pt[1]; frontCount++
-                }
+                u[k] = (cosLat * sin(dLon)).toFloat()
+                v[k] = y3.toFloat()
+                c[k] = cosc.toFloat()
+                d[k] = (y3 * sinTilt + cosc * cosTilt).toFloat()
+                if (d[k] > HORIZON) visible++
             }
-            if (frontCount == 0) continue
+            if (visible == 0) continue
 
-            /**
-             * Fills the visible run of a ring, closing it along the limb instead of with a chord.
-             *
-             * A ring that crosses the horizon - Antarctica with the pole near the limb, a
-             * continent half way round - used to be filled as one polygon whose closing edge cut
-             * straight across the disc. As the globe turned, that edge swept a land-coloured wash
-             * over the whole ball and then vanished: the flicker this was reported for.
-             * Following the rim from the last visible point back to the first keeps the fill
-             * inside the crescent that is actually on the near side.
-             */
-            fun fillRun(first: Int, last: Int) {
-                if (first == last) return
-                val path = Path()
-                path.moveTo(xs[first], ys[first])
-                var k = first
-                var guard = 0
-                while (k != last && guard <= n) {
-                    k = (k + 1) % n
-                    path.lineTo(xs[k], ys[k])
-                    guard++
-                }
-                val a0 = atan2((ys[k] - center.y).toDouble(), (xs[k] - center.x).toDouble())
-                val a1 = atan2((ys[first] - center.y).toDouble(), (xs[first] - center.x).toDouble())
-                var delta = a1 - a0
-                while (delta > Math.PI) delta -= 2 * Math.PI
-                while (delta < -Math.PI) delta += 2 * Math.PI
-                val steps = kotlin.math.max(2, (abs(delta) * 180.0 / Math.PI / 3.0).toInt())
-                for (step in 1 until steps) {
-                    val a = a0 + delta * step / steps
-                    path.lineTo(center.x + radius * cos(a).toFloat(), center.y + radius * sin(a).toFloat())
-                }
-                path.close()
-                drawPath(path, Color(0xFF2C4C68), alpha = alpha)
+            // Clip the ring to the near side of the horizon by cutting every edge that crosses it.
+            // Filling a ring that straddles the horizon used to mean inventing a closing edge - a
+            // chord across the ball swept a land-coloured wash over the whole face as the globe
+            // turned, and closing along the limb picked the wrong way round often enough to flood
+            // the disc. Clipping invents nothing: the polygon handed to the canvas is exactly the
+            // visible part of the ring, and it fills the same way at every rotation.
+            val land = Path()
+            var started = false
+            fun put(x: Float, y: Float) {
+                if (started) land.lineTo(x, y) else { land.moveTo(x, y); started = true }
             }
-
-            if (frontCount == n) {
-                // The common case: the whole ring is on the near side, so it fills as it is.
-                val land = Path().apply {
-                    moveTo(xs[0], ys[0])
-                    for (k in 1 until n) lineTo(xs[k], ys[k])
-                    close()
-                }
-                drawPath(land, Color(0xFF2C4C68), alpha = alpha)
-            } else {
-                // Walk the ring from a hidden vertex so every visible run is seen once, whole.
-                var begin = 0
-                while (begin < n && front[begin]) begin++
-                if (begin >= n) begin = 0
-                var runStart = -1
-                for (step in 0 until n) {
-                    val k = (begin + step) % n
-                    val nextVisible = front[(begin + step + 1) % n]
-                    if (front[k] && runStart < 0) runStart = k
-                    if (front[k] && !nextVisible) {
-                        fillRun(runStart, k)
-                        runStart = -1
-                    }
-                }
-            }
-
-            var pen = false
             for (k in 0 until n) {
                 val m = (k + 1) % n
-                if (front[k] && front[m]) {
-                    if (!pen) { coast.moveTo(xs[k], ys[k]); pen = true }
-                    coast.lineTo(xs[m], ys[m])
-                } else {
-                    pen = false
+                val inK = d[k] > HORIZON
+                val inM = d[m] > HORIZON
+                if (inK) {
+                    put(
+                        center.x + radius * u[k],
+                        (center.y - radius * (v[k] * cosTilt - c[k] * sinTilt)).toFloat(),
+                    )
+                }
+                if (inK != inM) {
+                    val t = (HORIZON - d[k]) / (d[m] - d[k])
+                    val iu = u[k] + (u[m] - u[k]) * t
+                    val iv = v[k] + (v[m] - v[k]) * t
+                    val ic = c[k] + (c[m] - c[k]) * t
+                    put(
+                        center.x + radius * iu,
+                        (center.y - radius * (iv * cosTilt - ic * sinTilt)).toFloat(),
+                    )
                 }
             }
+            if (!started) continue
+            land.close()
+            drawPath(land, Color(0xFF2C4C68), alpha = alpha)
+            // The outline follows the same clipped polygon, so the coast stops at the limb exactly
+            // where the fill does.
+            coast.addPath(land)
         }
         drawPath(coast, Color(0xFF86BCDF).copy(alpha = 0.8f * alpha), style = Stroke(width = 0.8.dp.toPx()))
     }
