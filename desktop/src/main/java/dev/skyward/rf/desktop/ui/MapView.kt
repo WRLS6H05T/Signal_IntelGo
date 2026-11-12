@@ -559,9 +559,7 @@ private fun DrawScope.drawGlobeSphere(
         while (parallel <= 60.0) { line(parallel, -180.0, parallel, 180.0, 96); parallel += 30.0 }
         drawPath(grid, Color(0xFF1E3548).copy(alpha = alpha), style = Stroke(width = 0.7.dp.toPx()))
 
-        val land = Path()
         val coast = Path()
-        val outside = radius * 1.02f
         for (ring in rings) {
             val n = ring.size / 2
             if (n < 3) continue
@@ -578,27 +576,73 @@ private fun DrawScope.drawGlobeSphere(
                 pt[2] = (y3 * sinTilt + cosc * cosTilt).toFloat()
                 pt[0] = (center.x + radius * (cosLat * sin(dLon))).toFloat()
                 pt[1] = (center.y - radius * (y3 * cosTilt - cosc * sinTilt)).toFloat()
-                val dx = pt[0] - center.x
-                val dy = pt[1] - center.y
-                val len = sqrt(dx * dx + dy * dy)
                 val near = pt[2] > 0.02f
                 front[k] = near
                 if (near) {
                     xs[k] = pt[0]; ys[k] = pt[1]; frontCount++
-                } else {
-                    // Behind the ball: pushed outside the clip so a closing edge never crosses
-                    // the visible hemisphere and fills the complement with land-coloured water.
-                    val a = if (len > 0.001f) atan2(dy.toDouble(), dx.toDouble()) else 0.0
-                    xs[k] = center.x + outside * cos(a).toFloat()
-                    ys[k] = center.y + outside * sin(a).toFloat()
                 }
             }
             if (frontCount == 0) continue
-            land.reset()
-            land.moveTo(xs[0], ys[0])
-            for (k in 1 until n) land.lineTo(xs[k], ys[k])
-            land.close()
-            drawPath(land, Color(0xFF2C4C68), alpha = alpha)
+
+            /**
+             * Fills the visible run of a ring, closing it along the limb instead of with a chord.
+             *
+             * A ring that crosses the horizon - Antarctica with the pole near the limb, a
+             * continent half way round - used to be filled as one polygon whose closing edge cut
+             * straight across the disc. As the globe turned, that edge swept a land-coloured wash
+             * over the whole ball and then vanished: the flicker this was reported for.
+             * Following the rim from the last visible point back to the first keeps the fill
+             * inside the crescent that is actually on the near side.
+             */
+            fun fillRun(first: Int, last: Int) {
+                if (first == last) return
+                val path = Path()
+                path.moveTo(xs[first], ys[first])
+                var k = first
+                var guard = 0
+                while (k != last && guard <= n) {
+                    k = (k + 1) % n
+                    path.lineTo(xs[k], ys[k])
+                    guard++
+                }
+                val a0 = atan2((ys[k] - center.y).toDouble(), (xs[k] - center.x).toDouble())
+                val a1 = atan2((ys[first] - center.y).toDouble(), (xs[first] - center.x).toDouble())
+                var delta = a1 - a0
+                while (delta > Math.PI) delta -= 2 * Math.PI
+                while (delta < -Math.PI) delta += 2 * Math.PI
+                val steps = kotlin.math.max(2, (abs(delta) * 180.0 / Math.PI / 3.0).toInt())
+                for (step in 1 until steps) {
+                    val a = a0 + delta * step / steps
+                    path.lineTo(center.x + radius * cos(a).toFloat(), center.y + radius * sin(a).toFloat())
+                }
+                path.close()
+                drawPath(path, Color(0xFF2C4C68), alpha = alpha)
+            }
+
+            if (frontCount == n) {
+                // The common case: the whole ring is on the near side, so it fills as it is.
+                val land = Path().apply {
+                    moveTo(xs[0], ys[0])
+                    for (k in 1 until n) lineTo(xs[k], ys[k])
+                    close()
+                }
+                drawPath(land, Color(0xFF2C4C68), alpha = alpha)
+            } else {
+                // Walk the ring from a hidden vertex so every visible run is seen once, whole.
+                var begin = 0
+                while (begin < n && front[begin]) begin++
+                if (begin >= n) begin = 0
+                var runStart = -1
+                for (step in 0 until n) {
+                    val k = (begin + step) % n
+                    val nextVisible = front[(begin + step + 1) % n]
+                    if (front[k] && runStart < 0) runStart = k
+                    if (front[k] && !nextVisible) {
+                        fillRun(runStart, k)
+                        runStart = -1
+                    }
+                }
+            }
 
             var pen = false
             for (k in 0 until n) {
