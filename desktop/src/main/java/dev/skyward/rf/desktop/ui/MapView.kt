@@ -496,7 +496,11 @@ private fun DrawScope.drawMap(
     // map samples it: the count stays the true total, and the picture stays a picture. The step is
     // taken in catalogue order, so the same satellites are plotted on every tick instead of a
     // different random subset popping in and out.
-    val satStep = if (sats.size > 3_000) sats.size / 3_000 + 1 else 1
+    // The plotted count is set against the mark's size, not on its own: a doubled mark at the old
+    // spacing covered four times the sky and tiled into a checkerboard of squares. Half as many
+    // marks at twice the size keeps the same amount of ink on the ball.
+    val plotted = if (sats.size > 3_000) 900 else sats.size
+    val satStep = if (sats.size > plotted) sats.size / plotted + 1 else 1
     // The line down to the ground is what makes the ball read as a shell rather than a sticker,
     // but one per satellite crossed into a lattice of wires that looked like a checkered texture
     // laid over the map. A share of them carries the same sense of depth with no visible grid.
@@ -510,8 +514,10 @@ private fun DrawScope.drawMap(
             drawLine(Desk.cyan.copy(alpha = 0.18f), Offset(pt[0], pt[1]), at, 1f)
         }
         // A satellite reads as a satellite rather than as a dot: the layer glyph's body and two
-        // wings, small enough that a crowded sky still reads as a picture.
-        drawSatGlyph(at, 6.5.dp.toPx(), Desk.cyan)
+        // wings. Fading towards the limb keeps the marks near the edge from drawing a hard ring of
+        // identical squares, which is what made the sky look tiled.
+        val face = pt[2].coerceIn(0f, 1f)
+        drawSatGlyph(at, 13.dp.toPx(), Desk.cyan.copy(alpha = 0.35f + 0.65f * face))
     }
 }
 
@@ -684,7 +690,11 @@ private fun DrawScope.drawGlobeSphere(
             }
             flush()
         }
-        drawPath(coast, Color(0xFF86BCDF).copy(alpha = 0.8f * alpha), style = Stroke(width = 0.8.dp.toPx()))
+        // The mesh ends on a one-degree staircase, so the pale line alone floats in and out of the
+        // fill. Stroking the coast in the land colour first covers the steps, and the land then ends
+        // where the outline says it does.
+        drawPath(coast, Color(0xFF2C4C68).copy(alpha = alpha), style = Stroke(width = 2.8.dp.toPx()))
+        drawPath(coast, Color(0xFF9ED2F0).copy(alpha = 0.9f * alpha), style = Stroke(width = 1.dp.toPx()))
     }
 
     drawCircle(Desk.cyan.copy(alpha = 0.22f * alpha), radius = radius, center = center, style = Stroke(1.4.dp.toPx()))
@@ -693,8 +703,8 @@ private fun DrawScope.drawGlobeSphere(
 
 /** Land coverage on a 2-degree longitude/latitude grid, worked out once from the coastline rings. */
 private object LandCover {
-    const val X = 180
-    const val Y = 90
+    const val X = 360
+    const val Y = 180
 
     private var maskedRings: Array<FloatArray>? = null
     private var cells: BooleanArray? = null
@@ -754,6 +764,29 @@ private object LandCover {
     }
 }
 
+
+/** Buffers for the land mesh, sized once and reused so a fine mesh costs no allocation per frame. */
+private class LandMeshScratch(val xs: FloatArray, val ys: FloatArray, val depth: FloatArray,
+                              val positions: FloatArray, val indices: ShortArray) {
+    companion object {
+        private var cached: LandMeshScratch? = null
+
+        fun of(cols: Int, rows: Int, cells: Int): LandMeshScratch {
+            val have = cached
+            if (have != null && have.xs.size == cols * rows) return have
+            val made = LandMeshScratch(
+                FloatArray(cols * rows),
+                FloatArray(cols * rows),
+                FloatArray(cols * rows),
+                FloatArray(cols * rows * 2),
+                ShortArray(cells * 6),
+            )
+            cached = made
+            return made
+        }
+    }
+}
+
 /**
  * Draws the land as triangles over the near side of the ball.
  *
@@ -776,9 +809,12 @@ private fun DrawScope.drawLandMesh(
     val mask = LandCover.mask(rings)
     val cols = LandCover.X + 1
     val rows = LandCover.Y + 1
-    val xs = FloatArray(cols * rows)
-    val ys = FloatArray(cols * rows)
-    val depth = FloatArray(cols * rows)
+    // Reused between frames: a one-degree mesh is sixty-five thousand points, and allocating that
+    // every frame is what makes a smooth globe expensive rather than the drawing itself.
+    val scratch = LandMeshScratch.of(cols, rows, LandCover.X * LandCover.Y)
+    val xs = scratch.xs
+    val ys = scratch.ys
+    val depth = scratch.depth
     for (j in 0 until rows) {
         val la = Math.toRadians((90.0 - j * 180.0 / LandCover.Y).coerceIn(-89.9, 89.9))
         val sinLa = sin(la)
@@ -794,12 +830,12 @@ private fun DrawScope.drawLandMesh(
         }
     }
 
-    val positions = FloatArray(cols * rows * 2)
+    val positions = scratch.positions
     for (at in 0 until cols * rows) {
         positions[at * 2] = xs[at]
         positions[at * 2 + 1] = ys[at]
     }
-    val indices = ShortArray(LandCover.X * LandCover.Y * 6)
+    val indices = scratch.indices
     var used = 0
     for (j in 0 until LandCover.Y) {
         for (i in 0 until LandCover.X) {
