@@ -5,6 +5,7 @@ import dev.skyward.rf.core.Geo
 import dev.skyward.rf.core.LatLon
 import dev.skyward.rf.core.SatView
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import okhttp3.OkHttpClient
@@ -33,7 +34,16 @@ class SatTracker(
         private const val CACHE_FILE = "tle_cache_v1.json"
         private const val MAX_AGE_MS = 6 * 60 * 60 * 1000L
         private const val BASE = "https://celestrak.org/NORAD/elements/gp.php"
-        private val KNOWN_GROUPS = listOf("stations", "visual", "weather", "gps-ops", "science", "amateur")
+
+        /** The constellation files: same objects, served separately from the GP endpoint. */
+        private const val SUPPLEMENTAL = "https://celestrak.org/NORAD/elements/supplemental/sup-gp.php"
+        // `active` is CelesTrak's whole tracked catalogue (15,880 element sets when this was
+        // written); starlink and cubesat are the two named constellations that take the total
+        // past eleven thousand on their own. A host that wants the full sky asks for `active`.
+        private val KNOWN_GROUPS = listOf(
+            "stations", "visual", "weather", "gps-ops", "science", "amateur",
+            "starlink", "cubesat", "active",
+        )
 
         /**
          * ZARYA, the station core: NORAD 25544, catalogue 1998-067A. This is the International
@@ -143,29 +153,33 @@ class SatTracker(
         }
         val collected = ArrayList<CachedTle>()
         val errors = ArrayList<String>()
-        for (group in wanted) {
-            val url = "$BASE?GROUP=$group&FORMAT=tle"
-            val req = Request.Builder().url(url).header("User-Agent", "Signal_IntelGo/1.0 (wardriving)").build()
-            runCatching {
-                http.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) {
-                        errors.add("$group: HTTP ${resp.code}")
-                        return@use
-                    }
-                    val body = resp.body?.string().orEmpty()
-                    val parsed = parseTle(body)
-                    if (parsed.isEmpty()) errors.add("$group: empty") else collected.addAll(parsed)
-                }
-            }.onFailure { errors.add("$group: ${it.message ?: "network error"}") }
+        // CelesTrak's `active` group already contains every object in the named groups, and it asks
+        // that its service not be hammered: one catalogue request replaces nine.
+        val fetched = if ("active" in wanted) listOf("active") else wanted
+        val arrived = ArrayList<String>(fetched.size)
+        for ((index, group) in fetched.withIndex()) {
+            // CelesTrak publishes a one-request-per-second limit and answers 403 to a burst.
+            // Asking for eight groups at once is exactly that burst, so they go out spaced.
+            if (index > 0) delay(1_200)
+            val result = fetchGroup(group)
+            if (result.sats.isEmpty()) {
+                errors.add("$group: ${result.note}")
+            } else {
+                collected.addAll(result.sats)
+                arrived.add(group)
+            }
         }
         // BIRDS-3 by catalogue number: it is not a CelesTrak group, and a 404 for a decayed
         // object is the expected answer rather than an error worth showing.
         collected.addAll(fetchBirds3())
         if (collected.isNotEmpty()) {
             val deduped = collapseIss(collected.associateBy { it.noradId }.values.toList())
+            // Only the groups that actually arrived are recorded. Recording the request instead
+            // meant a throttled group was cached as if it were there, and the six hour freshness
+            // check then kept the missing satellites missing.
             cache = CacheFile(
                 fetchedAt = System.currentTimeMillis(),
-                groups = wanted,
+                groups = arrived,
                 sats = deduped,
             )
             store.write(CACHE_FILE, cache)
@@ -182,6 +196,41 @@ class SatTracker(
             )
         }
     }
+
+    /**
+     * One group's element sets, with the constellation files as a fallback.
+     *
+     * CelesTrak rate-limits exactly the group the desk most wants: `starlink` answers 403 on the
+     * GP endpoint while every other group answers 200, and the same data is published as a
+     * supplemental file. A refused group is asked for there before it is called a failure.
+     */
+    private fun fetchGroup(group: String): GroupResult {
+        val direct = httpGet("$BASE?GROUP=$group&FORMAT=tle")
+        if (direct.sats.isNotEmpty()) return GroupResult(direct.sats, "${direct.sats.size}")
+        val supplemental = httpGet("$SUPPLEMENTAL?FILE=$group&FORMAT=tle")
+        if (supplemental.sats.isNotEmpty()) return GroupResult(supplemental.sats, "${supplemental.sats.size} supplemental")
+        // Both answers are reported: "403 then 403" and "200 with nothing in it" are different
+        // problems, and the note is the only place an operator can see which one happened.
+        return GroupResult(emptyList(), "${direct.note} / supplemental ${supplemental.note}")
+    }
+
+    private data class GroupResult(val sats: List<CachedTle>, val note: String)
+
+    private data class HttpResult(val sats: List<CachedTle>, val note: String)
+
+    private fun httpGet(url: String): HttpResult = runCatching {
+        val req = Request.Builder().url(url)
+            .header("User-Agent", "Signal_IntelGo/1.0 (wardriving)")
+            .build()
+        http.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) {
+                HttpResult(emptyList(), "HTTP ${resp.code}")
+            } else {
+                val parsed = parseTle(resp.body?.string().orEmpty())
+                HttpResult(parsed, if (parsed.isEmpty()) "HTTP 200, no TLEs" else "HTTP 200")
+            }
+        }
+    }.getOrElse { HttpResult(emptyList(), it.message ?: "network error") }
 
     /** Asks for the three BIRDS-3 objects by catalogue number; usually returns nothing. */
     private fun fetchBirds3(): List<CachedTle> {

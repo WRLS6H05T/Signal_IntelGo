@@ -224,8 +224,11 @@ The tabs are the app's own four, with the app's own glyphs. **MAP** is the globe
 own momentum (`SPIN OFF` / `1X` / `3X`, the phone's 4.5 degrees per second per step) and, zoomed
 past the hand-off, OpenStreetMap street tiles: the ball's radius is derived from the same zoom as
 the map's scale and the two meet where they agree on pixels per degree, so the curl into a plane
-has nothing to jump. Layers are satellites propagated locally from CelesTrak element sets,
-aircraft from api.adsb.lol's 30 mile ring, the Wi-Fi and BLE the desk's own boards hear at the fix
+has nothing to jump. Layers are satellites propagated locally from CelesTrak element sets - the named groups plus
+`starlink` and `cubesat`, which is 11,080 objects, with `ALL` for CelesTrak's whole catalogue;
+above three thousand markers the shell is sampled in catalogue order and anything off screen is
+skipped, so eleven thousand satellites still turn with the globe - aircraft from api.adsb.lol's
+30 mile ring, the Wi-Fi and BLE the desk's own boards hear at the fix
 the board reported, mesh nodes from the same Meshtastic and MeshCore MQTT brokers the app reads,
 and BLE Remote ID drones decoded by the app's own parser. **BOARD** is the console, **LOG** is what
 the session caught, and **SETUP** holds the observer, the feeds and the satellite groups.

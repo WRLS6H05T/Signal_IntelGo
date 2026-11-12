@@ -408,6 +408,10 @@ private fun DrawScope.drawMap(
         pt[0] = fx + (gx - fx) * t
         pt[1] = fy + (gy - fy) * t
         pt[2] = if (t <= 0.02f) 1f else (1f - (1f - front.coerceIn(0.0, 1.0).toFloat()) * t)
+        // The whole catalogue is fifteen thousand markers; one that lands outside the canvas
+        // still costs a draw call, and that is the difference between a spinning globe and a
+        // slideshow. The margin keeps arrows and links that start just off the edge intact.
+        if (pt[0] < -60f || pt[0] > width + 60f || pt[1] < -60f || pt[1] > height + 60f) return false
         return pt[2] > 0.02f
     }
 
@@ -486,9 +490,15 @@ private fun DrawScope.drawMap(
     }
 
     // ---- satellites, lifted by their altitude on the ball and flat on the map ----
-    sats.forEach { sat ->
+    // Above a few thousand the catalogue is sampled rather than drawn whole, the way the phone's
+    // map samples it: the count stays the true total, and the picture stays a picture. The step is
+    // taken in catalogue order, so the same satellites are plotted on every tick instead of a
+    // different random subset popping in and out.
+    val satStep = if (sats.size > 3_000) sats.size / 3_000 + 1 else 1
+    sats.forEachIndexed { index, sat ->
+        if (index % satStep != 0) return@forEachIndexed
         val lift = (ln(1.0 + sat.altKm * 1000.0 / 500.0) * 0.022).coerceIn(0.0, 0.30)
-        if (!place(sat.lat, sat.lon, lift)) return@forEach
+        if (!place(sat.lat, sat.lon, lift)) return@forEachIndexed
         val at = Offset(pt[0], pt[1])
         if (t > 0.5f && place(sat.lat, sat.lon, 0.0)) {
             drawLine(Desk.cyan.copy(alpha = 0.20f), Offset(pt[0], pt[1]), at, 1f)

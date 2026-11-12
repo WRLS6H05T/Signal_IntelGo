@@ -26,7 +26,10 @@ import kotlin.math.sin
  * a plane, a drone, a mesh, a board, Wi-Fi and Bluetooth - as strokes on a canvas, so a row can be
  * read at a glance without a font or an icon dependency.
  */
-enum class Glyph { SAT, AIR, UAV, MESH, ESP, WIFI, BLE, SPIN, CHEVRON, MAP, BOARD, LOG, SETUP }
+enum class Glyph {
+    SAT, AIR, UAV, MESH, ESP, WIFI, BLE, SPIN, CHEVRON, MAP, BOARD, LOG, SETUP,
+    LINK, SWEEP, RECORD, EXPORT,
+}
 
 @Composable
 fun LayerIcon(glyph: Glyph, color: Color, size: Dp = 14.dp, filled: Boolean = true) {
@@ -176,6 +179,46 @@ private fun DrawScope.drawGlyph(glyph: Glyph, color: Color, filled: Boolean) {
                 drawLine(color, Offset(cx - s * 0.32f, y), Offset(cx - s * 0.32f + s * f, y),
                     stroke.width * 0.9f, StrokeCap.Round)
             }
+        }
+
+        // Two ends meeting: the serial link.
+        Glyph.LINK -> {
+            drawRect(color, topLeft = Offset(cx - s * 0.44f, cy - s * 0.14f), size = Size(s * 0.26f, s * 0.28f), style = stroke)
+            drawRect(color, topLeft = Offset(cx + s * 0.18f, cy - s * 0.14f), size = Size(s * 0.26f, s * 0.28f), style = stroke)
+            drawLine(color, Offset(cx - s * 0.18f, cy), Offset(cx + s * 0.18f, cy), stroke.width * 0.9f)
+        }
+
+        // A sweep going out: three arcs and the beam.
+        Glyph.SWEEP -> {
+            val origin = Offset(cx - s * 0.3f, cy + s * 0.3f)
+            for (i in 1..3) {
+                val r = s * 0.28f * i
+                drawArc(
+                    color = color.copy(alpha = if (i == 1) 1f else 0.55f),
+                    startAngle = -90f,
+                    sweepAngle = 90f,
+                    useCenter = false,
+                    topLeft = Offset(origin.x - r, origin.y - r),
+                    size = Size(r * 2, r * 2),
+                    style = Stroke(width = stroke.width * 0.7f, cap = StrokeCap.Round),
+                )
+            }
+            drawLine(color, origin, Offset(origin.x + s * 0.34f, origin.y - s * 0.34f), stroke.width * 0.9f, StrokeCap.Round)
+        }
+
+        // A record dot.
+        Glyph.RECORD -> drawCircle(color, radius = s * 0.3f, center = Offset(cx, cy))
+
+        // An arrow leaving the box.
+        Glyph.EXPORT -> {
+            drawLine(color, Offset(cx, cy - s * 0.36f), Offset(cx, cy + s * 0.12f), stroke.width * 0.9f, StrokeCap.Round)
+            val head = Path().apply {
+                moveTo(cx - s * 0.18f, cy - s * 0.02f)
+                lineTo(cx, cy + s * 0.16f)
+                lineTo(cx + s * 0.18f, cy - s * 0.02f)
+            }
+            drawPath(head, color, style = Stroke(width = stroke.width * 0.9f, cap = StrokeCap.Round))
+            drawLine(color.copy(alpha = 0.7f), Offset(cx - s * 0.34f, cy + s * 0.34f), Offset(cx + s * 0.34f, cy + s * 0.34f), stroke.width * 0.8f, StrokeCap.Round)
         }
 
         // A gear's ring with teeth.

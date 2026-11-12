@@ -81,7 +81,17 @@ class DeskSky(
     @Volatile
     private var meshWanted = false
 
-    private val _state = MutableStateFlow(State(groups = tracker.knownGroups().toSet()))
+    /**
+     * The catalogue the desk opens with: the phone's named groups plus the two constellations
+     * that carry the count past eleven thousand. CelesTrak's `active` group is deliberately not
+     * in here - it is the whole catalogue in one request, which is what trips its rate limit -
+     * but it stays available as the ALL chip in SETUP.
+     */
+    private val defaultGroups = setOf(
+        "stations", "visual", "weather", "gps-ops", "science", "amateur", "starlink", "cubesat",
+    )
+
+    private val _state = MutableStateFlow(State(groups = defaultGroups))
     val state: StateFlow<State> = _state
 
     private var observer: LatLon? = null
@@ -127,7 +137,10 @@ class DeskSky(
             while (isActive) {
                 val positions = runCatching { tracker.positions(observer) }.getOrDefault(emptyList())
                 _state.update { it.copy(sats = positions, lastTick = System.currentTimeMillis()) }
-                delay(4_000)
+                // A 700 object sky is cheap enough to redraw every few seconds; the whole
+                // catalogue is fifteen thousand propagations per tick, so it is given a longer
+                // cadence rather than pinning a core for the picture to move imperceptibly.
+                delay(if (positions.size > 5_000) 8_000 else 4_000)
             }
         }
         // The aircraft feed is a shared community service: one request a minute is plenty for a

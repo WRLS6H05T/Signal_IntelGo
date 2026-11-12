@@ -416,7 +416,11 @@ private fun SensorsRail(
             SectionLabel("SENSORS")
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { host.refresh() }) {
-                Text("REFRESH", color = Desk.accent, fontSize = 11.sp, fontFamily = Desk.mono)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LayerIcon(Glyph.SPIN, Desk.accent, 10.dp)
+                    Spacer(Modifier.width(5.dp))
+                    Text("REFRESH", color = Desk.accent, fontSize = 11.sp, fontFamily = Desk.mono)
+                }
             }
         }
         Spacer(Modifier.height(6.dp))
@@ -464,7 +468,11 @@ private fun PortRow(board: BoardState, selected: Boolean, onClick: () -> Unit, h
                 )
             }
             TextButton(onClick = { if (board.connected) host.disconnect(board.path) else host.connect(board.path) }) {
-                Text(if (board.connected) "STOP" else "LINK", color = if (board.connected) Desk.warn else Desk.accent, fontSize = 11.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LayerIcon(Glyph.LINK, if (board.connected) Desk.warn else Desk.accent, 11.dp)
+                    Spacer(Modifier.width(5.dp))
+                    Text(if (board.connected) "STOP" else "LINK", color = if (board.connected) Desk.warn else Desk.accent, fontSize = 11.sp)
+                }
             }
         }
     }
@@ -530,7 +538,11 @@ private fun ActiveBoardCard(board: BoardState?, host: SensorHost) {
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("SWEEP NOW", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                LayerIcon(Glyph.SWEEP, Desk.bg, 12.dp)
+                Spacer(Modifier.width(6.dp))
+                Text("SWEEP NOW", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
         }
         if (board.lastLine.isNotBlank()) {
             Spacer(Modifier.height(8.dp))
@@ -913,7 +925,9 @@ private fun SetupPane(modifier: Modifier, sky: DeskSky, skyState: DeskSky.State,
         SectionLabel("SATELLITE GROUPS")
         Spacer(Modifier.height(8.dp))
         Row {
-            listOf("stations", "visual", "weather", "gps-ops", "science", "amateur").forEach { group ->
+            // The app's whole list, including the two constellations that carry it past eleven
+            // thousand objects, plus CelesTrak's full catalogue as one switch.
+            listOf("stations", "visual", "weather", "gps-ops", "science", "amateur", "starlink", "cubesat", "active").forEach { group ->
                 val on = group in skyState.groups
                 Box(
                     Modifier
@@ -923,7 +937,12 @@ private fun SetupPane(modifier: Modifier, sky: DeskSky, skyState: DeskSky.State,
                         .clickable { sky.toggleGroup(group) }
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                 ) {
-                    Text(group, color = if (on) Desk.cyan else Desk.dim, fontSize = 11.sp, fontFamily = Desk.mono)
+                    Text(
+                        if (group == "active") "ALL" else group,
+                        color = if (on) Desk.cyan else Desk.dim,
+                        fontSize = 11.sp,
+                        fontFamily = Desk.mono,
+                    )
                 }
             }
         }
@@ -1014,7 +1033,11 @@ private fun SessionBar(
             ),
             shape = RoundedCornerShape(6.dp),
         ) {
-            Text(if (liveSince == null) "START" else "STOP", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                LayerIcon(Glyph.RECORD, if (liveSince == null) Desk.bg else Color.White, 10.dp)
+                Spacer(Modifier.width(6.dp))
+                Text(if (liveSince == null) "START" else "STOP", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
         }
         Spacer(Modifier.width(14.dp))
         Text(
