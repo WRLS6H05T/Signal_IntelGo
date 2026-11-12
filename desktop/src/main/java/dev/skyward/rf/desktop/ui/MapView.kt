@@ -509,8 +509,29 @@ private fun DrawScope.drawMap(
         if (t > 0.5f && index % (satStep * tetherStep) == 0 && place(sat.lat, sat.lon, 0.0)) {
             drawLine(Desk.cyan.copy(alpha = 0.18f), Offset(pt[0], pt[1]), at, 1f)
         }
-        drawCircle(Desk.cyan, radius = 1.7.dp.toPx(), center = at)
+        // A satellite reads as a satellite rather than as a dot: the layer glyph's body and two
+        // wings, small enough that a crowded sky still reads as a picture.
+        drawSatGlyph(at, 6.5.dp.toPx(), Desk.cyan)
     }
+}
+
+/** The satellite mark: a body with a solar wing either side, at [size] across. */
+private fun DrawScope.drawSatGlyph(at: Offset, size: Float, color: Color) {
+    drawRect(
+        color,
+        topLeft = Offset(at.x - size * 0.16f, at.y - size * 0.16f),
+        size = Size(size * 0.32f, size * 0.32f),
+    )
+    drawRect(
+        color.copy(alpha = 0.85f),
+        topLeft = Offset(at.x - size * 0.5f, at.y - size * 0.09f),
+        size = Size(size * 0.28f, size * 0.18f),
+    )
+    drawRect(
+        color.copy(alpha = 0.85f),
+        topLeft = Offset(at.x + size * 0.22f, at.y - size * 0.09f),
+        size = Size(size * 0.28f, size * 0.18f),
+    )
 }
 
 /** The sphere only: ocean, graticule, continents, rim. Markers are drawn by the caller. */
