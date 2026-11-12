@@ -496,21 +496,24 @@ private fun DrawScope.drawMap(
     // map samples it: the count stays the true total, and the picture stays a picture. The step is
     // taken in catalogue order, so the same satellites are plotted on every tick instead of a
     // different random subset popping in and out.
-    // The plotted count is set against the mark's size, not on its own: a doubled mark at the old
-    // spacing covered four times the sky and tiled into a checkerboard of squares. Half as many
-    // marks at twice the size keeps the same amount of ink on the ball.
-    val plotted = if (sats.size > 3_000) 900 else sats.size
-    val satStep = if (sats.size > plotted) sats.size / plotted + 1 else 1
+    // The subset is picked by hashing each satellite's catalogue number, not by taking every nth
+    // one. A constellation is evenly phased, so a stride samples it evenly and the marks line up in
+    // rows - a checkered sheet laid over the globe. A hash scatters them, and because the hash is
+    // fixed the same satellites are plotted on every tick instead of blinking in and out.
+    val plotted = if (sats.size > 3_000) 500 else sats.size
+    val every = if (sats.size > plotted) sats.size / plotted else 1
     // The line down to the ground is what makes the ball read as a shell rather than a sticker,
     // but one per satellite crossed into a lattice of wires that looked like a checkered texture
     // laid over the map. A share of them carries the same sense of depth with no visible grid.
     val tetherStep = if (sats.size > 3_000) 5 else 1
     sats.forEachIndexed { index, sat ->
-        if (index % satStep != 0) return@forEachIndexed
+        if (every > 1 && Math.floorMod(sat.noradId.hashCode(), every) != 0) return@forEachIndexed
         val lift = (ln(1.0 + sat.altKm * 1000.0 / 500.0) * 0.022).coerceIn(0.0, 0.30)
         if (!place(sat.lat, sat.lon, lift)) return@forEachIndexed
         val at = Offset(pt[0], pt[1])
-        if (t > 0.5f && index % (satStep * tetherStep) == 0 && place(sat.lat, sat.lon, 0.0)) {
+        if (t > 0.5f && Math.floorMod(sat.noradId.hashCode(), every * tetherStep) == 0 &&
+            place(sat.lat, sat.lon, 0.0)
+        ) {
             drawLine(Desk.cyan.copy(alpha = 0.18f), Offset(pt[0], pt[1]), at, 1f)
         }
         // A satellite reads as a satellite rather than as a dot: the layer glyph's body and two
