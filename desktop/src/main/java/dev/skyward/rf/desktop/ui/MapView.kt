@@ -521,25 +521,29 @@ private fun DrawScope.drawMap(
         // wings. Fading towards the limb keeps the marks near the edge from drawing a hard ring of
         // identical squares, which is what made the sky look tiled.
         val face = pt[2].coerceIn(0f, 1f)
-        drawSatGlyph(at, 13.dp.toPx(), Desk.cyan.copy(alpha = 0.35f + 0.65f * face))
+        drawSatGlyph(at, 12.dp.toPx(), Desk.cyan.copy(alpha = 0.45f + 0.55f * face))
     }
 }
 
 /**
- * The satellite mark: a single diamond, [size] across. It has no straight edge facing a neighbour,
- * so a sky full of them cannot tile into the checkered sheet that square marks kept forming, and
- * the wings are gone because rows of horizontal bars read as hatching across the whole globe.
+ * The satellite mark: the layer glyph's body and its two solar wings, drawn as a thin outline.
+ * A filled mark at this size turned a field of them into a sheet of blocks; an outline keeps each
+ * one reading as a satellite without any of them touching its neighbour.
  */
 private fun DrawScope.drawSatGlyph(at: Offset, size: Float, color: Color) {
-    val half = size * 0.34f
+    val line = (size * 0.10f).coerceAtLeast(1.2f)
+    val body = size * 0.20f
     val diamond = Path().apply {
-        moveTo(at.x, at.y - half)
-        lineTo(at.x + half, at.y)
-        lineTo(at.x, at.y + half)
-        lineTo(at.x - half, at.y)
+        moveTo(at.x, at.y - body)
+        lineTo(at.x + body, at.y)
+        lineTo(at.x, at.y + body)
+        lineTo(at.x - body, at.y)
         close()
     }
-    drawPath(diamond, color)
+    drawPath(diamond, color, style = Stroke(width = line))
+    val gap = body * 2.2f
+    drawLine(color, Offset(at.x - size * 0.5f, at.y), Offset(at.x - gap, at.y), strokeWidth = line)
+    drawLine(color, Offset(at.x + gap, at.y), Offset(at.x + size * 0.5f, at.y), strokeWidth = line)
 }
 
 /** The sphere only: ocean, graticule, continents, rim. Markers are drawn by the caller. */
@@ -594,12 +598,10 @@ private fun DrawScope.drawGlobeSphere(
         while (parallel <= 60.0) { line(parallel, -180.0, parallel, 180.0, 96); parallel += 30.0 }
         drawPath(grid, Color(0xFF1E3548).copy(alpha = alpha), style = Stroke(width = 0.7.dp.toPx()))
 
-        // Land is drawn as a mesh of the cells that the coastline rings cover, not by filling the
-        // rings themselves. A ring that passes behind the horizon mirrors its far half onto the
-        // near half, and any polygon fill of it then covers ocean - the checkered pattern this was
-        // reported for. Cells are decided on in longitude and latitude instead, where there is no
-        // horizon to fold over, so the fill lands exactly on the coast at every rotation.
-        drawLandMesh(rings, center, radius, alpha, sinLat0, cosLat0, lon0, cosTilt, sinTilt)
+        // The land is drawn as coastline, not filled. Every fill this globe has had - filling the
+        // rings, filling the cells of a longitude/latitude grid, through a vertex mesh or a path -
+        // has at some rotation painted blocks of land colour across open ocean, and that is the
+        // checked pattern the globe kept being reported for. An outline cannot do that.
 
         val coast = Path()
         val HORIZON = 0.02f
@@ -692,193 +694,9 @@ private fun DrawScope.drawGlobeSphere(
             }
             flush()
         }
-        // The mesh ends on a one-degree staircase, so the pale line alone floats in and out of the
-        // fill. Stroking the coast in the land colour first covers the steps, and the land then ends
-        // where the outline says it does.
-        drawPath(coast, Color(0xFF2C4C68).copy(alpha = alpha), style = Stroke(width = 2.8.dp.toPx()))
         drawPath(coast, Color(0xFF9ED2F0).copy(alpha = 0.9f * alpha), style = Stroke(width = 1.dp.toPx()))
     }
 
     drawCircle(Desk.cyan.copy(alpha = 0.22f * alpha), radius = radius, center = center, style = Stroke(1.4.dp.toPx()))
     drawCircle(Color(0xFF5AC8FF).copy(alpha = 0.10f * alpha), radius = radius * 1.01f, center = center, style = Stroke(3.dp.toPx()))
-}
-
-/** Land coverage on a 2-degree longitude/latitude grid, worked out once from the coastline rings. */
-private object LandCover {
-    const val X = 360
-    const val Y = 180
-
-    private var maskedRings: Array<FloatArray>? = null
-    private var cells: BooleanArray? = null
-
-    fun mask(rings: Array<FloatArray>): BooleanArray {
-        val cached = cells
-        if (cached != null && maskedRings === rings) return cached
-        val out = BooleanArray(X * Y)
-        for (ring in rings) {
-            val n = ring.size / 2
-            if (n < 3) continue
-            var minLon = Double.MAX_VALUE
-            var maxLon = -Double.MAX_VALUE
-            var minLat = Double.MAX_VALUE
-            var maxLat = -Double.MAX_VALUE
-            for (k in 0 until n) {
-                val lon = ring[2 * k].toDouble()
-                val lat = ring[2 * k + 1].toDouble()
-                if (lon < minLon) minLon = lon
-                if (lon > maxLon) maxLon = lon
-                if (lat < minLat) minLat = lat
-                if (lat > maxLat) maxLat = lat
-            }
-            val i0 = (((minLon + 180.0) / 360.0) * X).toInt().coerceIn(0, X - 1)
-            val i1 = (((maxLon + 180.0) / 360.0) * X).toInt().coerceIn(0, X - 1)
-            val j0 = (((90.0 - maxLat) / 180.0) * Y).toInt().coerceIn(0, Y - 1)
-            val j1 = (((90.0 - minLat) / 180.0) * Y).toInt().coerceIn(0, Y - 1)
-            for (j in j0..j1) {
-                val lat = 90.0 - (j + 0.5) * 180.0 / Y
-                for (i in i0..i1) {
-                    val at = j * X + i
-                    if (out[at]) continue
-                    val lon = -180.0 + (i + 0.5) * 360.0 / X
-                    if (inside(ring, n, lon, lat)) out[at] = true
-                }
-            }
-        }
-        maskedRings = rings
-        cells = out
-        return out
-    }
-
-    private fun inside(ring: FloatArray, n: Int, lon: Double, lat: Double): Boolean {
-        var inside = false
-        var j = n - 1
-        for (i in 0 until n) {
-            val xi = ring[2 * i].toDouble()
-            val yi = ring[2 * i + 1].toDouble()
-            val xj = ring[2 * j].toDouble()
-            val yj = ring[2 * j + 1].toDouble()
-            if ((yi > lat) != (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi) {
-                inside = !inside
-            }
-            j = i
-        }
-        return inside
-    }
-}
-
-
-/** Buffers for the land mesh, sized once and reused so a fine mesh costs no allocation per frame. */
-private class LandMeshScratch(val xs: FloatArray, val ys: FloatArray, val depth: FloatArray,
-                              val positions: FloatArray, val indices: ShortArray) {
-    companion object {
-        private var cached: LandMeshScratch? = null
-
-        fun of(cols: Int, rows: Int, cells: Int): LandMeshScratch {
-            val have = cached
-            if (have != null && have.xs.size == cols * rows) return have
-            val made = LandMeshScratch(
-                FloatArray(cols * rows),
-                FloatArray(cols * rows),
-                FloatArray(cols * rows),
-                FloatArray(cols * rows * 2),
-                ShortArray(cells * 6),
-            )
-            cached = made
-            return made
-        }
-    }
-}
-
-/**
- * Draws the land as triangles over the near side of the ball.
- *
- * Each covered grid cell becomes two triangles when all four of its corners sit in front of the
- * horizon; a cell that reaches over the limb is skipped, and the coast outline drawn over the top
- * carries the silhouette there. Nothing here can paint the far side, which is what the polygon
- * fills kept doing.
- */
-private fun DrawScope.drawLandMesh(
-    rings: Array<FloatArray>,
-    center: Offset,
-    radius: Float,
-    alpha: Float,
-    sinLat0: Double,
-    cosLat0: Double,
-    lon0: Double,
-    cosTilt: Double,
-    sinTilt: Double,
-) {
-    val mask = LandCover.mask(rings)
-    val cols = LandCover.X + 1
-    val rows = LandCover.Y + 1
-    // Reused between frames: a one-degree mesh is sixty-five thousand points, and allocating that
-    // every frame is what makes a smooth globe expensive rather than the drawing itself.
-    val scratch = LandMeshScratch.of(cols, rows, LandCover.X * LandCover.Y)
-    val xs = scratch.xs
-    val ys = scratch.ys
-    val depth = scratch.depth
-    for (j in 0 until rows) {
-        val la = Math.toRadians((90.0 - j * 180.0 / LandCover.Y).coerceIn(-89.9, 89.9))
-        val sinLa = sin(la)
-        val cosLa = cos(la)
-        for (i in 0 until cols) {
-            val dLon = Math.toRadians(-180.0 + i * 360.0 / LandCover.X) - lon0
-            val cosc = sinLat0 * sinLa + cosLat0 * cosLa * cos(dLon)
-            val y3 = cosLat0 * sinLa - sinLat0 * cosLa * cos(dLon)
-            val at = j * cols + i
-            xs[at] = (center.x + radius * (cosLa * sin(dLon))).toFloat()
-            ys[at] = (center.y - radius * (y3 * cosTilt - cosc * sinTilt)).toFloat()
-            depth[at] = (y3 * sinTilt + cosc * cosTilt).toFloat()
-        }
-    }
-
-    val positions = scratch.positions
-    for (at in 0 until cols * rows) {
-        positions[at * 2] = xs[at]
-        positions[at * 2 + 1] = ys[at]
-    }
-    val indices = scratch.indices
-    var used = 0
-    for (j in 0 until LandCover.Y) {
-        for (i in 0 until LandCover.X) {
-            if (!mask[j * LandCover.X + i]) continue
-            val a = j * cols + i
-            val b = a + 1
-            val c = a + cols
-            val d = c + 1
-            if (depth[a] <= 0.02f || depth[b] <= 0.02f || depth[c] <= 0.02f || depth[d] <= 0.02f) continue
-            indices[used++] = a.toShort()
-            indices[used++] = b.toShort()
-            indices[used++] = d.toShort()
-            indices[used++] = a.toShort()
-            indices[used++] = d.toShort()
-            indices[used++] = c.toShort()
-        }
-    }
-    if (used == 0) return
-    val argb = ((alpha.coerceIn(0f, 1f) * 255f).toInt() shl 24) or 0x2C4C68
-    drawIntoCanvas { canvas ->
-        val paint = org.jetbrains.skia.Paint().apply {
-            color = argb
-            isAntiAlias = false
-        }
-        // Drawing straight onto the Skia canvas leaves its state changed for whatever is painted
-        // next, and the panels and their glyphs came out blank because of it. Save and restore it
-        // so this draw stays a closed box.
-        val native = canvas.nativeCanvas
-        val save = native.save()
-        try {
-            native.drawVertices(
-                org.jetbrains.skia.VertexMode.TRIANGLES,
-                positions,
-                null,
-                null,
-                indices.copyOf(used),
-                org.jetbrains.skia.BlendMode.SRC_OVER,
-                paint,
-            )
-        } finally {
-            native.restoreToCount(save)
-        }
-    }
 }

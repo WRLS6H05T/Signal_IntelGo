@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -310,11 +311,18 @@ private fun MapPane(
     onSpin: () -> Unit,
     logged: Map<String, Int>,
 ) {
+    // The rail and the telemetry column are fixed widths, and together they can add up to more
+    // than the window: the globe was then squeezed to a dot and the panels rode over it. Narrow
+    // the window and the telemetry column goes first, then the rail narrows, so the map - the
+    // thing this pane exists for - always keeps its room.
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+    val showTelemetry = maxWidth >= 1180.dp
+    val railWidth = if (maxWidth >= 1000.dp) 280.dp else 210.dp
     Row(modifier.fillMaxWidth()) {
         // The rail and the layer panel share one column: the panel is a header that opens over
         // the sensors, so switching a layer never covers the map being read.
         var intelOpen by remember { mutableStateOf(false) }
-        Box(Modifier.width(280.dp).fillMaxHeight()) {
+        Box(Modifier.width(railWidth).fillMaxHeight()) {
             SensorsRail(
                 modifier = Modifier.fillMaxSize(),
                 ports = ports,
@@ -363,8 +371,11 @@ private fun MapPane(
             spin = spin,
             onSpin = onSpin,
         )
-        VerticalHairline()
-        Telemetry(modifier = Modifier.width(420.dp).fillMaxHeight(), board = active)
+        if (showTelemetry) {
+            VerticalHairline()
+            Telemetry(modifier = Modifier.width(420.dp).fillMaxHeight(), board = active)
+        }
+    }
     }
 }
 
@@ -381,9 +392,12 @@ private fun BoardPane(
     active: BoardState?,
     console: List<ConsoleLine>,
 ) {
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+    val showTelemetry = maxWidth >= 1240.dp
+    val railWidth = if (maxWidth >= 1000.dp) 310.dp else 230.dp
     Row(modifier.fillMaxWidth()) {
         SensorsRail(
-            modifier = Modifier.width(310.dp).fillMaxHeight(),
+            modifier = Modifier.width(railWidth).fillMaxHeight(),
             ports = ports,
             boards = boards,
             activePath = activePath,
@@ -397,8 +411,11 @@ private fun BoardPane(
             lines = console,
             host = host,
         )
-        VerticalHairline()
-        Telemetry(modifier = Modifier.width(480.dp).fillMaxHeight(), board = active)
+        if (showTelemetry) {
+            VerticalHairline()
+            Telemetry(modifier = Modifier.width(480.dp).fillMaxHeight(), board = active)
+        }
+    }
     }
 }
 

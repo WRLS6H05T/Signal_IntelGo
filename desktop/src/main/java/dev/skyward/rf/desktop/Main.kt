@@ -15,6 +15,7 @@ import dev.skyward.rf.desktop.ui.DeskTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import java.awt.Dimension
 import java.io.File
 
 /**
@@ -48,6 +49,9 @@ fun main() = application {
         // the session bar below the screen edge on a 864-pixel-tall display.
         state = rememberWindowState(placement = WindowPlacement.Maximized),
     ) {
+        // The panes are laid out in fixed-width columns; below this the globe loses its room and
+        // the telemetry panel rides over the map, so the window is not allowed to get smaller.
+        LaunchedEffect(Unit) { window.minimumSize = Dimension(1100, 700) }
         DeskTheme {
             CommandCenter(host, recorder, sky)
         }
