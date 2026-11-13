@@ -502,12 +502,14 @@ private fun DrawScope.drawMap(
     // one. A constellation is evenly phased, so a stride samples it evenly and the marks line up in
     // rows - a checkered sheet laid over the globe. A hash scatters them, and because the hash is
     // fixed the same satellites are plotted on every tick instead of blinking in and out.
-    val plotted = if (sats.size > 3_000) 450 else sats.size
-    val every = if (sats.size > plotted) sats.size / plotted else 1
+    // The step is quantised to a power of two. A plain size/450 moved every time the catalogue
+    // changed by a single satellite, and each move re-picked the whole subset at once, so the grid
+    // of marks blinked out and back. A doubling boundary is crossed once in a very long while.
+    val every = if (sats.size <= 3_000) 1 else Integer.highestOneBit((sats.size / 450).coerceAtLeast(1))
     // The line down to the ground is what makes the ball read as a shell rather than a sticker,
     // but one per satellite crossed into a lattice of wires that looked like a checkered texture
     // laid over the map. A share of them carries the same sense of depth with no visible grid.
-    val tetherStep = if (sats.size > 3_000) 5 else 1
+    val tetherStep = if (every > 1) 5 else 1
     sats.forEach { sat ->
         if (every > 1 && Math.floorMod(sat.noradId.hashCode(), every) != 0) return@forEach
         val lift = (ln(1.0 + sat.altKm * 1000.0 / 500.0) * 0.022).coerceIn(0.0, 0.30)
