@@ -598,10 +598,14 @@ private fun DrawScope.drawGlobeSphere(
         while (parallel <= 60.0) { line(parallel, -180.0, parallel, 180.0, 96); parallel += 30.0 }
         drawPath(grid, Color(0xFF1E3548).copy(alpha = alpha), style = Stroke(width = 0.7.dp.toPx()))
 
-        // The land is drawn as coastline, not filled. Every fill this globe has had - filling the
-        // rings, filling the cells of a longitude/latitude grid, through a vertex mesh or a path -
-        // has at some rotation painted blocks of land colour across open ocean, and that is the
-        // checked pattern the globe kept being reported for. An outline cannot do that.
+        // The land is filled from a longitude/latitude grid, as one path of cell quads: a ring that
+        // crosses the horizon has no honest screen-space polygon, but a grid cell is simply in or
+        // out. It is a path rather than a vertex mesh because Skia's drawVertices takes SHORT
+        // indices over a shared vertex table, and cells drawn through that table landed as blocks
+        // of land colour far from where the grid put them.
+        if (radius > 60f) {
+            drawLandMesh(rings, center, radius, alpha, sinLat0, cosLat0, lon0, cosTilt, sinTilt)
+        }
 
         val coast = Path()
         val HORIZON = 0.02f
@@ -694,9 +698,149 @@ private fun DrawScope.drawGlobeSphere(
             }
             flush()
         }
+        // The fill ends on a one-degree staircase. Stroking the coast in the land colour first
+        // covers the steps, so the land ends where the outline says it does, and the pale line
+        // then reads as the coast itself.
+        drawPath(coast, Color(0xFF2C4C68).copy(alpha = alpha), style = Stroke(width = 2.2.dp.toPx()))
         drawPath(coast, Color(0xFF9ED2F0).copy(alpha = 0.9f * alpha), style = Stroke(width = 1.dp.toPx()))
     }
 
     drawCircle(Desk.cyan.copy(alpha = 0.22f * alpha), radius = radius, center = center, style = Stroke(1.4.dp.toPx()))
     drawCircle(Color(0xFF5AC8FF).copy(alpha = 0.10f * alpha), radius = radius * 1.01f, center = center, style = Stroke(3.dp.toPx()))
+}
+
+/** Land coverage on a 2-degree longitude/latitude grid, worked out once from the coastline rings. */
+private object LandCover {
+    const val X = 360
+    const val Y = 180
+
+    private var maskedRings: Array<FloatArray>? = null
+    private var cells: BooleanArray? = null
+
+    fun mask(rings: Array<FloatArray>): BooleanArray {
+        val cached = cells
+        if (cached != null && maskedRings === rings) return cached
+        val out = BooleanArray(X * Y)
+        for (ring in rings) {
+            val n = ring.size / 2
+            if (n < 3) continue
+            var minLon = Double.MAX_VALUE
+            var maxLon = -Double.MAX_VALUE
+            var minLat = Double.MAX_VALUE
+            var maxLat = -Double.MAX_VALUE
+            for (k in 0 until n) {
+                val lon = ring[2 * k].toDouble()
+                val lat = ring[2 * k + 1].toDouble()
+                if (lon < minLon) minLon = lon
+                if (lon > maxLon) maxLon = lon
+                if (lat < minLat) minLat = lat
+                if (lat > maxLat) maxLat = lat
+            }
+            val i0 = (((minLon + 180.0) / 360.0) * X).toInt().coerceIn(0, X - 1)
+            val i1 = (((maxLon + 180.0) / 360.0) * X).toInt().coerceIn(0, X - 1)
+            val j0 = (((90.0 - maxLat) / 180.0) * Y).toInt().coerceIn(0, Y - 1)
+            val j1 = (((90.0 - minLat) / 180.0) * Y).toInt().coerceIn(0, Y - 1)
+            for (j in j0..j1) {
+                val lat = 90.0 - (j + 0.5) * 180.0 / Y
+                for (i in i0..i1) {
+                    val at = j * X + i
+                    if (out[at]) continue
+                    val lon = -180.0 + (i + 0.5) * 360.0 / X
+                    if (inside(ring, n, lon, lat)) out[at] = true
+                }
+            }
+        }
+        maskedRings = rings
+        cells = out
+        return out
+    }
+
+    private fun inside(ring: FloatArray, n: Int, lon: Double, lat: Double): Boolean {
+        var inside = false
+        var j = n - 1
+        for (i in 0 until n) {
+            val xi = ring[2 * i].toDouble()
+            val yi = ring[2 * i + 1].toDouble()
+            val xj = ring[2 * j].toDouble()
+            val yj = ring[2 * j + 1].toDouble()
+            if ((yi > lat) != (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi) {
+                inside = !inside
+            }
+            j = i
+        }
+        return inside
+    }
+}
+
+/** Buffers for the land grid, sized once and reused so the fill costs no allocation per frame. */
+private class LandMeshScratch(val xs: FloatArray, val ys: FloatArray, val depth: FloatArray) {
+    companion object {
+        private var cached: LandMeshScratch? = null
+
+        fun of(cols: Int, rows: Int): LandMeshScratch {
+            val have = cached
+            if (have != null && have.xs.size == cols * rows) return have
+            val made = LandMeshScratch(
+                FloatArray(cols * rows),
+                FloatArray(cols * rows),
+                FloatArray(cols * rows),
+            )
+            cached = made
+            return made
+        }
+    }
+}
+
+/** Fills the land: every grid cell whose centre the coastline covers, as one path of quads. */
+private fun DrawScope.drawLandMesh(
+    rings: Array<FloatArray>,
+    center: Offset,
+    radius: Float,
+    alpha: Float,
+    sinLat0: Double,
+    cosLat0: Double,
+    lon0: Double,
+    cosTilt: Double,
+    sinTilt: Double,
+) {
+    val mask = LandCover.mask(rings)
+    val cols = LandCover.X + 1
+    val rows = LandCover.Y + 1
+    val scratch = LandMeshScratch.of(cols, rows)
+    val xs = scratch.xs
+    val ys = scratch.ys
+    val depth = scratch.depth
+    for (j in 0 until rows) {
+        val la = Math.toRadians((90.0 - j * 180.0 / LandCover.Y).coerceIn(-89.9, 89.9))
+        val sinLa = sin(la)
+        val cosLa = cos(la)
+        for (i in 0 until cols) {
+            val dLon = Math.toRadians(-180.0 + i * 360.0 / LandCover.X) - lon0
+            val cosc = sinLat0 * sinLa + cosLat0 * cosLa * cos(dLon)
+            val y3 = cosLat0 * sinLa - sinLat0 * cosLa * cos(dLon)
+            val at = j * cols + i
+            xs[at] = (center.x + radius * (cosLa * sin(dLon))).toFloat()
+            ys[at] = (center.y - radius * (y3 * cosTilt - cosc * sinTilt)).toFloat()
+            depth[at] = (y3 * sinTilt + cosc * cosTilt).toFloat()
+        }
+    }
+
+    val land = Path()
+    for (j in 0 until LandCover.Y) {
+        for (i in 0 until LandCover.X) {
+            if (!mask[j * LandCover.X + i]) continue
+            val a = j * cols + i
+            val b = a + 1
+            val c = a + cols
+            val d = c + 1
+            // A cell reaching past the limb would drag a sliver of land across the disc.
+            if (depth[a] <= 0.02f || depth[b] <= 0.02f || depth[c] <= 0.02f || depth[d] <= 0.02f) continue
+            land.moveTo(xs[a], ys[a])
+            land.lineTo(xs[b], ys[b])
+            land.lineTo(xs[d], ys[d])
+            land.lineTo(xs[c], ys[c])
+            land.close()
+        }
+    }
+    drawPath(land, Color(0xFF2C4C68).copy(alpha = alpha.coerceIn(0f, 1f)))
 }
