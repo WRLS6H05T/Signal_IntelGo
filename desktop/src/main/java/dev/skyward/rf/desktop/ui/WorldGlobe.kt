@@ -4,6 +4,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PointMode
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -69,6 +71,12 @@ class GlobeInk {
      */
     internal var trigFor: Array<FloatArray>? = null
     internal var trig: Array<FloatArray> = emptyArray()
+    /**
+     * Land sampled once from the coastline rings, four floats per point: cos(lat), sin(lat),
+     * cos(lon), sin(lon). See [landCloud] for why the fill is sampled rather than filled.
+     */
+    internal var cloudFor: Array<FloatArray>? = null
+    internal var cloud: FloatArray = FloatArray(0)
 }
 
 /**
@@ -143,6 +151,18 @@ fun DrawScope.drawGlobeWorld(
     disc.reset()
     disc.addOval(Rect(center.x - radius, center.y - radius, center.x + radius, center.y + radius))
 
+    val sinLat0F = sinLat0.toFloat()
+    val cosLat0F = cosLat0.toFloat()
+    val lonCos0F = lonCos0.toFloat()
+    val lonSin0F = lonSin0.toFloat()
+    val cosTiltF = cosTilt.toFloat()
+    val sinTiltF = sinTilt.toFloat()
+    if (ink.cloudFor !== rings) {
+        ink.cloud = landCloud(rings)
+        ink.cloudFor = rings
+    }
+    val cloud = ink.cloud
+
     clipPath(disc) {
         val coast = Color(COAST).copy(alpha = 0.8f * alpha)
         val coastWidth = 0.8.dp.toPx()
@@ -215,7 +235,6 @@ fun DrawScope.drawGlobeWorld(
         var rf = ink.front
         // Far enough past the rim that every closing edge is clipped, close enough that the
         // edge from a crossing point stays within a pixel of the limb.
-        val outside = radius * 1.02f
         // A vertex in front of the camera: past this the projection mirrors, so it is behind.
         val HORIZON = 0.02f
 
@@ -250,8 +269,6 @@ fun DrawScope.drawGlobeWorld(
                 ink.depth = rd
                 ink.front = rf
             }
-            var lastCrossX = 0f
-            var lastCrossY = 0f
             var front = 0
             for (k in 0 until n) {
                 projectIndexed(tri, k)
@@ -265,72 +282,6 @@ fun DrawScope.drawGlobeWorld(
             }
             if (front == 0) continue
             for (k in 0 until n) rf[k] = rd[k] > HORIZON
-
-            // The land, clipped at the horizon and closed with a straight chord between its two
-            // crossing points.
-            //
-            // Every earlier attempt filled a whole ring and closed it somehow - outside the disc,
-            // then with an arc along the limb - and each of those closures is a choice that flips
-            // side when two crossings line up opposite each other, which is the checkered
-            // land/water flash as the ball turns. A chord makes no such choice: the fill is the
-            // same at every camera angle. The cost is a thin lens of land at the limb left
-            // unfilled, which the limb's own compression hides.
-            landPath.reset()
-            if (front == n) {
-                landPath.moveTo(rx[0], ry[0])
-                for (k in 1 until n) landPath.lineTo(rx[k], ry[k])
-                landPath.close()
-            } else {
-                var startIdx = 0
-                while (startIdx < n && rf[startIdx]) startIdx++
-                if (startIdx >= n) startIdx = 0
-                var pen = false
-                var firstX = 0f
-                var firstY = 0f
-                fun crossing(k: Int, m: Int): Float {
-                    val t = (HORIZON - rd[k]) / (rd[m] - rd[k])
-                    lastCrossX = rx[k] + (rx[m] - rx[k]) * t
-                    lastCrossY = ry[k] + (ry[m] - ry[k]) * t
-                    return t
-                }
-                fun emit() {
-                    if (!pen) return
-                    landPath.lineTo(firstX, firstY)
-                    landPath.close()
-                    pen = false
-                }
-                for (step in 0 until n) {
-                    val k = (startIdx + step) % n
-                    val m = (startIdx + step + 1) % n
-                    if (!rf[k]) {
-                        emit()
-                        continue
-                    }
-                    if (!pen) {
-                        if (!rf[(k - 1 + n) % n]) {
-                            // Entering over the limb: start at the crossing, not at the first
-                            // visible vertex, so the chord back closes on the limb itself.
-                            crossing((k - 1 + n) % n, k)
-                            landPath.moveTo(lastCrossX, lastCrossY)
-                            firstX = lastCrossX
-                            firstY = lastCrossY
-                        } else {
-                            landPath.moveTo(rx[k], ry[k])
-                            firstX = rx[k]
-                            firstY = ry[k]
-                        }
-                        pen = true
-                    }
-                    landPath.lineTo(rx[k], ry[k])
-                    if (!rf[m]) {
-                        crossing(k, m)
-                        landPath.lineTo(lastCrossX, lastCrossY)
-                        emit()
-                    }
-                }
-                emit()
-            }
-            drawPath(landPath, Color(LAND_MID), alpha = alpha)
 
             // Coastline only where both ends of a segment are genuinely on the near side, so no
             // stroke ever runs along the clipped closure.
@@ -348,6 +299,44 @@ fun DrawScope.drawGlobeWorld(
                 }
             }
         }
+        // The land, as points sampled once from the rings.
+        //
+        // Filling the rings as polygons needs a closure where a ring crosses the limb, and
+        // every closure on offer - pushing hidden points outside the disc, an arc along the rim,
+        // a chord, a threshold on how far apart the crossings are - flips side as the crossings
+        // move. Each flip swapped blocks of land and water, which is the alternating pattern.
+        // A sample is land or it is not, so there is nothing to choose and nothing to flip; the
+        // only motion is the cells turning, and at half a degree that is under two pixels.
+        if (cloud.isNotEmpty()) {
+            val marks = ArrayList<Offset>(cloud.size / 4)
+            var i = 0
+            while (i < cloud.size) {
+                val cLat = cloud[i]
+                val sLat = cloud[i + 1]
+                val cLon = cloud[i + 2]
+                val sLon = cloud[i + 3]
+                i += 4
+                val cosD = cLon * lonCos0F + sLon * lonSin0F
+                val sinD = sLon * lonCos0F - cLon * lonSin0F
+                val cosc = sinLat0F * sLat + cosLat0F * cLat * cosD
+                val y3 = cosLat0F * sLat - sinLat0F * cLat * cosD
+                if (y3 * sinTiltF + cosc * cosTiltF <= 0f) continue
+                marks.add(
+                    Offset(
+                        center.x + radius * (cLat * sinD),
+                        center.y - radius * (y3 * cosTiltF - cosc * sinTiltF),
+                    ),
+                )
+            }
+            drawPoints(
+                points = marks,
+                pointMode = PointMode.Points,
+                color = Color(LAND_MID),
+                strokeWidth = radius * 0.0102f,
+                cap = StrokeCap.Square,
+                alpha = alpha,
+            )
+        }
         drawPath(coastPath, coast, style = Stroke(width = coastWidth))
     }
 
@@ -358,4 +347,65 @@ fun DrawScope.drawGlobeWorld(
         center = center,
         style = Stroke(width = 1.6.dp.toPx()),
     )
+}
+
+/**
+ * Land sampled on a half-degree grid, as unit-sphere cosines and sines.
+ *
+ * Each row of latitude is crossed against every ring edge and filled even-odd, which is exact for
+ * the bundled coastline and costs one pass over the geometry; the frame then only projects the
+ * points. A cell centre is either inside the land or outside it, so no closure is ever needed and
+ * the fill cannot flip between frames.
+ */
+private fun landCloud(rings: Array<FloatArray>): FloatArray {
+    val cellDeg = 0.5
+    val rows = 360
+    val out = ArrayList<Float>(160_000)
+    var crossings = DoubleArray(1 shl 13)
+    for (gy in 0 until rows) {
+        val lat = -90.0 + (gy + 0.5) * cellDeg
+        var count = 0
+        for (ring in rings) {
+            val n = ring.size / 2
+            if (n < 3) continue
+            var lonA = ring[(n - 1) * 2].toDouble()
+            var latA = ring[(n - 1) * 2 + 1].toDouble()
+            for (k in 0 until n) {
+                val lonB = ring[k * 2].toDouble()
+                val latB = ring[k * 2 + 1].toDouble()
+                if ((latA > lat) != (latB > lat)) {
+                    val t = (lat - latA) / (latB - latA)
+                    var lon = lonA + (lonB - lonA) * t
+                    if (lon > 180.0) lon -= 360.0
+                    if (lon < -180.0) lon += 360.0
+                    if (count == crossings.size) crossings = crossings.copyOf(crossings.size * 2)
+                    crossings[count++] = lon
+                }
+                lonA = lonB
+                latA = latB
+            }
+        }
+        if (count < 2) continue
+        val sorted = crossings.copyOf(count)
+        sorted.sort()
+        val sinLat = Math.sin(Math.toRadians(lat))
+        val cosLat = Math.cos(Math.toRadians(lat))
+        var i = 0
+        while (i + 1 < count) {
+            var lon = sorted[i]
+            val to = sorted[i + 1]
+            while (lon < to) {
+                val lonR = Math.toRadians(lon)
+                out.add(cosLat.toFloat())
+                out.add(sinLat.toFloat())
+                out.add(Math.cos(lonR).toFloat())
+                out.add(Math.sin(lonR).toFloat())
+                lon += cellDeg
+            }
+            i += 2
+        }
+    }
+    val arr = FloatArray(out.size)
+    for (i in out.indices) arr[i] = out[i]
+    return arr
 }
