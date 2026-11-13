@@ -311,14 +311,14 @@ private fun MapPane(
     onSpin: () -> Unit,
     logged: Map<String, Int>,
 ) {
-    // The rail and the telemetry column are fixed widths, and together they can add up to more
-    // than the window: the globe was then squeezed to a dot and the panels rode over it. Narrow
-    // the window and the telemetry column goes first, then the rail narrows, so the map - the
-    // thing this pane exists for - always keeps its room.
-    BoxWithConstraints(modifier.fillMaxWidth()) {
-    val showTelemetry = maxWidth >= 1180.dp
-    val railWidth = if (maxWidth >= 1000.dp) 280.dp else 210.dp
-    Row(modifier.fillMaxWidth()) {
+    // The rail and the telemetry column are fixed widths and the map takes what is left. They are
+    // sized from the pane rather than by weight: as weighted siblings the globe took the whole
+    // remainder and pushed the telemetry column past the right edge of the window.
+    BoxWithConstraints(modifier.fillMaxSize()) {
+    val railWidth = 280.dp
+    val panelWidth = if (maxWidth >= 900.dp) 320.dp else 250.dp
+    val mapWidth = maxWidth - railWidth - panelWidth - 2.dp
+    Row(Modifier.fillMaxSize()) {
         // The rail and the layer panel share one column: the panel is a header that opens over
         // the sensors, so switching a layer never covers the map being read.
         var intelOpen by remember { mutableStateOf(false) }
@@ -359,7 +359,10 @@ private fun MapPane(
         }
         VerticalHairline()
         MapView(
-            modifier = Modifier.weight(1f).fillMaxHeight(),
+            // Whatever the two fixed columns did not take. A weight here let the globe claim the
+            // whole row and carry the telemetry column off the right edge: inside the row the
+            // compass box stops being the implicit receiver, so the width is computed above.
+            modifier = Modifier.width(mapWidth).fillMaxHeight(),
             sats = skyState.sats,
             aircraft = skyState.aircraft,
             mesh = skyState.mesh,
@@ -371,10 +374,8 @@ private fun MapPane(
             spin = spin,
             onSpin = onSpin,
         )
-        if (showTelemetry) {
-            VerticalHairline()
-            Telemetry(modifier = Modifier.width(420.dp).fillMaxHeight(), board = active)
-        }
+        VerticalHairline()
+        Telemetry(modifier = Modifier.width(panelWidth).fillMaxHeight(), board = active)
     }
     }
 }
@@ -392,10 +393,11 @@ private fun BoardPane(
     active: BoardState?,
     console: List<ConsoleLine>,
 ) {
-    BoxWithConstraints(modifier.fillMaxWidth()) {
-    val showTelemetry = maxWidth >= 1240.dp
-    val railWidth = if (maxWidth >= 1000.dp) 310.dp else 230.dp
-    Row(modifier.fillMaxWidth()) {
+    BoxWithConstraints(modifier.fillMaxSize()) {
+    val railWidth = 310.dp
+    val panelWidth = if (maxWidth >= 940.dp) 340.dp else 270.dp
+    val mapWidth = maxWidth - railWidth - panelWidth - 2.dp
+    Row(Modifier.fillMaxSize()) {
         SensorsRail(
             modifier = Modifier.width(railWidth).fillMaxHeight(),
             ports = ports,
@@ -406,15 +408,13 @@ private fun BoardPane(
         )
         VerticalHairline()
         ConsolePane(
-            modifier = Modifier.weight(1f).fillMaxHeight(),
+            modifier = Modifier.width(mapWidth).fillMaxHeight(),
             board = active,
             lines = console,
             host = host,
         )
-        if (showTelemetry) {
-            VerticalHairline()
-            Telemetry(modifier = Modifier.width(480.dp).fillMaxHeight(), board = active)
-        }
+        VerticalHairline()
+        Telemetry(modifier = Modifier.width(panelWidth).fillMaxHeight(), board = active)
     }
     }
 }
@@ -748,10 +748,19 @@ private fun Telemetry(modifier: Modifier, board: BoardState?) {
 }
 
 @Composable
-private fun StatCell(label: String, value: String, color: Color) {
-    Column(Modifier.padding(end = 14.dp)) {
-        Text(label, color = Desk.dim, fontSize = 9.sp, letterSpacing = 1.sp, fontFamily = Desk.mono)
-        Text(value, color = color, fontSize = 13.sp, fontFamily = Desk.mono, maxLines = 1)
+private fun RowScope.StatCell(label: String, value: String, color: Color) {
+    // Each cell takes its share of the panel, so a long value shortens rather than pushing the
+    // row past the edge of the window.
+    Column(Modifier.weight(1f).padding(end = 10.dp)) {
+        Text(label, color = Desk.dim, fontSize = 9.sp, letterSpacing = 1.sp, fontFamily = Desk.mono, maxLines = 1)
+        Text(
+            value,
+            color = color,
+            fontSize = 13.sp,
+            fontFamily = Desk.mono,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
