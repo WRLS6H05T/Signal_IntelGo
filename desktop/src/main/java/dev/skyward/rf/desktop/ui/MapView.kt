@@ -287,6 +287,12 @@ fun MapView(
                 fontFamily = Desk.mono,
             )
             Spacer(Modifier.width(8.dp))
+            // The ball and the plane are one zoom, so the toggle only has to land on the far side of
+            // the hand-off; the camera stays where the operator left it either way.
+            MapButton(if (MapMath.globeBlend(zoom) > 0.5f) "MAP" else "GLOBE") {
+                zoom = if (MapMath.globeBlend(zoom) > 0.5f) MapMath.HANDOFF + 1.0 else 4.0
+            }
+            Spacer(Modifier.width(6.dp))
             MapButton(if (spin > 0) "SPIN ${if (spin == 2) "3X" else "1X"}" else "SPIN") { onSpin() }
             Spacer(Modifier.width(6.dp))
             MapButton("−") { zoom = (zoom - 1.0).coerceIn(MapMath.MIN_ZOOM, MapMath.MAX_ZOOM) }
@@ -419,10 +425,28 @@ private fun DrawScope.drawMap(
         return pt[2] > 0.02f
     }
 
-    // ---- observer ----
-    if (layers.boards && observer != null && place(observer.lat, observer.lon, 0.0)) {
-        drawCircle(Desk.accent, radius = 3.5.dp.toPx(), center = Offset(pt[0], pt[1]))
-        drawCircle(Desk.accent.copy(alpha = 0.35f), radius = 9.dp.toPx(), center = Offset(pt[0], pt[1]), style = Stroke(1.dp.toPx()))
+    // ---- observer: the pin is the operator's own fix, so it does not belong to a layer ----
+    if (observer != null && place(observer.lat, observer.lon, 0.0)) {
+        val tip = Offset(pt[0], pt[1])
+        val headR = 5.5.dp.toPx()
+        val headY = tip.y - 11.dp.toPx()
+        // A pin, not a dot: at a glance the fix has to be distinguishable from the markers around
+        // it, and its point sits on the position while the head carries the hole.
+        val pin = Path().apply {
+            moveTo(tip.x, tip.y)
+            cubicTo(tip.x - headR * 0.9f, tip.y - headR * 1.1f, tip.x - headR, headY + headR * 0.35f, tip.x - headR, headY)
+            arcTo(Rect(tip.x - headR, headY - headR, tip.x + headR, headY + headR), 180f, 180f, false)
+            cubicTo(tip.x + headR, headY + headR * 0.35f, tip.x + headR * 0.9f, tip.y - headR * 1.1f, tip.x, tip.y)
+            close()
+        }
+        drawPath(pin, Desk.accent)
+        drawCircle(Desk.panel, radius = headR * 0.42f, center = Offset(tip.x, headY))
+        drawCircle(
+            Desk.accent.copy(alpha = 0.3f),
+            radius = 13.dp.toPx(),
+            center = tip,
+            style = Stroke(1.dp.toPx()),
+        )
     }
 
     // ---- the Wi-Fi and BLE the boards hear, fanned around the fix that heard them ----
