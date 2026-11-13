@@ -58,6 +58,7 @@ class GlobeInk {
     internal val coast: Path = Path()
     internal var x: FloatArray = FloatArray(512)
     internal var y: FloatArray = FloatArray(512)
+    internal var depth: FloatArray = FloatArray(512)
     internal var front: BooleanArray = BooleanArray(512)
     /**
      * sin/cos of every land vertex, four floats per point. The coastline does not move, so the
@@ -210,10 +211,13 @@ fun DrawScope.drawGlobeWorld(
         coastPath.reset()
         var rx = ink.x
         var ry = ink.y
+        var rd = ink.depth
         var rf = ink.front
         // Far enough past the rim that every closing edge is clipped, close enough that the
         // edge from a crossing point stays within a pixel of the limb.
         val outside = radius * 1.02f
+        // A vertex in front of the camera: past this the projection mirrors, so it is behind.
+        val HORIZON = 0.02f
 
         // The same maths as [project], with the sines taken from the cache and the longitude
         // rotation folded into two constants. The ten thousand coastline vertices are the
@@ -239,39 +243,93 @@ fun DrawScope.drawGlobeWorld(
             if (rx.size < n) {
                 rx = FloatArray(n)
                 ry = FloatArray(n)
+                rd = FloatArray(n)
                 rf = BooleanArray(n)
                 ink.x = rx
                 ink.y = ry
+                ink.depth = rd
                 ink.front = rf
             }
+            var lastCrossX = 0f
+            var lastCrossY = 0f
             var front = 0
-            var lastAngle = 0.0
             for (k in 0 until n) {
                 projectIndexed(tri, k)
-                val dx = pt[0] - center.x
-                val dy = pt[1] - center.y
-                val len = sqrt(dx * dx + dy * dy)
-                val near = pt[2] > 0.02f
-                rf[k] = near
-                if (near) {
-                    rx[k] = pt[0]
-                    ry[k] = pt[1]
-                    front++
-                    if (len > 0.001f) lastAngle = atan2(dy.toDouble(), dx.toDouble())
-                } else {
-                    // Directly behind the centre the direction is undefined, so the previous
-                    // point's angle is reused rather than letting a vertex snap to the middle.
-                    val a = if (len > 0.001f) atan2(dy.toDouble(), dx.toDouble()) else lastAngle
-                    rx[k] = center.x + outside * cos(a).toFloat()
-                    ry[k] = center.y + outside * sin(a).toFloat()
-                }
+                // Screen position and facing of every vertex are kept as they are: the fill clips
+                // the ring against the horizon itself, so it needs the real point rather than one
+                // pushed out past the rim.
+                rx[k] = pt[0]
+                ry[k] = pt[1]
+                rd[k] = pt[2]
+                if (pt[2] > HORIZON) front++
             }
             if (front == 0) continue
+            for (k in 0 until n) rf[k] = rd[k] > HORIZON
 
+            // The land, clipped at the horizon and closed with a straight chord between its two
+            // crossing points.
+            //
+            // Every earlier attempt filled a whole ring and closed it somehow - outside the disc,
+            // then with an arc along the limb - and each of those closures is a choice that flips
+            // side when two crossings line up opposite each other, which is the checkered
+            // land/water flash as the ball turns. A chord makes no such choice: the fill is the
+            // same at every camera angle. The cost is a thin lens of land at the limb left
+            // unfilled, which the limb's own compression hides.
             landPath.reset()
-            landPath.moveTo(rx[0], ry[0])
-            for (k in 1 until n) landPath.lineTo(rx[k], ry[k])
-            landPath.close()
+            if (front == n) {
+                landPath.moveTo(rx[0], ry[0])
+                for (k in 1 until n) landPath.lineTo(rx[k], ry[k])
+                landPath.close()
+            } else {
+                var startIdx = 0
+                while (startIdx < n && rf[startIdx]) startIdx++
+                if (startIdx >= n) startIdx = 0
+                var pen = false
+                var firstX = 0f
+                var firstY = 0f
+                fun crossing(k: Int, m: Int): Float {
+                    val t = (HORIZON - rd[k]) / (rd[m] - rd[k])
+                    lastCrossX = rx[k] + (rx[m] - rx[k]) * t
+                    lastCrossY = ry[k] + (ry[m] - ry[k]) * t
+                    return t
+                }
+                fun emit() {
+                    if (!pen) return
+                    landPath.lineTo(firstX, firstY)
+                    landPath.close()
+                    pen = false
+                }
+                for (step in 0 until n) {
+                    val k = (startIdx + step) % n
+                    val m = (startIdx + step + 1) % n
+                    if (!rf[k]) {
+                        emit()
+                        continue
+                    }
+                    if (!pen) {
+                        if (!rf[(k - 1 + n) % n]) {
+                            // Entering over the limb: start at the crossing, not at the first
+                            // visible vertex, so the chord back closes on the limb itself.
+                            crossing((k - 1 + n) % n, k)
+                            landPath.moveTo(lastCrossX, lastCrossY)
+                            firstX = lastCrossX
+                            firstY = lastCrossY
+                        } else {
+                            landPath.moveTo(rx[k], ry[k])
+                            firstX = rx[k]
+                            firstY = ry[k]
+                        }
+                        pen = true
+                    }
+                    landPath.lineTo(rx[k], ry[k])
+                    if (!rf[m]) {
+                        crossing(k, m)
+                        landPath.lineTo(lastCrossX, lastCrossY)
+                        emit()
+                    }
+                }
+                emit()
+            }
             drawPath(landPath, Color(LAND_MID), alpha = alpha)
 
             // Coastline only where both ends of a segment are genuinely on the near side, so no
