@@ -7,6 +7,7 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import dev.skyward.rf.desktop.DeskSettings
 import dev.skyward.rf.desktop.hardware.SensorHost
 import dev.skyward.rf.desktop.session.SessionRecorder
 import dev.skyward.rf.desktop.sky.DeskSky
@@ -32,6 +33,7 @@ fun main() = application {
     val scope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Default) }
     val home = remember { File(System.getProperty("user.home"), ".signal-intelgo") }
     val sky = remember { DeskSky(scope, home) }
+    val settings = remember { DeskSettings(home) }
     val host = remember {
         SensorHost(scope) { board ->
             // A board's own fix goes on its rows; a board without one records blank coordinates
@@ -53,7 +55,7 @@ fun main() = application {
         // the telemetry panel rides over the map, so the window is not allowed to get smaller.
         LaunchedEffect(Unit) { window.minimumSize = Dimension(1100, 700) }
         DeskTheme {
-            CommandCenter(host, recorder, sky)
+            CommandCenter(host, recorder, sky, settings)
         }
     }
 }

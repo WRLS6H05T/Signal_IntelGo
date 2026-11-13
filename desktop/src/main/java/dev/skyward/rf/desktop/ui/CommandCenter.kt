@@ -21,7 +21,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedTextField
@@ -50,7 +52,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.skyward.rf.core.LatLon
 import dev.skyward.rf.core.ScanPlan
+import dev.skyward.rf.core.Settings
 import dev.skyward.rf.core.SignalScale
+import dev.skyward.rf.desktop.DeskSettings
 import dev.skyward.rf.desktop.hardware.Bands
 import dev.skyward.rf.desktop.hardware.BoardState
 import dev.skyward.rf.desktop.hardware.ConsoleLine
@@ -81,18 +85,35 @@ enum class DeskTab(val label: String) {
  * twice to use either end.
  */
 @Composable
-fun CommandCenter(host: SensorHost, recorder: SessionRecorder, sky: DeskSky) {
+fun CommandCenter(host: SensorHost, recorder: SessionRecorder, sky: DeskSky, settings: DeskSettings) {
     val boards by host.boards.collectAsState()
     val ports by host.ports.collectAsState()
     val console by host.console.collectAsState()
     val skyState by sky.state.collectAsState()
+    val cfg by settings.state.collectAsState()
 
     var tab by remember { mutableStateOf(DeskTab.MAP) }
     var selected by remember { mutableStateOf<String?>(null) }
     var layers by remember { mutableStateOf(GlobeLayers()) }
-    // Spin starts at the phone's 1X: a desk that is watching a globe wants it to be alive, and
-    // a stationary ball is indistinguishable from a frozen app.
-    var spin by remember { mutableStateOf(1) }
+    // Spin starts at whatever Setup was left on - the phone's 1X by default: a desk that is
+    // watching a globe wants it alive, and a stationary ball is indistinguishable from a frozen
+    // app. The choice is written back to the shared settings, so both ends keep the same pace.
+    var spin by remember { mutableStateOf(cfg.globeSpin.coerceIn(0, 2)) }
+    var report by remember { mutableStateOf<WatchReport?>(null) }
+
+    // The Watcher's own clock. It reads the same two tables a spoken report would, at the
+    // interval set in Setup; 0 minutes keeps it quiet until somebody asks.
+    LaunchedEffect(cfg.intelUpdateMinutes, cfg.watcherReportStyle) {
+        val minutes = cfg.intelUpdateMinutes
+        if (minutes <= 0) return@LaunchedEffect
+        while (true) {
+            delay(minutes * 60_000L)
+            report = WatchReport(
+                System.currentTimeMillis(),
+                buildReport(sky.state.value, recorder.count, cfg.watcherReportStyle, clockOf(System.currentTimeMillis())),
+            )
+        }
+    }
     // The second number in each INTEL row: what has been written into this session so far.
     val loggedCounts = remember(recorder.count) {
         val rows = recorder.rows()
@@ -153,7 +174,11 @@ fun CommandCenter(host: SensorHost, recorder: SessionRecorder, sky: DeskSky) {
                 skyState = skyState,
                 layers = layers,
                 spin = spin,
-                onSpin = { spin = (spin + 1) % 3 },
+                onSpin = {
+                    val next = (spin + 1) % 3
+                    spin = next
+                    settings.update { it.copy(globeSpin = next) }
+                },
                 logged = loggedCounts,
                 onLayer = { key, on ->
                     layers = when (key) {
@@ -198,6 +223,16 @@ fun CommandCenter(host: SensorHost, recorder: SessionRecorder, sky: DeskSky) {
                 modifier = Modifier.weight(1f),
                 sky = sky,
                 skyState = skyState,
+                cfg = cfg,
+                settings = settings,
+                host = host,
+                report = report,
+                onRead = {
+                    report = WatchReport(
+                        System.currentTimeMillis(),
+                        buildReport(sky.state.value, recorder.count, cfg.watcherReportStyle, clockOf(System.currentTimeMillis())),
+                    )
+                },
                 boards = ordered,
             )
         }
@@ -894,11 +929,21 @@ private fun LogCell(text: String, width: androidx.compose.ui.unit.Dp, color: Col
 // ---------------------------------------------------------------- setup
 
 @Composable
-private fun SetupPane(modifier: Modifier, sky: DeskSky, skyState: DeskSky.State, boards: List<BoardState>) {
+private fun SetupPane(
+    modifier: Modifier,
+    sky: DeskSky,
+    skyState: DeskSky.State,
+    cfg: Settings,
+    settings: DeskSettings,
+    host: SensorHost,
+    report: WatchReport?,
+    onRead: () -> Unit,
+    boards: List<BoardState>,
+) {
     var latText by remember { mutableStateOf(skyState.observer?.let { String.format("%.5f", it.lat) } ?: "") }
     var lonText by remember { mutableStateOf(skyState.observer?.let { String.format("%.5f", it.lon) } ?: "") }
 
-    Column(modifier.padding(18.dp)) {
+    Column(modifier.verticalScroll(rememberScrollState()).padding(18.dp)) {
         SectionLabel("OBSERVER")
         Spacer(Modifier.height(8.dp))
         Text(
@@ -1010,14 +1055,161 @@ private fun SetupPane(modifier: Modifier, sky: DeskSky, skyState: DeskSky.State,
         if (boards.isEmpty()) {
             Text("No serial ports seen. A board on a cable is a radio the desk has and the phone does not always.", color = Desk.dim, fontSize = 11.sp)
         } else {
+            // Each board is switched on and off from here as well as from the rail, and its plan is
+            // cycled rather than picked from a list: a board offers only the bands its silicon has,
+            // so the next plan is the honest choice on a firmware that does not answer queries.
             boards.forEach { board ->
-                Text(
-                    "${board.path} · ${board.identity?.name ?: "unknown"} · ${board.chip.ifBlank { "chip not named" }} · ${board.planLabel}",
-                    color = Desk.text,
-                    fontSize = 11.sp,
-                    fontFamily = Desk.mono,
-                )
+                Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "${board.path} · ${board.identity?.name ?: "unknown"}",
+                            color = Desk.text,
+                            fontSize = 11.sp,
+                            fontFamily = Desk.mono,
+                        )
+                        Text(
+                            "${board.chip.ifBlank { "chip not named" }} · ${board.planLabel}",
+                            color = Desk.dim,
+                            fontSize = 10.sp,
+                            fontFamily = Desk.mono,
+                        )
+                    }
+                    TextButton(onClick = { if (board.connected) host.disconnect(board.path) else host.connect(board.path) }) {
+                        Text(
+                            if (board.connected) "DISCONNECT" else "CONNECT",
+                            color = if (board.connected) Desk.warn else Desk.accent,
+                            fontSize = 10.sp,
+                            fontFamily = Desk.mono,
+                        )
+                    }
+                    TextButton(onClick = {
+                        val options = board.options
+                        val at = options.indexOf(board.plan)
+                        host.setPlan(board.path, options[(at + 1).mod(options.size)])
+                    }) { Text("PLAN", color = Desk.cyan, fontSize = 10.sp, fontFamily = Desk.mono) }
+                }
             }
+        }
+        Text(
+            "A board is polled only while it is connected: disconnecting leaves the port free for " +
+                "another tool instead of holding it open behind a hidden window.",
+            color = Desk.dim,
+            fontSize = 11.sp,
+        )
+
+        Spacer(Modifier.height(20.dp))
+        Hairline()
+        Spacer(Modifier.height(16.dp))
+        SectionLabel("MAP")
+        Spacer(Modifier.height(8.dp))
+        Text("AUTO-SPIN", color = Desk.dim, fontSize = 10.sp, letterSpacing = 1.2.sp, fontFamily = Desk.mono)
+        Spacer(Modifier.height(6.dp))
+        ChoiceChips(listOf("OFF", "1X", "3X"), cfg.globeSpin.coerceIn(0, 2)) { pick ->
+            settings.update { it.copy(globeSpin = pick) }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "The globe's own pace, shared with the phone: the same number is read by both maps.",
+            color = Desk.dim,
+            fontSize = 11.sp,
+        )
+
+        Spacer(Modifier.height(20.dp))
+        Hairline()
+        Spacer(Modifier.height(16.dp))
+        SectionLabel("WATCHER")
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "The desk has no microphone, so the Watcher here is its written half: it reads the live " +
+                "tables and the session log, and a report is exactly what a spoken one would have said.",
+            color = Desk.dim,
+            fontSize = 11.sp,
+        )
+        Spacer(Modifier.height(8.dp))
+        SettingSwitch(
+            label = "Timed intel update",
+            note = if (cfg.intelUpdateMinutes == 0) "off - reads only when asked" else "every ${cfg.intelUpdateMinutes} minutes",
+            on = cfg.intelUpdateMinutes > 0,
+        ) { on ->
+            settings.update { it.copy(intelUpdateMinutes = if (on) 5 else 0) }
+        }
+        if (cfg.intelUpdateMinutes > 0) {
+            val minuteChoices = listOf(3, 5, 7, 10, 30)
+            ChoiceChips(minuteChoices.map { "$it MIN" }, minuteChoices.indexOf(cfg.intelUpdateMinutes).coerceAtLeast(0)) { pick ->
+                settings.update { it.copy(intelUpdateMinutes = minuteChoices[pick]) }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text("WATCHER READS", color = Desk.dim, fontSize = 10.sp, letterSpacing = 1.2.sp, fontFamily = Desk.mono)
+        Spacer(Modifier.height(6.dp))
+        val styles = listOf("intel", "entities", "both")
+        ChoiceChips(listOf("INTEL", "ENTITIES", "BOTH"), styles.indexOf(cfg.watcherReportStyle).coerceAtLeast(0)) { pick ->
+            settings.update { it.copy(watcherReportStyle = styles[pick]) }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Button(
+                onClick = onRead,
+                colors = ButtonDefaults.buttonColors(containerColor = Desk.accent, contentColor = Desk.bg),
+                shape = RoundedCornerShape(6.dp),
+            ) { Text("READ NOW", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+            Spacer(Modifier.width(12.dp))
+            Text(
+                report?.let { "last read ${clockOf(it.at)}" } ?: "nothing read yet",
+                color = Desk.dim,
+                fontSize = 11.sp,
+                fontFamily = Desk.mono,
+            )
+        }
+        report?.let {
+            Spacer(Modifier.height(10.dp))
+            Box(
+                Modifier.fillMaxWidth()
+                    .background(Desk.panelHi, RoundedCornerShape(8.dp))
+                    .border(1.dp, Desk.line, RoundedCornerShape(8.dp))
+                    .padding(12.dp),
+            ) {
+                Text(it.text, color = Desk.text, fontSize = 11.sp, fontFamily = Desk.mono)
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+        Hairline()
+        Spacer(Modifier.height(16.dp))
+        SectionLabel("SHARED WITH THE PHONE")
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "The handset's own settings, kept in the same file the desk now writes: a choice made " +
+                "here is the choice the phone starts with. The desk stores them; the phone acts on them.",
+            color = Desk.dim,
+            fontSize = 11.sp,
+        )
+        Spacer(Modifier.height(8.dp))
+        SettingSwitch("Hands-free voice", "the phone listens for the wake word", cfg.voiceEnabled) { on ->
+            settings.update { it.copy(voiceEnabled = on) }
+        }
+        SettingSwitch("Spoken replies", "watch alerts use the glitched voice", cfg.voiceAudio) { on ->
+            settings.update { it.copy(voiceAudio = on) }
+        }
+        SettingSwitch("Offline mode", "element sets and tiles already downloaded", cfg.offlineMode) { on ->
+            settings.update { it.copy(offlineMode = on) }
+        }
+        SettingSwitch("Hide weak dots", "only plot entities above the red bin", cfg.dropWeakDots) { on ->
+            settings.update { it.copy(dropWeakDots = on) }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text("DISTANCE", color = Desk.dim, fontSize = 10.sp, letterSpacing = 1.2.sp, fontFamily = Desk.mono)
+        Spacer(Modifier.height(6.dp))
+        val units = listOf("km", "mi")
+        ChoiceChips(listOf("KM", "MI"), units.indexOf(cfg.distanceUnit).coerceAtLeast(0)) { pick ->
+            settings.update { it.copy(distanceUnit = units[pick]) }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text("TEMPERATURE", color = Desk.dim, fontSize = 10.sp, letterSpacing = 1.2.sp, fontFamily = Desk.mono)
+        Spacer(Modifier.height(6.dp))
+        val temps = listOf("c", "f")
+        ChoiceChips(listOf("C", "F"), temps.indexOf(cfg.tempUnit).coerceAtLeast(0)) { pick ->
+            settings.update { it.copy(tempUnit = temps[pick]) }
         }
     }
 }
@@ -1141,3 +1333,40 @@ private fun save(suggested: String, content: String) {
     val chosen = dialog.file ?: return
     runCatching { File(directory, chosen).writeText(content) }
 }
+
+/** A row of equal choices with the picked one lit: the phone's segmented control, on the desk. */
+@Composable
+private fun ChoiceChips(options: List<String>, selected: Int, onPick: (Int) -> Unit) {
+    Row {
+        options.forEachIndexed { index, label ->
+            val on = index == selected
+            Box(
+                Modifier
+                    .padding(end = 6.dp)
+                    .background(if (on) Desk.cyan.copy(alpha = 0.16f) else Color.Transparent, RoundedCornerShape(6.dp))
+                    .border(1.dp, if (on) Desk.cyan.copy(alpha = 0.6f) else Desk.line, RoundedCornerShape(6.dp))
+                    .clickable { onPick(index) }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            ) {
+                Text(label, color = if (on) Desk.cyan else Desk.dim, fontSize = 11.sp, fontFamily = Desk.mono)
+            }
+        }
+    }
+}
+
+/** A labelled switch with the line that says what it does, as the app's settings rows read. */
+@Composable
+private fun SettingSwitch(label: String, note: String, on: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(label, color = Desk.text, fontSize = 12.sp)
+            if (note.isNotBlank()) Text(note, color = Desk.dim, fontSize = 10.sp)
+        }
+        Switch(checked = on, onCheckedChange = onChange)
+    }
+}
+
+/** Wall-clock time for a report stamp: the desk reads local time, not the session's stopwatch. */
+private fun clockOf(millis: Long): String =
+    java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss")
+        .format(java.time.LocalTime.ofSecondOfDay((millis / 1000) % 86_400))
