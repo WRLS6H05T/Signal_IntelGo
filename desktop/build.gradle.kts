@@ -26,6 +26,12 @@ dependencies {
     // one dependency the desk cannot be written without.
     implementation("com.fazecast:jSerialComm:2.11.0")
 
+    // The phone's peer link is a BLE GATT service and the JVM has no Bluetooth API at all: this
+    // binding carries SimpleBLE's WinRT backend, which is the one way a desk-side app can scan,
+    // connect and subscribe on Windows. It is BUSL-1.1 (free for non-commercial use; each release
+    // becomes GPLv3 four years on), so that licence, not this project's, governs shipping it.
+    implementation("org.simpleble:simplejavable:1.4.0")
+
     // `:shared` fetches on OkHttp but does not export it, so the desk names the client type it
     // hands to the satellite and aircraft feeds itself.
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

@@ -60,6 +60,7 @@ import dev.skyward.rf.desktop.hardware.BoardState
 import dev.skyward.rf.desktop.hardware.ConsoleLine
 import dev.skyward.rf.desktop.hardware.PortInfo
 import dev.skyward.rf.desktop.hardware.SensorHost
+import dev.skyward.rf.desktop.peer.DeskPeer
 import dev.skyward.rf.desktop.session.SessionRecorder
 import dev.skyward.rf.desktop.session.SessionSummary
 import dev.skyward.rf.desktop.session.Sighting
@@ -85,12 +86,19 @@ enum class DeskTab(val label: String) {
  * twice to use either end.
  */
 @Composable
-fun CommandCenter(host: SensorHost, recorder: SessionRecorder, sky: DeskSky, settings: DeskSettings) {
+fun CommandCenter(
+    host: SensorHost,
+    recorder: SessionRecorder,
+    sky: DeskSky,
+    settings: DeskSettings,
+    peer: DeskPeer,
+) {
     val boards by host.boards.collectAsState()
     val ports by host.ports.collectAsState()
     val console by host.console.collectAsState()
     val skyState by sky.state.collectAsState()
     val cfg by settings.state.collectAsState()
+    val peerState by peer.state.collectAsState()
 
     var tab by remember { mutableStateOf(DeskTab.MAP) }
     var selected by remember { mutableStateOf<String?>(null) }
@@ -234,6 +242,7 @@ fun CommandCenter(host: SensorHost, recorder: SessionRecorder, sky: DeskSky, set
                     )
                 },
                 boards = ordered,
+                peer = peerState,
             )
         }
         Hairline()
@@ -939,6 +948,7 @@ private fun SetupPane(
     report: WatchReport?,
     onRead: () -> Unit,
     boards: List<BoardState>,
+    peer: DeskPeer.State,
 ) {
     var latText by remember { mutableStateOf(skyState.observer?.let { String.format("%.5f", it.lat) } ?: "") }
     var lonText by remember { mutableStateOf(skyState.observer?.let { String.format("%.5f", it.lon) } ?: "") }
@@ -1176,6 +1186,37 @@ private fun SetupPane(
         Spacer(Modifier.height(20.dp))
         Hairline()
         Spacer(Modifier.height(16.dp))
+        SectionLabel("PEER · THE PHONE")
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "The handset advertises the peer service and notifies what its own radios hear. This " +
+                "end scans for that service, subscribes, and holds what arrives: the phone's fix, " +
+                "its wifi and BLE totals and the entities it has logged.",
+            color = Desk.dim,
+            fontSize = 11.sp,
+        )
+        Spacer(Modifier.height(4.dp))
+        SettingSwitch("Link to the phone", "scan for its BLE service and subscribe", cfg.peerEnabled) { on ->
+            settings.update { it.copy(peerEnabled = on) }
+        }
+        Text(
+            (if (peer.linked) "linked" else "not linked") + " · " + peer.note +
+                if (peer.name.isBlank()) "" else " · ${peer.name}",
+            color = if (peer.linked) Desk.accent else Desk.dim,
+            fontSize = 11.sp,
+            fontFamily = Desk.mono,
+        )
+        Spacer(Modifier.height(4.dp))
+        val peerFix = peer.fix
+        Text(
+            "sats ${peer.sats} · wifi ${peer.wifi} · ble ${peer.ble} · " +
+                "entities ${peer.entities}/${peer.entityTotal}" +
+                if (peerFix == null) "" else " · ${String.format("%.4f, %.4f", peerFix.lat, peerFix.lon)}",
+            color = Desk.dim,
+            fontSize = 11.sp,
+            fontFamily = Desk.mono,
+        )
+        Spacer(Modifier.height(6.dp))
         SectionLabel("SHARED WITH THE PHONE")
         Spacer(Modifier.height(8.dp))
         Text(

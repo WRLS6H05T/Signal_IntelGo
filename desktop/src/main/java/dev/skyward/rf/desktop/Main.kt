@@ -1,6 +1,8 @@
 package dev.skyward.rf.desktop
 
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
@@ -9,6 +11,7 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import dev.skyward.rf.desktop.DeskSettings
 import dev.skyward.rf.desktop.hardware.SensorHost
+import dev.skyward.rf.desktop.peer.DeskPeer
 import dev.skyward.rf.desktop.session.SessionRecorder
 import dev.skyward.rf.desktop.sky.DeskSky
 import dev.skyward.rf.desktop.ui.CommandCenter
@@ -34,6 +37,8 @@ fun main() = application {
     val home = remember { File(System.getProperty("user.home"), ".signal-intelgo") }
     val sky = remember { DeskSky(scope, home) }
     val settings = remember { DeskSettings(home) }
+    // The phone's side of the link, pulled here: off until Setup says otherwise, as on the phone.
+    val peer = remember { DeskPeer(scope) }
     val host = remember {
         SensorHost(scope) { board ->
             // A board's own fix goes on its rows; a board without one records blank coordinates
@@ -55,7 +60,11 @@ fun main() = application {
         // the telemetry panel rides over the map, so the window is not allowed to get smaller.
         LaunchedEffect(Unit) { window.minimumSize = Dimension(1100, 700) }
         DeskTheme {
-            CommandCenter(host, recorder, sky, settings)
+            val cfg by settings.state.collectAsState()
+            LaunchedEffect(cfg.peerEnabled) {
+                if (cfg.peerEnabled) peer.start() else peer.stop()
+            }
+            CommandCenter(host, recorder, sky, settings, peer)
         }
     }
 }
