@@ -613,10 +613,7 @@ private fun DrawScope.drawGlobeSphere(
         }
 
         val coast = Path()
-        // Stopped short of the exact limb: on the last degree before it the projection
-        // squeezes whole degrees into a couple of pixels, so a 2dp coast stroke there piles
-        // up into a pale land-coloured band that reads as a halo around the ball.
-        val HORIZON = 0.10f
+        val HORIZON = 0.02f
         for (ring in rings) {
             val n = ring.size / 2
             if (n < 3) continue
@@ -709,7 +706,7 @@ private fun DrawScope.drawGlobeSphere(
         // The fill ends on a one-degree staircase. Stroking the coast in the land colour first
         // covers the steps, so the land ends where the outline says it does, and the pale line
         // then reads as the coast itself.
-        drawPath(coast, Color(0xFF3C5F7A).copy(alpha = alpha), style = Stroke(width = 1.8.dp.toPx()))
+        drawPath(coast, Color(0xFF3C5F7A).copy(alpha = alpha), style = Stroke(width = 2.2.dp.toPx()))
         drawPath(coast, Color(0xFF86BCDF).copy(alpha = 0.8f * alpha), style = Stroke(width = 0.8.dp.toPx()))
     }
 
@@ -847,8 +844,6 @@ private fun DrawScope.drawLandMesh(
             val c = a + cols
             val d = c + 1
             // A cell reaching past the limb would drag a sliver of land across the disc.
-            // Cells are kept right up to the limb, so the land meets the rim as it does on the
-            // phone: cutting them short left a dark ring of ocean between the coast and the edge.
             if (depth[a] <= 0.02f || depth[b] <= 0.02f || depth[c] <= 0.02f || depth[d] <= 0.02f) continue
             land.moveTo(xs[a], ys[a])
             land.lineTo(xs[b], ys[b])
