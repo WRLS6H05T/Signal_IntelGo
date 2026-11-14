@@ -99,6 +99,8 @@ fun CommandCenter(
     val skyState by sky.state.collectAsState()
     val cfg by settings.state.collectAsState()
     val peerState by peer.state.collectAsState()
+    // A drive picked in Setup, drawn on the map until another is picked.
+    var peerTrack by remember { mutableStateOf<List<LatLon>>(emptyList()) }
 
     var tab by remember { mutableStateOf(DeskTab.MAP) }
     var selected by remember { mutableStateOf<String?>(null) }
@@ -208,6 +210,7 @@ fun CommandCenter(
                     if (key == "uav") sky.setLayer("uav", on)
                 },
                 active = active,
+                track = peerTrack,
             )
 
             DeskTab.BOARD -> BoardPane(
@@ -243,6 +246,9 @@ fun CommandCenter(
                 },
                 boards = ordered,
                 peer = peerState,
+                onAskDrives = { peer.requestList() },
+                onFetchDrive = { peer.fetch(it) },
+                onShowDrive = { peerTrack = peer.track(it) },
             )
         }
         Hairline()
@@ -354,6 +360,7 @@ private fun MapPane(
     spin: Int,
     onSpin: () -> Unit,
     logged: Map<String, Int>,
+    track: List<LatLon>,
 ) {
     // The rail and the telemetry column are fixed widths and the map takes what is left. They are
     // sized from the pane rather than by weight: as weighted siblings the globe took the whole
@@ -417,6 +424,7 @@ private fun MapPane(
             onLayer = onLayer,
             spin = spin,
             onSpin = onSpin,
+            track = track,
         )
         VerticalHairline()
         Telemetry(modifier = Modifier.width(panelWidth).fillMaxHeight(), board = active)
@@ -949,6 +957,9 @@ private fun SetupPane(
     onRead: () -> Unit,
     boards: List<BoardState>,
     peer: DeskPeer.State,
+    onAskDrives: () -> Unit,
+    onFetchDrive: (String) -> Unit,
+    onShowDrive: (String) -> Unit,
 ) {
     var latText by remember { mutableStateOf(skyState.observer?.let { String.format("%.5f", it.lat) } ?: "") }
     var lonText by remember { mutableStateOf(skyState.observer?.let { String.format("%.5f", it.lon) } ?: "") }
@@ -1216,6 +1227,107 @@ private fun SetupPane(
             fontSize = 11.sp,
             fontFamily = Desk.mono,
         )
+        Spacer(Modifier.height(6.dp))
+        SectionLabel("DRIVES FROM THE PHONE")
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "A drive recorded on the handset crosses the same link: gzipped, cut into parts, rebuilt " +
+                "here and kept under ~/.signal-intelgo/wardrive. Pick one below and its track is drawn " +
+                "on the map.",
+            color = Desk.dim,
+            fontSize = 11.sp,
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onAskDrives) {
+                Text("ASK FOR THE LIST", color = Desk.cyan, fontSize = 10.sp, fontFamily = Desk.mono)
+            }
+            if (peer.fetching.isNotBlank()) {
+                Text(
+                    "fetching · ${peer.progress}/${peer.progressTotal}",
+                    color = Desk.accent,
+                    fontSize = 10.sp,
+                    fontFamily = Desk.mono,
+                )
+            }
+        }
+        if (peer.offered.isEmpty()) {
+            Text(
+                if (peer.linked) "The phone has not offered a list yet." else "Link to the phone first.",
+                color = Desk.dim,
+                fontSize = 11.sp,
+            )
+        } else {
+            peer.offered.forEach { drive ->
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            drive.name.ifBlank { drive.id },
+                            color = Desk.text,
+                            fontSize = 11.sp,
+                            fontFamily = Desk.mono,
+                        )
+                        Text(
+                            clockOf(drive.at) + " · ${drive.points} fixes · " +
+                                String.format("%.1f", drive.km) + " km · " +
+                                "${drive.wifi} AP · ${drive.ble} BLE",
+                            color = Desk.dim,
+                            fontSize = 10.sp,
+                            fontFamily = Desk.mono,
+                        )
+                    }
+                    TextButton(onClick = { onFetchDrive(drive.id) }) {
+                        Text("FETCH", color = Desk.accent, fontSize = 10.sp, fontFamily = Desk.mono)
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "KEPT ON THIS DESK",
+            color = Desk.dim,
+            fontSize = 10.sp,
+            letterSpacing = 1.2.sp,
+            fontFamily = Desk.mono,
+        )
+        Spacer(Modifier.height(4.dp))
+        if (peer.saved.isEmpty()) {
+            Text("Nothing from the phone yet.", color = Desk.dim, fontSize = 11.sp)
+        } else {
+            peer.saved.forEach { drive ->
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            drive.name.ifBlank { drive.id },
+                            color = Desk.text,
+                            fontSize = 11.sp,
+                            fontFamily = Desk.mono,
+                        )
+                        Text(
+                            clockOf(drive.startedAt) + " · ${drive.points} fixes · " +
+                                String.format("%.1f", drive.km) + " km" +
+                                if (drive.from.isBlank()) "" else " · from ${drive.from}",
+                            color = Desk.dim,
+                            fontSize = 10.sp,
+                            fontFamily = Desk.mono,
+                        )
+                    }
+                    TextButton(onClick = { onShowDrive(drive.id) }) {
+                        Text("SHOW", color = Desk.cyan, fontSize = 10.sp, fontFamily = Desk.mono)
+                    }
+                }
+            }
+        }
+        if (peer.lastSave.isNotBlank()) {
+            Spacer(Modifier.height(4.dp))
+            Text(peer.lastSave, color = Desk.accent, fontSize = 10.sp, fontFamily = Desk.mono)
+        }
         Spacer(Modifier.height(6.dp))
         SectionLabel("SHARED WITH THE PHONE")
         Spacer(Modifier.height(8.dp))

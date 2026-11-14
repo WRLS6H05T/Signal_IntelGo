@@ -32,6 +32,11 @@ dependencies {
     // becomes GPLv3 four years on), so that licence, not this project's, governs shipping it.
     implementation("org.simpleble:simplejavable:1.4.0")
 
+    // A drive crosses the peer link as the phone's own session JSON, so the desk needs the same
+    // serializer to read it back. `:shared` keeps its copy private, and a desk that invented its own
+    // reader would drift from the recorder the first time a field was added.
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+
     // `:shared` fetches on OkHttp but does not export it, so the desk names the client type it
     // hands to the satellite and aircraft feeds itself.
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

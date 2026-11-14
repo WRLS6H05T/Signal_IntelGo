@@ -12,6 +12,7 @@ import androidx.compose.ui.window.rememberWindowState
 import dev.skyward.rf.desktop.DeskSettings
 import dev.skyward.rf.desktop.hardware.SensorHost
 import dev.skyward.rf.desktop.peer.DeskPeer
+import dev.skyward.rf.desktop.wardrive.DeskDrives
 import dev.skyward.rf.desktop.session.SessionRecorder
 import dev.skyward.rf.desktop.sky.DeskSky
 import dev.skyward.rf.desktop.ui.CommandCenter
@@ -37,8 +38,10 @@ fun main() = application {
     val home = remember { File(System.getProperty("user.home"), ".signal-intelgo") }
     val sky = remember { DeskSky(scope, home) }
     val settings = remember { DeskSettings(home) }
+    // Drives sent over the link are kept beside the desk's own data, one file per drive.
+    val drives = remember { DeskDrives(home) }
     // The phone's side of the link, pulled here: off until Setup says otherwise, as on the phone.
-    val peer = remember { DeskPeer(scope) }
+    val peer = remember { DeskPeer(scope, drives) }
     val host = remember {
         SensorHost(scope) { board ->
             // A board's own fix goes on its rows; a board without one records blank coordinates

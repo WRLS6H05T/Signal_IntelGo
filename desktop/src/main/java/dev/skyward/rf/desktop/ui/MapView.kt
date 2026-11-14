@@ -136,6 +136,8 @@ fun MapView(
     onLayer: (String, Boolean) -> Unit,
     spin: Int,
     onSpin: () -> Unit,
+    /** The fixes of a drive picked in Setup, drawn over the map. */
+    track: List<LatLon> = emptyList(),
 ) {
     var camLat by remember { mutableStateOf(20.0) }
     var camLon by remember { mutableStateOf(0.0) }
@@ -264,6 +266,7 @@ fun MapView(
                 boards = boards,
                 observer = observer,
                 layers = layers,
+                track = track,
             )
         }
 
@@ -338,6 +341,7 @@ private fun DrawScope.drawMap(
     boards: List<BoardState>,
     observer: LatLon?,
     layers: GlobeLayers,
+    track: List<LatLon>,
 ) {
     @Suppress("UNUSED_EXPRESSION")
     generation
@@ -447,6 +451,29 @@ private fun DrawScope.drawMap(
             center = tip,
             style = Stroke(1.dp.toPx()),
         )
+    }
+
+    // ---- a drive's track, from the phone ----
+    if (track.size > 1) {
+        val line = Path()
+        var pen = false
+        for (fix in track) {
+            // A point on the far hemisphere breaks the line rather than joining across the globe:
+            // a track that vanished behind the ball has not travelled through it.
+            if (place(fix.lat, fix.lon, 0.0)) {
+                if (pen) line.lineTo(pt[0], pt[1]) else line.moveTo(pt[0], pt[1])
+                pen = true
+            } else {
+                pen = false
+            }
+        }
+        drawPath(line, Desk.violet.copy(alpha = 0.9f), style = Stroke(2.5.dp.toPx(), cap = StrokeCap.Round))
+        if (place(track.first().lat, track.first().lon, 0.0)) {
+            drawCircle(Desk.violet, radius = 3.5.dp.toPx(), center = Offset(pt[0], pt[1]))
+        }
+        if (place(track.last().lat, track.last().lon, 0.0)) {
+            drawCircle(Desk.accent, radius = 3.5.dp.toPx(), center = Offset(pt[0], pt[1]))
+        }
     }
 
     // ---- the Wi-Fi and BLE the boards hear, fanned around the fix that heard them ----
