@@ -1211,7 +1211,8 @@ private fun SetupPane(
             settings.update { it.copy(peerEnabled = on) }
         }
         Text(
-            (if (peer.linked) "linked" else "not linked") + " · " + peer.note +
+            // The note already says "linked" when it is: repeating it read as two links.
+            (if (peer.linked) peer.note else "not linked · " + peer.note) +
                 if (peer.name.isBlank()) "" else " · ${peer.name}",
             color = if (peer.linked) Desk.accent else Desk.dim,
             fontSize = 11.sp,
