@@ -177,12 +177,14 @@ fun CommandCenter(
             )
         }
     }
-    // The second number in each INTEL row: what has been written into this session so far.
-    val loggedCounts = remember(recorder.count) {
+    // The dots beside each INTEL row: what has been written down. The desk's own session and the
+    // phone's drives both count - a sweep that arrived over the cable or the radio link is logged
+    // data too, and on a desk with no board of its own it is the only logged data there is.
+    val loggedCounts = remember(recorder.count, peerState.saved.size) {
         val rows = recorder.rows()
         mapOf(
-            "WIFI" to rows.count { it.kind == SessionRecorder.WIFI },
-            "BLE" to rows.count { it.kind == SessionRecorder.BLE },
+            "WIFI" to rows.count { it.kind == SessionRecorder.WIFI } + peerState.saved.sumOf { it.wifi },
+            "BLE" to rows.count { it.kind == SessionRecorder.BLE } + peerState.saved.sumOf { it.ble },
         )
     }
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
