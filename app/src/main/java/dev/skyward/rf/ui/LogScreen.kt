@@ -140,6 +140,8 @@ fun LogScreen(c: Container, modifier: Modifier = Modifier, onShowOnMap: () -> Un
 
         item { PeerLogsCard(c, df) }
 
+        item { UsbShareCard(c) }
+
         item {
             Text(
                 "DRIVES",
@@ -297,6 +299,41 @@ private fun PeerLogsCard(c: Container, df: SimpleDateFormat) {
                 }
                 SmallAction("FETCH", Sky.cyan) { c.peer.requestLog(info.id) }
             }
+        }
+    }
+}
+
+/**
+ * The cable side of sharing, on the phone.
+ *
+ * The radio link shares a drive while both apps are open; a cable shares everything that is stored
+ * and keeps working with the link off. The files are written as each drive closes, so this card is
+ * mostly the answer to "where did they go, and did it work".
+ */
+@Composable
+private fun UsbShareCard(c: Container) {
+    val sessions by c.wardrive.sessions.collectAsState()
+    var result by remember { mutableStateOf<String?>(null) }
+    SectionCard(title = "USB share", trailing = "${sessions.size} drives") {
+        Text(
+            "Plug the phone into the desk and every drive recorded here copies across without " +
+                "Bluetooth. Each session is written to the folder below as it closes, so the desk " +
+                "has nothing to wait for on this end.",
+            color = Sky.textDim,
+            fontSize = 11.sp,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(c.usbExport.folder(), color = Sky.textDim, fontSize = 9.sp)
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SmallAction("WRITE FILES NOW", Sky.cyan) {
+                val n = c.usbExport.export()
+                result = if (n == 0) "No drives recorded yet." else "$n drive file(s) ready to copy"
+            }
+        }
+        result?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(it, color = Sky.cyan, fontSize = 10.sp)
         }
     }
 }

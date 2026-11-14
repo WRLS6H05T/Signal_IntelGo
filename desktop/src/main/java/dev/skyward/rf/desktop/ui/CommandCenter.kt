@@ -65,7 +65,10 @@ import dev.skyward.rf.desktop.session.SessionRecorder
 import dev.skyward.rf.desktop.session.SessionSummary
 import dev.skyward.rf.desktop.session.Sighting
 import dev.skyward.rf.desktop.sky.DeskSky
+import dev.skyward.rf.desktop.wardrive.UsbImport
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /** The app's own four surfaces, on the desk. */
@@ -92,6 +95,7 @@ fun CommandCenter(
     sky: DeskSky,
     settings: DeskSettings,
     peer: DeskPeer,
+    usb: UsbImport,
 ) {
     val boards by host.boards.collectAsState()
     val ports by host.ports.collectAsState()
@@ -101,6 +105,31 @@ fun CommandCenter(
     val peerState by peer.state.collectAsState()
     // A drive picked in Setup, drawn on the map until another is picked.
     var peerTrack by remember { mutableStateOf<List<LatLon>>(emptyList()) }
+    // The cable is polled, not watched: nothing on this machine tells a JVM that a phone
+    // appeared on the bus, and asking adb costs a few milliseconds.
+    var usbState by remember { mutableStateOf(UsbImport.State()) }
+    var usbWant by remember { mutableStateOf(0) }
+    LaunchedEffect(usbWant) {
+        val adb = usb.adb()
+        if (adb == null) {
+            usbState = UsbImport.State(note = "no adb on this machine")
+            return@LaunchedEffect
+        }
+        while (true) {
+            val seen = withContext(Dispatchers.IO) { usb.devices(adb) }
+            if (seen.isEmpty()) {
+                usbState = usbState.copy(adb = adb.path, devices = 0, note = "no phone attached")
+                delay(4_000)
+            } else {
+                // A phone that stays plugged in is re-read slowly: the pull copies every drive,
+                // which is cheap but not free.
+                val result = withContext(Dispatchers.IO) { usb.pull(adb) }
+                usbState = result.copy(adb = adb.path)
+                if (result.imported > 0) peer.refreshSaved()
+                delay(15_000)
+            }
+        }
+    }
 
     var tab by remember { mutableStateOf(DeskTab.MAP) }
     var selected by remember { mutableStateOf<String?>(null) }
@@ -249,6 +278,8 @@ fun CommandCenter(
                 onAskDrives = { peer.requestList() },
                 onFetchDrive = { peer.fetch(it) },
                 onShowDrive = { peerTrack = peer.track(it) },
+                usb = usbState,
+                onUsbPull = { usbWant++ },
             )
         }
         Hairline()
@@ -960,6 +991,8 @@ private fun SetupPane(
     onAskDrives: () -> Unit,
     onFetchDrive: (String) -> Unit,
     onShowDrive: (String) -> Unit,
+    usb: UsbImport.State,
+    onUsbPull: () -> Unit,
 ) {
     var latText by remember { mutableStateOf(skyState.observer?.let { String.format("%.5f", it.lat) } ?: "") }
     var lonText by remember { mutableStateOf(skyState.observer?.let { String.format("%.5f", it.lon) } ?: "") }
@@ -1328,6 +1361,38 @@ private fun SetupPane(
         if (peer.lastSave.isNotBlank()) {
             Spacer(Modifier.height(4.dp))
             Text(peer.lastSave, color = Desk.accent, fontSize = 10.sp, fontFamily = Desk.mono)
+        }
+        Spacer(Modifier.height(6.dp))
+        SectionLabel("USB FILE SHARING")
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "On a cable the drives come off the handset's own files instead of the radio link: the " +
+                "phone writes each session to a folder the cable can read and this side copies it " +
+                "in. Both routes end in the same store, so a drive is listed once however it " +
+                "arrived.",
+            color = Desk.dim,
+            fontSize = 11.sp,
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onUsbPull) {
+                Text("PULL NOW", color = Desk.cyan, fontSize = 10.sp, fontFamily = Desk.mono)
+            }
+            Text(
+                (if (usb.devices > 0) "${usb.devices} phone · " else "") + usb.note,
+                color = if (usb.imported > 0) Desk.accent else Desk.dim,
+                fontSize = 10.sp,
+                fontFamily = Desk.mono,
+            )
+        }
+        if (usb.adb.isBlank()) {
+            Text(
+                "adb was not found. Install platform-tools or set ANDROID_HOME; a phone's card " +
+                    "copied by hand still works by dropping its session files into " +
+                    "~/.signal-intelgo/wardrive.",
+                color = Desk.dim,
+                fontSize = 10.sp,
+            )
         }
         Spacer(Modifier.height(6.dp))
         SectionLabel("SHARED WITH THE PHONE")

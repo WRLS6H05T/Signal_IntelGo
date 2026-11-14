@@ -13,6 +13,7 @@ import dev.skyward.rf.desktop.DeskSettings
 import dev.skyward.rf.desktop.hardware.SensorHost
 import dev.skyward.rf.desktop.peer.DeskPeer
 import dev.skyward.rf.desktop.wardrive.DeskDrives
+import dev.skyward.rf.desktop.wardrive.UsbImport
 import dev.skyward.rf.desktop.session.SessionRecorder
 import dev.skyward.rf.desktop.sky.DeskSky
 import dev.skyward.rf.desktop.ui.CommandCenter
@@ -42,6 +43,7 @@ fun main() = application {
     val drives = remember { DeskDrives(home) }
     // The phone's side of the link, pulled here: off until Setup says otherwise, as on the phone.
     val peer = remember { DeskPeer(scope, drives) }
+    val usb = remember { UsbImport(drives, home) }
     val host = remember {
         SensorHost(scope) { board ->
             // A board's own fix goes on its rows; a board without one records blank coordinates
@@ -67,7 +69,7 @@ fun main() = application {
             LaunchedEffect(cfg.peerEnabled) {
                 if (cfg.peerEnabled) peer.start() else peer.stop()
             }
-            CommandCenter(host, recorder, sky, settings, peer)
+            CommandCenter(host, recorder, sky, settings, peer, usb)
         }
     }
 }

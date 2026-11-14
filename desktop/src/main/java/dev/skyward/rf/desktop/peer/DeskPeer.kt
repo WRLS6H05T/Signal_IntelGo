@@ -133,6 +133,11 @@ class DeskPeer(private val scope: CoroutineScope, private val drives: DeskDrives
     /** A drive's fixes, for the map. */
     fun track(id: String): List<LatLon> = drives.track(id)
 
+    /** Re-reads the folder, so drives that arrived by cable list beside the ones from the link. */
+    fun refreshSaved() {
+        _state.value = _state.value.copy(saved = drives.list())
+    }
+
     fun stop() {
         job?.cancel()
         job = null

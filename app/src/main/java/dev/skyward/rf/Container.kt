@@ -32,6 +32,7 @@ import dev.skyward.rf.sky.MeshSource
 import dev.skyward.rf.sky.SatTracker
 import dev.skyward.rf.wardrive.LoggedRegistry
 import dev.skyward.rf.wardrive.SignalLog
+import dev.skyward.rf.wardrive.UsbExport
 import dev.skyward.rf.wardrive.WardriveEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -101,6 +102,19 @@ class Container(context: Context) {
         store = FileStore(File(rootData, "wardrives").apply { mkdirs() }),
         logged = logged,
     )
+
+    /**
+     * The drives, mirrored where a cable can read them.
+     *
+     * Internal storage is invisible to MTP and to `adb pull`, so each session is copied to the app's
+     * external files folder. Collecting the list means the copy happens when a drive closes and once
+     * at startup, with no export action for the user to remember.
+     */
+    val usbExport = UsbExport(appContext, wardrive)
+
+    init {
+        scope.launch { wardrive.sessions.collect { usbExport.export() } }
+    }
 
     val rf = RfScanner(appContext)
     val cell = CellScanner(appContext)
