@@ -65,6 +65,7 @@ import dev.skyward.rf.desktop.session.SessionRecorder
 import dev.skyward.rf.desktop.session.SessionSummary
 import dev.skyward.rf.desktop.session.Sighting
 import dev.skyward.rf.desktop.sky.DeskSky
+import dev.skyward.rf.desktop.wardrive.DeskDrives
 import dev.skyward.rf.desktop.wardrive.UsbImport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -132,6 +133,29 @@ fun CommandCenter(
     }
 
     var tab by remember { mutableStateOf(DeskTab.MAP) }
+    // Which camera move the last SHOW asked for. The token makes each SHOW a fresh event, so
+    // showing the same drive twice still returns the map to it.
+    var mapFocus by remember { mutableStateOf<MapFocus?>(null) }
+    var focusToken by remember { mutableStateOf(0L) }
+
+    /**
+     * Draws a phone drive on the map, and takes the map to it.
+     *
+     * The drive was recorded wherever the handset went, which is rarely where this desk is looking,
+     * so the polyline alone was drawn off-screen and SHOW read as a dead button.
+     */
+    fun showDrive(id: String) {
+        val line = peer.track(id)
+        if (line.isEmpty()) return
+        peerTrack = line
+        val lats = line.map { it.lat }
+        val lons = line.map { it.lon }
+        val span = maxOf(lats.max() - lats.min(), lons.max() - lons.min())
+        focusToken += 1
+        mapFocus = MapFocus(lats.average(), lons.average(), zoomFor(span), focusToken)
+        tab = DeskTab.MAP
+    }
+
     var selected by remember { mutableStateOf<String?>(null) }
     var layers by remember { mutableStateOf(GlobeLayers()) }
     // Spin starts at whatever Setup was left on - the phone's 1X by default: a desk that is
@@ -240,6 +264,7 @@ fun CommandCenter(
                 },
                 active = active,
                 track = peerTrack,
+                focus = mapFocus,
             )
 
             DeskTab.BOARD -> BoardPane(
@@ -257,6 +282,8 @@ fun CommandCenter(
                 modifier = Modifier.weight(1f),
                 recorder = recorder,
                 boards = ordered,
+                drives = peerState.saved,
+                onShowDrive = { showDrive(it) },
             )
 
             DeskTab.SETUP -> SetupPane(
@@ -277,7 +304,7 @@ fun CommandCenter(
                 peer = peerState,
                 onAskDrives = { peer.requestList() },
                 onFetchDrive = { peer.fetch(it) },
-                onShowDrive = { peerTrack = peer.track(it) },
+                onShowDrive = { showDrive(it) },
                 usb = usbState,
                 onUsbPull = { usbWant++ },
             )
@@ -392,6 +419,7 @@ private fun MapPane(
     onSpin: () -> Unit,
     logged: Map<String, Int>,
     track: List<LatLon>,
+    focus: MapFocus?,
 ) {
     // The rail and the telemetry column are fixed widths and the map takes what is left. They are
     // sized from the pane rather than by weight: as weighted siblings the globe took the whole
@@ -456,6 +484,7 @@ private fun MapPane(
             spin = spin,
             onSpin = onSpin,
             track = track,
+            focus = focus,
         )
         VerticalHairline()
         Telemetry(modifier = Modifier.width(panelWidth).fillMaxHeight(), board = active)
@@ -879,8 +908,53 @@ private fun EmptyRow(text: String) {
 
 // ---------------------------------------------------------------- log
 
+/** The handset's drives, where a log is read: the desk's own rows and the phone's trips together. */
 @Composable
-private fun LogPane(modifier: Modifier, recorder: SessionRecorder, boards: List<BoardState>) {
+private fun PhoneDrives(drives: List<DeskDrives.Row>, onShow: (String) -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(Desk.bg.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+            .padding(12.dp),
+    ) {
+        Text(
+            "DRIVES FROM THE PHONE · ${drives.size}",
+            color = Desk.dim,
+            fontSize = 10.sp,
+        )
+        Spacer(Modifier.height(6.dp))
+        drives.forEach { drive ->
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(drive.name.ifBlank { drive.id }, color = Desk.text, fontSize = 12.sp)
+                    Text(
+                        (if (drive.from.isBlank()) "" else drive.from + " · ") +
+                            clockOf(drive.startedAt) + " · ${drive.points} fixes · " +
+                            String.format("%.1f", drive.km) + " km",
+                        color = Desk.dim,
+                        fontSize = 10.sp,
+                        fontFamily = Desk.mono,
+                    )
+                }
+                TextButton(onClick = { onShow(drive.id) }) {
+                    Text("SHOW ON MAP", color = Desk.cyan, fontSize = 10.sp, fontFamily = Desk.mono)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LogPane(
+    modifier: Modifier,
+    recorder: SessionRecorder,
+    boards: List<BoardState>,
+    drives: List<DeskDrives.Row>,
+    onShowDrive: (String) -> Unit,
+) {
     val rows = remember(recorder.count) { recorder.rows() }
     val wifi = rows.count { it.kind == SessionRecorder.WIFI }
     val ble = rows.count { it.kind == SessionRecorder.BLE }
@@ -899,6 +973,12 @@ private fun LogPane(modifier: Modifier, recorder: SessionRecorder, boards: List<
             Badge("$ghz5 ON 5 GHZ", Desk.accent)
         }
         Spacer(Modifier.height(12.dp))
+        // Listed above the rows and before the empty state: a desk that has not recorded its own
+        // session yet still has the phone's drives to show, and they were invisible here.
+        if (drives.isNotEmpty()) {
+            PhoneDrives(drives, onShowDrive)
+            Spacer(Modifier.height(12.dp))
+        }
         if (rows.isEmpty()) {
             Text(
                 "Nothing recorded yet. START a session, link a board, and every network and advertiser it sweeps is filed here with the board's own fix.",
@@ -1505,6 +1585,17 @@ private fun SessionBar(
 }
 
 // ---------------------------------------------------------------- bits
+
+/** A zoom that fits a track [span] degrees across, from a few streets to a continent. */
+private fun zoomFor(span: Double): Double = when {
+    span < 0.01 -> 8.0
+    span < 0.05 -> 7.0
+    span < 0.2 -> 6.0
+    span < 0.8 -> 5.0
+    span < 3.0 -> 3.5
+    span < 10.0 -> 2.5
+    else -> 1.5
+}
 
 @Composable
 private fun SectionLabel(text: String) {

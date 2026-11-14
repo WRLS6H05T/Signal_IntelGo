@@ -122,6 +122,9 @@ object WorldLand {
  * every point without anything jumping: the sphere and the plane agree on pixels per degree at
  * the centre of the screen, and only the curvature dissolves.
  */
+/** A camera move asked for from outside, e.g. showing a drive recorded somewhere else. */
+data class MapFocus(val lat: Double, val lon: Double, val zoom: Double, val token: Long)
+
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun MapView(
@@ -138,6 +141,8 @@ fun MapView(
     onSpin: () -> Unit,
     /** The fixes of a drive picked in Setup, drawn over the map. */
     track: List<LatLon> = emptyList(),
+    /** Where to look when a drive has just been shown; the token changes on every SHOW. */
+    focus: MapFocus? = null,
 ) {
     var camLat by remember { mutableStateOf(20.0) }
     var camLon by remember { mutableStateOf(0.0) }
@@ -179,6 +184,16 @@ fun MapView(
             camLon = where.lon
             centred = true
         }
+    }
+
+    // Showing a drive has to move the camera as well as draw it: a drive recorded elsewhere was
+    // painted off-screen, so the click looked like it did nothing.
+    LaunchedEffect(focus?.token) {
+        val where = focus ?: return@LaunchedEffect
+        camLat = where.lat
+        camLon = where.lon
+        zoom = where.zoom
+        centred = true
     }
 
     Box(modifier.background(Color(0xFF070C12))) {
