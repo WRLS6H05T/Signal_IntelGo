@@ -66,6 +66,8 @@ class DeskPeer(private val scope: CoroutineScope, private val drives: DeskDrives
         val saved: List<DeskDrives.Row> = emptyList(),
         /** The last drive that finished arriving, for a line of confirmation. */
         val lastSave: String = "",
+        /** Frames heard on the notify characteristic since the link came up. */
+        val frames: Int = 0,
     )
 
     private companion object {
@@ -99,6 +101,7 @@ class DeskPeer(private val scope: CoroutineScope, private val drives: DeskDrives
     private val inParts = HashMap<String, HashMap<Int, String>>()
     private val inTotals = HashMap<String, Int>()
     private var sendId = 0
+    private var frames = 0
 
     fun start() {
         if (job != null) return
@@ -228,6 +231,7 @@ class DeskPeer(private val scope: CoroutineScope, private val drives: DeskDrives
         }
 
         synchronized(assembler) { assembler.reset() }
+        frames = 0
         inParts.clear()
         inTotals.clear()
         link = peripheral
@@ -252,7 +256,16 @@ class DeskPeer(private val scope: CoroutineScope, private val drives: DeskDrives
 
     /** Runs on SimpleBLE's callback thread: reassemble, decode, publish. */
     private fun onFrames(bytes: ByteArray) {
-        val payload = synchronized(assembler) { assembler.add(bytes) } ?: return
+        // Counted before decoding: "the phone says nothing" and "the phone is sending something
+        // this build cannot read" need different answers, and from the outside they look the same.
+        frames++
+        val payload = synchronized(assembler) { assembler.add(bytes) }
+        if (payload == null) {
+            if (frames == 1 || frames % 40 == 0) {
+                _state.value = _state.value.copy(frames = frames, note = "linked · $frames frames · nothing complete yet")
+            }
+            return
+        }
         val message = PeerProtocol.decode(String(payload, Charsets.UTF_8)) ?: return
         if (message.kind == PeerProtocol.KIND_LOGS) {
             takeLogs(message)
@@ -273,6 +286,7 @@ class DeskPeer(private val scope: CoroutineScope, private val drives: DeskDrives
             entityTotal = message.entityTotal,
             at = message.at,
             note = "receiving snapshots",
+            frames = frames,
         )
     }
 
