@@ -66,6 +66,7 @@ import dev.skyward.rf.desktop.session.SessionSummary
 import dev.skyward.rf.desktop.session.Sighting
 import dev.skyward.rf.desktop.sky.DeskSky
 import dev.skyward.rf.desktop.wardrive.DeskDrives
+import dev.skyward.rf.wardrive.WardrivePoint
 import dev.skyward.rf.desktop.wardrive.UsbImport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -104,8 +105,9 @@ fun CommandCenter(
     val skyState by sky.state.collectAsState()
     val cfg by settings.state.collectAsState()
     val peerState by peer.state.collectAsState()
-    // A drive picked in Setup, drawn on the map until another is picked.
-    var peerTrack by remember { mutableStateOf<List<LatLon>>(emptyList()) }
+    // A drive picked in Setup, drawn on the map until another is picked. Its fixes carry the
+    // scores and the radios heard there, which is what the phone's dots are made of.
+    var peerDrive by remember { mutableStateOf<List<WardrivePoint>>(emptyList()) }
     // The cable is polled, not watched: nothing on this machine tells a JVM that a phone
     // appeared on the bus, and asking adb costs a few milliseconds.
     var usbState by remember { mutableStateOf(UsbImport.State()) }
@@ -145,14 +147,14 @@ fun CommandCenter(
      * so the polyline alone was drawn off-screen and SHOW read as a dead button.
      */
     fun showDrive(id: String) {
-        val line = peer.track(id)
-        if (line.isEmpty()) return
-        peerTrack = line
-        val lats = line.map { it.lat }
-        val lons = line.map { it.lon }
+        val fixes = peer.points(id)
+        if (fixes.isEmpty()) return
+        peerDrive = fixes
+        val lats = fixes.map { it.lat }
+        val lons = fixes.map { it.lon }
         val span = maxOf(lats.max() - lats.min(), lons.max() - lons.min())
         focusToken += 1
-        mapFocus = MapFocus(lats.average(), lons.average(), zoomFor(span), focusToken)
+        mapFocus = MapFocus(lats.average(), lons.average(), span, focusToken)
         tab = DeskTab.MAP
     }
 
@@ -265,7 +267,7 @@ fun CommandCenter(
                     if (key == "uav") sky.setLayer("uav", on)
                 },
                 active = active,
-                track = peerTrack,
+                drive = peerDrive,
                 focus = mapFocus,
             )
 
@@ -420,7 +422,7 @@ private fun MapPane(
     spin: Int,
     onSpin: () -> Unit,
     logged: Map<String, Int>,
-    track: List<LatLon>,
+    drive: List<WardrivePoint>,
     focus: MapFocus?,
 ) {
     // The rail and the telemetry column are fixed widths and the map takes what is left. They are
@@ -485,7 +487,7 @@ private fun MapPane(
             onLayer = onLayer,
             spin = spin,
             onSpin = onSpin,
-            track = track,
+            track = drive,
             focus = focus,
         )
         VerticalHairline()
@@ -1587,17 +1589,6 @@ private fun SessionBar(
 }
 
 // ---------------------------------------------------------------- bits
-
-/** A zoom that fits a track [span] degrees across, from a few streets to a continent. */
-private fun zoomFor(span: Double): Double = when {
-    span < 0.01 -> 8.0
-    span < 0.05 -> 7.0
-    span < 0.2 -> 6.0
-    span < 0.8 -> 5.0
-    span < 3.0 -> 3.5
-    span < 10.0 -> 2.5
-    else -> 1.5
-}
 
 @Composable
 private fun SectionLabel(text: String) {

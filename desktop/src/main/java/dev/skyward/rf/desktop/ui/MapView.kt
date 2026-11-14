@@ -28,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -46,6 +47,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import dev.skyward.rf.core.SignalScale
+import dev.skyward.rf.wardrive.WardrivePoint
 import androidx.compose.ui.unit.sp
 import dev.skyward.rf.core.AircraftView
 import dev.skyward.rf.core.DroneView
@@ -53,7 +56,6 @@ import dev.skyward.rf.core.Geo
 import dev.skyward.rf.core.MeshNode
 import dev.skyward.rf.core.LatLon
 import dev.skyward.rf.core.SatView
-import dev.skyward.rf.core.SignalScale
 import dev.skyward.rf.desktop.hardware.BoardState
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -122,8 +124,26 @@ object WorldLand {
  * every point without anything jumping: the sphere and the plane agree on pixels per degree at
  * the centre of the screen, and only the curvature dissolves.
  */
-/** A camera move asked for from outside, e.g. showing a drive recorded somewhere else. */
-data class MapFocus(val lat: Double, val lon: Double, val zoom: Double, val token: Long)
+/** How many dots a drive gets before it is sampled, matching the phone's budget. */
+private const val DRIVE_DOT_BUDGET = 900
+
+/**
+ * A camera move asked for from outside, e.g. showing a drive recorded somewhere else.
+ *
+ * The span travels rather than a zoom, because the zoom that makes a drive fill the view depends
+ * on the size of the map area, which only the drawing side knows.
+ */
+data class MapFocus(val lat: Double, val lon: Double, val spanDeg: Double, val token: Long)
+
+/** The zoom at which [spanDeg] fills most of a map [minSide] pixels across. */
+private fun fitZoom(spanDeg: Double, minSide: Float): Double {
+    if (minSide <= 0f) return MapMath.HANDOFF
+    val degrees = spanDeg.coerceAtLeast(1e-4)
+    val targetPxPerDegree = 0.7 * minSide / degrees
+    // Inverts the flat map's scale: worldSize(mapZoom) / 360 pixels per degree.
+    val zoom = ln(targetPxPerDegree * 360.0 / 256.0) / ln(2.0) - MapMath.handoffOffset(minSide)
+    return zoom.coerceIn(MapMath.MIN_ZOOM, MapMath.MAX_ZOOM)
+}
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -139,8 +159,8 @@ fun MapView(
     onLayer: (String, Boolean) -> Unit,
     spin: Int,
     onSpin: () -> Unit,
-    /** The fixes of a drive picked in Setup, drawn over the map. */
-    track: List<LatLon> = emptyList(),
+    /** The fixes of a drive picked in Setup: one dot each, coloured by the signal at that fix. */
+    track: List<WardrivePoint> = emptyList(),
     /** Where to look when a drive has just been shown; the token changes on every SHOW. */
     focus: MapFocus? = null,
 ) {
@@ -148,6 +168,9 @@ fun MapView(
     var camLon by remember { mutableStateOf(0.0) }
     // 4.0 puts the ball at a comfortable size: the hand-off is 5.5, where it fills the viewport.
     var zoom by remember { mutableStateOf(4.0) }
+    // The map's own size, which is what a fitted zoom is measured against.
+    var viewW by remember { mutableStateOf(0f) }
+    var viewH by remember { mutableStateOf(0f) }
     val rings = remember { WorldLand.rings() }
     val scope = rememberCoroutineScope()
     val tiles = remember { TileStore(scope) }
@@ -188,15 +211,20 @@ fun MapView(
 
     // Showing a drive has to move the camera as well as draw it: a drive recorded elsewhere was
     // painted off-screen, so the click looked like it did nothing.
-    LaunchedEffect(focus?.token) {
+    LaunchedEffect(focus?.token, viewW, viewH) {
         val where = focus ?: return@LaunchedEffect
+        if (viewW <= 0f || viewH <= 0f) return@LaunchedEffect
         camLat = where.lat
         camLon = where.lon
-        zoom = where.zoom
+        zoom = fitZoom(where.spanDeg, minOf(viewW, viewH))
         centred = true
     }
 
-    Box(modifier.background(Color(0xFF070C12))) {
+    Box(
+        modifier
+            .background(Color(0xFF070C12))
+            .onSizeChanged { viewW = it.width.toFloat(); viewH = it.height.toFloat() },
+    ) {
         Canvas(
             Modifier
                 .fillMaxSize()
@@ -356,7 +384,7 @@ private fun DrawScope.drawMap(
     boards: List<BoardState>,
     observer: LatLon?,
     layers: GlobeLayers,
-    track: List<LatLon>,
+    track: List<WardrivePoint>,
 ) {
     @Suppress("UNUSED_EXPRESSION")
     generation
@@ -468,23 +496,42 @@ private fun DrawScope.drawMap(
         )
     }
 
-    // ---- a drive's track, from the phone ----
-    if (track.size > 1) {
-        val line = Path()
-        var pen = false
-        for (fix in track) {
-            // A point on the far hemisphere breaks the line rather than joining across the globe:
-            // a track that vanished behind the ball has not travelled through it.
-            if (place(fix.lat, fix.lon, 0.0)) {
-                if (pen) line.lineTo(pt[0], pt[1]) else line.moveTo(pt[0], pt[1])
-                pen = true
-            } else {
-                pen = false
+    // ---- a drive from the phone, drawn the way the phone draws it ----
+    // One dot per fix on the five-bin red-to-green scale, weak to strong, with nothing painted
+    // between them: the drive reads as the sweep it was instead of as a line drawn over the map,
+    // which is what the handset has always shown. A stride samples a long drive evenly - the
+    // skipped dots sit under the kept ones - and the radios heard at a fix sit in a ring around it,
+    // coloured by their own strength, so a fix says what it found.
+    if (track.isNotEmpty()) {
+        val step = ((track.size + DRIVE_DOT_BUDGET - 1) / DRIVE_DOT_BUDGET).coerceAtLeast(1)
+        for (i in track.indices step step) {
+            val fix = track[i]
+            if (!place(fix.lat, fix.lon, 0.0)) continue
+            drawCircle(
+                Color(SignalScale.colorOfScore(fix.score)),
+                radius = 2.4.dp.toPx(),
+                center = Offset(pt[0], pt[1]),
+            )
+        }
+        for (i in track.indices step step) {
+            val fix = track[i]
+            if (fix.networks.isEmpty() || !place(fix.lat, fix.lon, 0.0)) continue
+            val cx = pt[0]
+            val cy = pt[1]
+            fix.networks.take(6).forEachIndexed { k, heard ->
+                val angle = Math.toRadians(k * 60.0 - 90.0)
+                drawCircle(
+                    Color(SignalScale.colorOfDbm(heard.rssi)).copy(alpha = 0.75f),
+                    radius = 1.5.dp.toPx(),
+                    center = Offset(
+                        cx + (Math.cos(angle) * 6.0).toFloat() * density,
+                        cy + (Math.sin(angle) * 6.0).toFloat() * density,
+                    ),
+                )
             }
         }
-        drawPath(line, Desk.violet.copy(alpha = 0.9f), style = Stroke(2.5.dp.toPx(), cap = StrokeCap.Round))
         if (place(track.first().lat, track.first().lon, 0.0)) {
-            drawCircle(Desk.violet, radius = 3.5.dp.toPx(), center = Offset(pt[0], pt[1]))
+            drawCircle(Desk.text, radius = 3.dp.toPx(), center = Offset(pt[0], pt[1]))
         }
         if (place(track.last().lat, track.last().lon, 0.0)) {
             drawCircle(Desk.accent, radius = 3.5.dp.toPx(), center = Offset(pt[0], pt[1]))

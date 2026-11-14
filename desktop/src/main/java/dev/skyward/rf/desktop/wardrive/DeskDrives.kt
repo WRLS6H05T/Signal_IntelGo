@@ -1,6 +1,7 @@
 package dev.skyward.rf.desktop.wardrive
 
 import dev.skyward.rf.core.LatLon
+import dev.skyward.rf.wardrive.WardrivePoint
 import dev.skyward.rf.wardrive.WardriveSession
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -49,6 +50,16 @@ class DeskDrives(home: File) {
             .onFailure { return null }
         return row(stamped)
     }
+
+    /**
+     * The fixes of one saved drive.
+     *
+     * The map needs more than the line: the phone paints a drive as one dot per fix on its
+     * red-to-green scale, so the scores and the radios heard at each fix have to come through.
+     */
+    fun points(id: String): List<WardrivePoint> = runCatching {
+        json.decodeFromString(WardriveSession.serializer(), File(dir, "peer_$id.json").readText())
+    }.getOrNull()?.points.orEmpty()
 
     /** Every saved drive, newest first. Unreadable files are skipped rather than listed empty. */
     fun list(): List<Row> {

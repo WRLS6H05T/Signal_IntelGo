@@ -1,6 +1,7 @@
 package dev.skyward.rf.desktop.peer
 
 import dev.skyward.rf.core.LatLon
+import dev.skyward.rf.wardrive.WardrivePoint
 import dev.skyward.rf.desktop.wardrive.DeskDrives
 import dev.skyward.rf.peer.PeerFrames
 import dev.skyward.rf.peer.PeerLogs
@@ -132,6 +133,9 @@ class DeskPeer(private val scope: CoroutineScope, private val drives: DeskDrives
 
     /** A drive's fixes, for the map. */
     fun track(id: String): List<LatLon> = drives.track(id)
+
+    /** The same drive with its scores, for the dot-per-fix drawing. */
+    fun points(id: String): List<WardrivePoint> = drives.points(id)
 
     /** Re-reads the folder, so drives that arrived by cable list beside the ones from the link. */
     fun refreshSaved() {
