@@ -245,6 +245,15 @@ class DeskPeer(private val scope: CoroutineScope, private val drives: DeskDrives
             saved = drives.list(),
         )
 
+        // Ask as soon as the link is up rather than waiting to be spoken to. The phone offers a
+        // snapshot every five seconds while it has a subscriber, but a phone whose app has been
+        // throttled in the background can sit there saying nothing, and a request is what turns a
+        // silent link into either an answer or a visible write failure.
+        if (subscribed) {
+            delay(1_500)
+            requestList()
+        }
+
         // The binding has no disconnect callback of its own that carries the reason, so the link
         // is watched rather than waited on.
         while (peripheral.isConnected) delay(1_000)
