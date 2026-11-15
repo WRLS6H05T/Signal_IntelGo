@@ -234,13 +234,19 @@ and BLE Remote ID drones decoded by the app's own parser. **BOARD** is the conso
 the session caught, and **SETUP** holds the observer, the feeds and the satellite groups.
 
 **INTEL** is a dropdown at the top of the sensor rail rather than a panel over the map: a header
-line that opens over the boards, so switching a layer never covers the map being read. Each row
-carries the app's two numbers - drawn now, and written into the session - and its own glyph.
+line that opens over the boards, so switching a layer never covers the map being read. Each row is
+split the way the panel is read: the live count on the left under `LIVE`, and on the right under
+`LOGGED` one dot per logged signal, coloured by the layer it belongs to, with a `SOME` / `ALL`
+toggle for a sweep too long to draw whole - 27 dots a row, or up to 450 with `ALL`. The logged side
+counts the phone's fetched drives as well as the desk's own session, because on a desk with no
+board of its own the phone's sweeps are the only recorded traffic there is. Every row still carries
+its own glyph and switches its layer when clicked.
 
 ```bash
 ./gradlew :desktop:run          # the window
 ./gradlew :desktop:test         # identity, band and session-export tests
 ./gradlew :desktop:packageMsi   # installer (packageDeb / packageDmg on the others)
+./gradlew :desktop:createDistributable   # a runnable bundle in desktop/build/compose/binaries/main/app
 ```
 
 | Panel | What it does |
@@ -251,9 +257,9 @@ carries the app's two numbers - drawn now, and written into the session - and it
 | **CONSOLE** | the live transcript, a verb box and the firmware's own quick verbs (`help`, `status`, `scanap`, `blescan`, `gps`, `reboot`) |
 | **TELEMETRY** | every reply parsed by the app's parser: fix, satellites, HDOP, position, altitude, and the AP and BLE tables sorted by signal on the app's red -> green scale. The **5 GHZ** count is the proof the C5's second pass ran: no single-band radio prints a 5 GHz network |
 | **SESSION** | records every sighting with the board it came from and the fix that board had, then exports CSV or JSON through a native save dialog |
-| **MAP** | the globe, and the INTEL table over it: SAT, AIR, ESP, WIFI and BLE, each row switching its layer. Drag to spin, `+`/`−` to size it, `◎` to reset |
-| **LOG** | every recorded sighting, newest first, with the per-session counts and the same CSV/JSON exports |
-| **SETUP** | the observer (a board's own fix, or a position typed in - the desk has no receiver of its own), the six CelesTrak groups, and the two feed statuses |
+| **MAP** | the globe, the INTEL table over it, and a phone drive drawn as one dot per fix on the app's red -> green scale. Drag to spin, `+`/`−` to size it, `◎` to reset |
+| **LOG** | the phone's drives above every recorded sighting, newest first, each with `SHOW ON MAP`; the per-session counts and the same CSV/JSON exports |
+| **SETUP** | the observer (a board's own fix, or a position typed in - the desk has no receiver of its own), the six CelesTrak groups, the two feed statuses, the link to the phone and its drives, and the cable import |
 
 What goes down the cable is not chosen by the desk: the verbs come from the same
 `Esp32Console.commandsFor` the handset calls, and the band menu from the same `ScanPlan`. The
@@ -665,6 +671,44 @@ for their catalogue numbers on every element-set refresh and gives them the same
 as everything else, with a gold glow when caught, but there are no live elements to propagate, so
 nothing is plotted today. They appear automatically if any of them is catalogued again.
 
+## Drives on the desk: the radio link and the cable
+
+A wardrive recorded on the phone can reach the desk two ways, and both end in the same store -
+`~/.signal-intelgo/wardrive`, one JSON file per drive - so a drive is listed once however it
+arrived, and a second fetch of the same drive replaces the file rather than duplicating it.
+
+**Over BLE.** Setup -> **PEER · THE PHONE** links the desk to the handset's peer service as a
+central: it scans for the service, subscribes, and writes its first request a second and a half
+after the link is up instead of waiting to be spoken to. `ASK FOR THE LIST` asks again. Each drive
+the phone offers is fetched in slices over the peer protocol (`KIND_LOGS`, gzipped, cut into
+parts), rebuilt and saved. The link line says which of the two silences it is:
+`linked · 12 frames · nothing complete yet` is traffic that arrived but would not decode, while
+`waiting for a snapshot` is a phone that has not answered at all.
+
+**Over a cable.** The phone mirrors every drive, as it closes, into a folder a cable can read:
+`Android/data/dev.skyward.rf/files/SignalIntelGo/wardrives/session_<id>.json`. The Log tab's
+**USB share** card shows that path and how many drives are in it. On the desk, Setup -> **USB FILE
+SHARING** finds the handset with `adb` (the SDK's own, or whatever is on `PATH`), pulls that folder
+into `~/.signal-intelgo/usb-pull` and imports what it finds, re-reading a phone that stays plugged
+in every fifteen seconds. `PULL NOW` forces a pass. `adb` is the one USB path a JVM can read on
+Windows - MTP is a shell namespace, not a drive letter - so without the SDK the pane says so, and a
+card copied by hand still works by dropping its session files into the wardrive folder.
+
+**USB, one cable** is the pairing that matters here: the phone needs no radio link and the desk
+needs no subscriber, and the files survive the phone being switched off afterwards.
+
+### What a shown drive looks like
+
+`SHOW ON MAP`, in the Log tab or in Setup's drives list, switches to the map, fits the camera to
+the drive and draws it the way the handset draws it: one dot per fix on the app's five-bin
+red -> green scale (weak to strong, `SignalScale` in `:shared`), nothing painted between the dots,
+and a small ring of dots around each fix for the radios heard there, coloured by their own dBm.
+A 715-fix drive is 715 dots; past 900 the track is sampled evenly, as the phone samples it, and
+the skipped dots sit under the kept ones. The camera fit inverts the map's own world scale against
+the size of the map area, so a sweep recorded elsewhere lands on its streets rather than on a
+continent.
+
+
 ## Moving the intel to another phone
 
 Everything the app records is plain files in one folder:
@@ -679,6 +723,10 @@ Internal storage/Android/data/dev.skyward.rf/files/data
 | `signals/` | the per-signal log, with the fix each signal was heard at |
 | `logged/` | the registry of what has already been captured |
 | `settings_v1.json` | the settings |
+
+Every drive is also mirrored, as it closes, into `Android/data/dev.skyward.rf/files/SignalIntelGo/wardrives`
+- the same session JSON, in the one folder both a cable and the desk's `adb` pull can reach. It is
+a copy for sharing, not the recording: the `data` folder above stays the truth.
 
 To move it: plug the phone into a PC, choose **File transfer** on the phone, open
 `Internal storage/Android/data/dev.skyward.rf/files`, and copy the `data` folder somewhere safe.
