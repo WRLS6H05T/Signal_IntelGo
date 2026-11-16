@@ -59,6 +59,7 @@ import dev.skyward.rf.core.Geo
 import dev.skyward.rf.core.MeshNode
 import dev.skyward.rf.core.LatLon
 import dev.skyward.rf.core.SatView
+import dev.skyward.rf.sky.SatTracker
 import dev.skyward.rf.desktop.hardware.BoardState
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -700,10 +701,23 @@ private fun DrawScope.drawMap(
     // laid over the map. A share of them carries the same sense of depth with no visible grid.
     val tetherStep = if (every > 1) 5 else 1
     sats.forEach { sat ->
-        if (every > 1 && Math.floorMod(sat.noradId.hashCode(), every) != 0) return@forEach
+        // The station is a named object, not a sample of a shell. With the Starlink catalogues on,
+        // NORAD 25544 is one index in ten thousand, so whether the stride kept it was an accident of
+        // its hash: it is always plotted, and drawn larger than the shell around it.
+        val station = sat.noradId == SatTracker.ISS_NORAD
+        if (!station && every > 1 && Math.floorMod(sat.noradId.hashCode(), every) != 0) return@forEach
         val lift = (ln(1.0 + sat.altKm * 1000.0 / 500.0) * 0.022).coerceIn(0.0, 0.30)
         if (!place(sat.lat, sat.lon, lift)) return@forEach
         val at = Offset(pt[0], pt[1])
+        if (station) {
+            // A halo and a tether: the eye has to find one mark among hundreds.
+            if (place(sat.lat, sat.lon, 0.0)) {
+                drawLine(Desk.accent.copy(alpha = 0.4f), Offset(pt[0], pt[1]), at, 1.2f)
+            }
+            drawCircle(Desk.accent.copy(alpha = 0.16f), radius = 10.dp.toPx(), center = at)
+            drawSatGlyph(at, 12.dp.toPx(), Desk.text)
+            return@forEach
+        }
         if (t > 0.5f && Math.floorMod(sat.noradId.hashCode(), every * tetherStep) == 0 &&
             place(sat.lat, sat.lon, 0.0)
         ) {

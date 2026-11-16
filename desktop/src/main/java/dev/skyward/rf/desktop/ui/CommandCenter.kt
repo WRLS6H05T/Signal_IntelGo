@@ -55,7 +55,10 @@ import dev.skyward.rf.desktop.alerts.DeskAlert
 import dev.skyward.rf.desktop.alerts.DeskAlerts
 import dev.skyward.rf.desktop.alerts.DeskWatch
 import dev.skyward.rf.core.ScanPlan
+import dev.skyward.rf.core.SatView
 import dev.skyward.rf.core.Settings
+import dev.skyward.rf.net.IssCrew
+import dev.skyward.rf.sky.SatTracker
 import dev.skyward.rf.core.BleKind
 import dev.skyward.rf.core.BleIdentity
 import dev.skyward.rf.core.SignalScale
@@ -518,7 +521,13 @@ private fun MapPane(
             focus = focus,
         )
         VerticalHairline()
-        Telemetry(modifier = Modifier.width(panelWidth).fillMaxHeight(), board = active)
+        Telemetry(
+            modifier = Modifier.width(panelWidth).fillMaxHeight(),
+            board = active,
+            iss = skyState.sats.firstOrNull { it.noradId == SatTracker.ISS_NORAD },
+            crew = skyState.crew,
+            hasObserver = skyState.observer != null,
+        )
     }
     }
 }
@@ -813,7 +822,13 @@ private fun ConsoleRow(line: ConsoleLine) {
 // ---------------------------------------------------------------- telemetry
 
 @Composable
-private fun Telemetry(modifier: Modifier, board: BoardState?) {
+private fun Telemetry(
+    modifier: Modifier,
+    board: BoardState?,
+    iss: SatView? = null,
+    crew: IssCrew.Crew? = null,
+    hasObserver: Boolean = true,
+) {
     var tab by remember { mutableStateOf(0) }
     val reading = board?.reading
     val sweep = board?.sweep
@@ -841,6 +856,64 @@ private fun Telemetry(modifier: Modifier, board: BoardState?) {
             BigNumber("AP", board?.aps ?: 0, Desk.text)
             BigNumber("BLE", board?.bles ?: 0, Desk.text)
             BigNumber("5 GHZ", board?.ghz5 ?: 0, if ((board?.ghz5 ?: 0) > 0) Desk.accent else Desk.dim)
+        }
+        if (iss != null) {
+            Spacer(Modifier.height(12.dp))
+            Hairline()
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SectionLabel("ISS")
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    when {
+                        // Without a fix the tracker answers every satellite at 90 degrees and a
+                        // range equal to its altitude. Reporting that as a pass would be inventing
+                        // an observer, so the desk says what it does know: where the station is.
+                        !hasObserver -> "no observer yet"
+                        iss.elevation > 0 -> "above the horizon"
+                        else -> "below the horizon"
+                    },
+                    color = when {
+                        !hasObserver -> Desk.dim
+                        iss.elevation > 0 -> Desk.accent
+                        else -> Desk.dim
+                    },
+                    fontSize = 9.sp,
+                    fontFamily = Desk.mono,
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            Row {
+                if (hasObserver) {
+                    StatCell(
+                        "ELEV",
+                        String.format("%.0f°", iss.elevation),
+                        if (iss.elevation > 0) Desk.accent else Desk.text,
+                    )
+                    StatCell("RANGE", String.format("%,.0f km", iss.rangeKm), Desk.text)
+                } else {
+                    StatCell("LAT", String.format("%.1f", iss.lat), Desk.text)
+                    StatCell("LON", String.format("%.1f", iss.lon), Desk.text)
+                }
+                StatCell("ALT", String.format("%.0f km", iss.altKm), Desk.text)
+                StatCell("CREW", crew?.aboard?.toString() ?: "—", Desk.text)
+            }
+            Spacer(Modifier.height(4.dp))
+            // A dash until the roster answers, never a zero: "nobody aboard" is a claim.
+            Text(
+                when {
+                    crew == null -> "crew roster not read yet"
+                    crew.error != null -> "crew roster: ${crew.error}"
+                    crew.names.isNotEmpty() -> crew.label + "  ·  " + crew.names.joinToString(", ")
+                    else -> crew.label
+                },
+                color = Desk.dim,
+                fontSize = 9.sp,
+                fontFamily = Desk.mono,
+                maxLines = 2,
+            )
+            Spacer(Modifier.height(10.dp))
+            Hairline()
         }
         Spacer(Modifier.height(14.dp))
         Row {

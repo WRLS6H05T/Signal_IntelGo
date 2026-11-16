@@ -10,6 +10,7 @@ import dev.skyward.rf.core.Settings
 import dev.skyward.rf.desktop.drones.RidFeed
 import dev.skyward.rf.sky.AircraftSource
 import dev.skyward.rf.sky.MeshSource
+import dev.skyward.rf.net.IssCrew
 import dev.skyward.rf.sky.SatTracker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -57,6 +58,8 @@ class DeskSky(
         val airLive: Boolean = true,
         val meshLive: Boolean = false,
         val droneLive: Boolean = false,
+        /** Who is aboard the station, from the same roster feed the phone reads. */
+        val crew: IssCrew.Crew? = null,
         val lastTick: Long = 0,
     )
 
@@ -65,6 +68,7 @@ class DeskSky(
         .callTimeout(25, TimeUnit.SECONDS)
         .build()
     private val tracker = SatTracker(store, http)
+    private val issCrew = IssCrew(http, store)
     private val aircraft = AircraftSource(http)
 
     /**
@@ -161,6 +165,10 @@ class DeskSky(
                         }
                     }
                 }
+                // A crew change is a launch, so the roster is asked on the aircraft's slow tick:
+                // cached on disk for a day, and never turned into a claim when it has not answered.
+                runCatching { issCrew.refreshIfStale() }
+                _state.update { it.copy(crew = issCrew.state.value) }
                 delay(60_000)
             }
         }
