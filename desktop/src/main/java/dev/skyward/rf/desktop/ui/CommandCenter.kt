@@ -919,66 +919,111 @@ private fun EmptyRow(text: String) {
 // ---------------------------------------------------------------- log
 
 /**
- * Every signal the fetched drives heard, one row each.
+ * Every signal the fetched drives heard, on two tabs.
  *
- * A board reports no security field, so a session row cannot say whether a network has a key; a
- * drive's own observations can, because the phone read the advertisement. That is why this table is
- * built from the drives: `OPEN` and `WPA2` are facts here, not guesses. A BLE advertiser has no
- * security at all, so its column is the kind of device it looks like instead.
+ * Wi-Fi and BLE answer different questions: a network has a key or it does not, and an advertiser
+ * has a kind. Keeping them in one list meant the security column said `not reported` for half the
+ * rows and the kind column said `unknown` for the other half, so each gets its own table and its
+ * own counts - `OPEN` against `WPA` on the Wi-Fi tab, named against unnamed on the BLE one.
  */
+/** A chip, not an underline: the active tab has to be readable at a glance on a dark pane. */
+@Composable
+private fun SignalTab(text: String, on: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .background(if (on) Desk.panelHi else Color.Transparent, RoundedCornerShape(6.dp))
+            .border(1.dp, if (on) Desk.accent.copy(alpha = 0.5f) else Color.Transparent, RoundedCornerShape(6.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 5.dp),
+    ) {
+        Text(
+            text,
+            color = if (on) Desk.accent else Desk.dim,
+            fontSize = 10.sp,
+            letterSpacing = 1.sp,
+            fontFamily = Desk.mono,
+        )
+    }
+}
+
 @Composable
 private fun LoggedSignals(signals: List<DeskDrives.SignalRow>) {
     val wifi = signals.filter { it.kind == "WIFI" }
+    val ble = signals.filter { it.kind != "WIFI" }
+    var tab by remember { mutableStateOf(0) }
+    val rows = if (tab == 0) wifi else ble
+
     val open = wifi.count { WifiSecurity.isOpen(it.security) }
     val wpa = wifi.count {
         !WifiSecurity.isOpen(it.security) && WifiSecurity.label(it.security) != WifiSecurity.UNKNOWN
     }
     val quiet = wifi.count { WifiSecurity.label(it.security) == WifiSecurity.UNKNOWN }
+    val unnamed = ble.count { BleKind.of(it.name, it.address) == BleKind.UNKNOWN }
 
     Column(Modifier.fillMaxWidth().padding(top = 12.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             SectionLabel("LOGGED SIGNALS · ${signals.size}")
             Spacer(Modifier.weight(1f))
-            if (open > 0) {
-                Badge("$open OPEN", Desk.warn)
-                Spacer(Modifier.width(6.dp))
+            if (tab == 0) {
+                if (open > 0) {
+                    Badge("$open OPEN", Desk.warn)
+                    Spacer(Modifier.width(6.dp))
+                }
+                if (wpa > 0) {
+                    Badge("$wpa WPA", Desk.accent)
+                    Spacer(Modifier.width(6.dp))
+                }
+                if (quiet > 0) Badge("$quiet NO AUTH FIELD", Desk.dim)
+            } else {
+                Badge("${ble.size - unnamed} NAMED", Desk.accent)
+                if (unnamed > 0) {
+                    Spacer(Modifier.width(6.dp))
+                    Badge("$unnamed UNNAMED", Desk.dim)
+                }
             }
-            if (wpa > 0) {
-                Badge("$wpa WPA", Desk.accent)
-                Spacer(Modifier.width(6.dp))
-            }
-            if (quiet > 0) Badge("$quiet NO AUTH FIELD", Desk.dim)
         }
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SignalTab("WIFI ${wifi.size}", tab == 0) { tab = 0 }
+            Spacer(Modifier.width(8.dp))
+            SignalTab("BLE ${ble.size}", tab == 1) { tab = 1 }
+        }
+        Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
-            LogCell("KIND", 52.dp, Desk.dim)
-            LogCell("NAME", 160.dp, Desk.dim)
-            LogCell("ADDRESS", 140.dp, Desk.dim)
+            LogCell("NAME", 170.dp, Desk.dim)
+            LogCell("ADDRESS", 150.dp, Desk.dim)
             LogCell("RSSI", 52.dp, Desk.dim)
-            LogCell("CH", 34.dp, Desk.dim)
-            LogCell("SECURITY / TYPE", 150.dp, Desk.dim)
+            LogCell(if (tab == 0) "CH" else "GAP", 40.dp, Desk.dim)
+            LogCell(if (tab == 0) "SECURITY" else "DEVICE TYPE", 150.dp, Desk.dim)
         }
         Hairline()
-        signals.take(12).forEach { row ->
+        if (rows.isEmpty()) {
+            Text(
+                if (tab == 0) "No Wi-Fi in the fetched drives." else "No BLE advertisers in the fetched drives.",
+                color = Desk.dim,
+                fontSize = 11.sp,
+                fontFamily = Desk.mono,
+            )
+        }
+        rows.take(14).forEach { row ->
             val isWifi = row.kind == "WIFI"
             val security = WifiSecurity.label(row.security)
             Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                LogCell(row.kind, 52.dp, if (isWifi) Desk.warn else Desk.violet)
-                LogCell(row.name.ifBlank { "—" }, 160.dp, Desk.text)
-                LogCell(row.address, 140.dp, Desk.text)
+                LogCell(row.name.ifBlank { "—" }, 170.dp, Desk.text)
+                LogCell(row.address, 150.dp, Desk.text)
                 LogCell(row.rssi.toString(), 52.dp, rssiColor(row.rssi))
-                LogCell(if (row.channel > 0) row.channel.toString() else "—", 34.dp, Desk.dim)
+                LogCell(if (row.channel > 0) row.channel.toString() else "—", 40.dp, Desk.dim)
                 LogCell(
                     if (isWifi) security else BleKind.label(row.name, row.address),
-                   150.dp,
+                    150.dp,
                     if (isWifi && WifiSecurity.isOpen(row.security)) Desk.warn
                     else if (isWifi && security == WifiSecurity.UNKNOWN) Desk.dim
                     else Desk.accent,
                 )
             }
         }
-        if (signals.size > 12) {
-            Text("+${signals.size - 12} more, strongest first", color = Desk.dim, fontSize = 10.sp, fontFamily = Desk.mono)
+        if (rows.size > 14) {
+            Text("+${rows.size - 14} more, strongest first", color = Desk.dim, fontSize = 10.sp, fontFamily = Desk.mono)
         }
     }
 }
