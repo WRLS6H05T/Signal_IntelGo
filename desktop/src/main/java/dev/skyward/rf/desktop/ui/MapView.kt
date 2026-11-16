@@ -47,7 +47,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import dev.skyward.rf.core.BleKind
 import dev.skyward.rf.core.SignalScale
+import dev.skyward.rf.core.WifiSecurity
 import dev.skyward.rf.wardrive.WardrivePoint
 import androidx.compose.ui.unit.sp
 import dev.skyward.rf.core.AircraftView
@@ -124,6 +126,18 @@ object WorldLand {
  * every point without anything jumping: the sphere and the plane agree on pixels per degree at
  * the centre of the screen, and only the curvature dissolves.
  */
+/** One drawn signal, with where it landed, so a click can find it. */
+data class MapHit(
+    val x: Float,
+    val y: Float,
+    val kind: String,
+    val name: String,
+    val address: String,
+    val rssi: Int,
+    val channel: Int,
+    val security: String,
+)
+
 /** How many dots a drive gets before it is sampled, matching the phone's budget. */
 private const val DRIVE_DOT_BUDGET = 900
 
@@ -171,6 +185,10 @@ fun MapView(
     // The map's own size, which is what a fitted zoom is measured against.
     var viewW by remember { mutableStateOf(0f) }
     var viewH by remember { mutableStateOf(0f) }
+    // What the last frame drew, so a click can be matched to a signal rather than to a rectangle:
+    // the dots are laid out in the drawing pass, and nothing else knows where they are.
+    val hits = remember { mutableListOf<MapHit>() }
+    var picked by remember { mutableStateOf<MapHit?>(null) }
     val rings = remember { WorldLand.rings() }
     val scope = rememberCoroutineScope()
     val tiles = remember { TileStore(scope) }
@@ -251,7 +269,20 @@ fun MapView(
                                     last = event.changes.firstOrNull()?.position ?: Offset.Zero
                                 }
 
-                                PointerEventType.Release -> dragging = false
+                                PointerEventType.Release -> {
+                                    dragging = false
+                                    // A click, not a drag: the press and release share a place and
+                                    // arrive together. The nearest dot within a fingertip wins, so
+                                    // overlapping signals are still pickable one at a time.
+                                    val where = event.changes.firstOrNull()?.position ?: last
+                                    val heldMs = (System.nanoTime() - pressedAt) / 1_000_000L
+                                    if (heldMs in 1..600L && (where - last).getDistance() < 24f) {
+                                        val reach = 16.dp.toPx()
+                                        picked = hits
+                                            .filter { (Offset(it.x, it.y) - where).getDistance() <= reach }
+                                            .minByOrNull { (Offset(it.x, it.y) - where).getDistance() }
+                                    }
+                                }
 
                                 PointerEventType.Scroll -> {
                                     val delta = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
@@ -294,6 +325,10 @@ fun MapView(
                     }
                 },
         ) {
+            // The hit list is rebuilt from scratch every frame: a signal that scrolled away must
+            // stop being clickable, and a stale dot would select a network no longer under the
+            // pointer.
+            hits.clear()
             // Reading the tile counter here is what redraws the frame in which a new tile lands.
             drawMap(
                 rings = rings,
@@ -310,6 +345,15 @@ fun MapView(
                 observer = observer,
                 layers = layers,
                 track = track,
+                hits = hits,
+            )
+        }
+
+        picked?.let { hit ->
+            SignalCard(
+                hit = hit,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(14.dp),
+                onClose = { picked = null },
             )
         }
 
@@ -385,6 +429,7 @@ private fun DrawScope.drawMap(
     observer: LatLon?,
     layers: GlobeLayers,
     track: List<WardrivePoint>,
+    hits: MutableList<MapHit>,
 ) {
     @Suppress("UNUSED_EXPRESSION")
     generation
@@ -520,12 +565,23 @@ private fun DrawScope.drawMap(
             val cy = pt[1]
             fix.networks.take(6).forEachIndexed { k, heard ->
                 val angle = Math.toRadians(k * 60.0 - 90.0)
+                val hx = cx + (Math.cos(angle) * 6.0).toFloat() * density
+                val hy = cy + (Math.sin(angle) * 6.0).toFloat() * density
                 drawCircle(
                     Color(SignalScale.colorOfDbm(heard.rssi)).copy(alpha = 0.75f),
                     radius = 1.5.dp.toPx(),
-                    center = Offset(
-                        cx + (Math.cos(angle) * 6.0).toFloat() * density,
-                        cy + (Math.sin(angle) * 6.0).toFloat() * density,
+                    center = Offset(hx, hy),
+                )
+                hits.add(
+                    MapHit(
+                        x = hx,
+                        y = hy,
+                        kind = heard.kind.name,
+                        name = heard.name,
+                        address = heard.id,
+                        rssi = heard.rssi,
+                        channel = heard.channel,
+                        security = heard.security,
                     ),
                 )
             }
@@ -540,18 +596,33 @@ private fun DrawScope.drawMap(
 
     // ---- the Wi-Fi and BLE the boards hear, fanned around the fix that heard them ----
     if ((layers.wifi || layers.ble) && observer != null) {
-        val spots = ArrayList<Int>()
-        if (layers.wifi) boards.forEach { b -> b.sweep.aps.forEach { spots.add(it.rssi) } }
-        if (layers.ble) boards.forEach { b -> b.sweep.devices.forEach { spots.add(it.rssi) } }
+        // The dots keep their networks: a dot nobody can identify is a dot nobody can act on, and
+        // the board's own sweep has the name, the address and the channel for each one.
+        val spots = ArrayList<MapHit>()
+        if (layers.wifi) {
+            boards.forEach { b ->
+                b.sweep.aps.forEach {
+                    spots.add(MapHit(0f, 0f, "WIFI", it.ssid, it.bssid, it.rssi, it.channel, ""))
+                }
+            }
+        }
+        if (layers.ble) {
+            boards.forEach { b ->
+                b.sweep.devices.forEach {
+                    spots.add(MapHit(0f, 0f, "BLE", it.name, it.address, it.rssi, 0, ""))
+                }
+            }
+        }
         if (place(observer.lat, observer.lon, 0.0)) {
             val baseX = pt[0]
             val baseY = pt[1]
-            spots.take(160).forEachIndexed { index, rssi ->
+            spots.take(160).forEachIndexed { index, spot ->
                 val angle = index * 2.399963
                 val r = 4.0 + (index % 7) * 1.6
                 val x = baseX + (cos(angle) * r).toFloat()
                 val y = baseY + (sin(angle) * r).toFloat()
-                drawCircle(Color(SignalScale.colorOfDbm(rssi)), radius = 1.6.dp.toPx(), center = Offset(x, y))
+                drawCircle(Color(SignalScale.colorOfDbm(spot.rssi)), radius = 1.6.dp.toPx(), center = Offset(x, y))
+                hits.add(spot.copy(x = x, y = y))
             }
         }
     }
@@ -693,3 +764,74 @@ private fun DrawScope.drawGlobeSphere(
 
 private val globeInk = GlobeInk()
 
+/**
+ * What the clicked dot is.
+ *
+ * A network's security is only as good as what the radio wrote down: a drive's observations carry
+ * the advertisement's own field, so WPA2 and OPEN are facts there, while a board sweep has no
+ * security field at all and says so rather than implying the network is open.
+ */
+@Composable
+private fun SignalCard(hit: MapHit, modifier: Modifier = Modifier, onClose: () -> Unit) {
+    Column(
+        modifier
+            .width(250.dp)
+            .background(Desk.panel.copy(alpha = 0.97f), RoundedCornerShape(10.dp))
+            .border(1.dp, Desk.line, RoundedCornerShape(10.dp))
+            .padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                hit.kind,
+                color = if (hit.kind == "WIFI") Desk.warn else Desk.violet,
+                fontSize = 9.sp,
+                letterSpacing = 1.sp,
+                fontFamily = Desk.mono,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                "CLOSE",
+                color = Desk.dim,
+                fontSize = 9.sp,
+                letterSpacing = 1.sp,
+                fontFamily = Desk.mono,
+                modifier = Modifier.clickable { onClose() },
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(hit.name.ifBlank { "(no name)" }, color = Desk.text, fontSize = 13.sp)
+        Text(hit.address, color = Desk.dim, fontSize = 9.sp, fontFamily = Desk.mono)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "${hit.rssi} dBm" + if (hit.channel > 0) " · ch ${hit.channel}" else "",
+            color = Color(SignalScale.colorOfDbm(hit.rssi)),
+            fontSize = 11.sp,
+            fontFamily = Desk.mono,
+        )
+        Spacer(Modifier.height(4.dp))
+        if (hit.kind == "WIFI") {
+            val security = WifiSecurity.label(hit.security)
+            Text(
+                when {
+                    security == WifiSecurity.UNKNOWN -> "security not reported by this radio"
+                    WifiSecurity.isOpen(hit.security) -> "$security · no key, anyone can join"
+                    else -> security
+                },
+                color = when {
+                    security == WifiSecurity.UNKNOWN -> Desk.dim
+                    WifiSecurity.isOpen(hit.security) -> Desk.warn
+                    else -> Desk.accent
+                },
+                fontSize = 11.sp,
+                fontFamily = Desk.mono,
+            )
+        } else {
+            Text(
+                "device · " + BleKind.label(hit.name, hit.address),
+                color = Desk.accent,
+                fontSize = 11.sp,
+                fontFamily = Desk.mono,
+            )
+        }
+    }
+}

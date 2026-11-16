@@ -53,7 +53,9 @@ import androidx.compose.ui.unit.sp
 import dev.skyward.rf.core.LatLon
 import dev.skyward.rf.core.ScanPlan
 import dev.skyward.rf.core.Settings
+import dev.skyward.rf.core.BleKind
 import dev.skyward.rf.core.SignalScale
+import dev.skyward.rf.core.WifiSecurity
 import dev.skyward.rf.desktop.DeskSettings
 import dev.skyward.rf.desktop.hardware.Bands
 import dev.skyward.rf.desktop.hardware.BoardState
@@ -189,6 +191,9 @@ fun CommandCenter(
             "BLE" to rows.count { it.kind == SessionRecorder.BLE } + peerState.saved.sumOf { it.ble },
         )
     }
+    // One row per signal the fetched drives heard. Recomputed when the drive list changes, not
+    // per frame: a long drive is 700 fixes of observations to walk.
+    val loggedSignals = remember(peerState.saved.size) { peer.signals() }
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
     var sessionName by remember { mutableStateOf("desk") }
     var startedAt by remember { mutableStateOf<Long?>(null) }
@@ -287,6 +292,7 @@ fun CommandCenter(
                 recorder = recorder,
                 boards = ordered,
                 drives = peerState.saved,
+                signals = loggedSignals,
                 onShowDrive = { showDrive(it) },
             )
 
@@ -912,6 +918,71 @@ private fun EmptyRow(text: String) {
 
 // ---------------------------------------------------------------- log
 
+/**
+ * Every signal the fetched drives heard, one row each.
+ *
+ * A board reports no security field, so a session row cannot say whether a network has a key; a
+ * drive's own observations can, because the phone read the advertisement. That is why this table is
+ * built from the drives: `OPEN` and `WPA2` are facts here, not guesses. A BLE advertiser has no
+ * security at all, so its column is the kind of device it looks like instead.
+ */
+@Composable
+private fun LoggedSignals(signals: List<DeskDrives.SignalRow>) {
+    val wifi = signals.filter { it.kind == "WIFI" }
+    val open = wifi.count { WifiSecurity.isOpen(it.security) }
+    val wpa = wifi.count {
+        !WifiSecurity.isOpen(it.security) && WifiSecurity.label(it.security) != WifiSecurity.UNKNOWN
+    }
+    val quiet = wifi.count { WifiSecurity.label(it.security) == WifiSecurity.UNKNOWN }
+
+    Column(Modifier.fillMaxWidth().padding(top = 12.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            SectionLabel("LOGGED SIGNALS · ${signals.size}")
+            Spacer(Modifier.weight(1f))
+            if (open > 0) {
+                Badge("$open OPEN", Desk.warn)
+                Spacer(Modifier.width(6.dp))
+            }
+            if (wpa > 0) {
+                Badge("$wpa WPA", Desk.accent)
+                Spacer(Modifier.width(6.dp))
+            }
+            if (quiet > 0) Badge("$quiet NO AUTH FIELD", Desk.dim)
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
+            LogCell("KIND", 52.dp, Desk.dim)
+            LogCell("NAME", 160.dp, Desk.dim)
+            LogCell("ADDRESS", 140.dp, Desk.dim)
+            LogCell("RSSI", 52.dp, Desk.dim)
+            LogCell("CH", 34.dp, Desk.dim)
+            LogCell("SECURITY / TYPE", 150.dp, Desk.dim)
+        }
+        Hairline()
+        signals.take(12).forEach { row ->
+            val isWifi = row.kind == "WIFI"
+            val security = WifiSecurity.label(row.security)
+            Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                LogCell(row.kind, 52.dp, if (isWifi) Desk.warn else Desk.violet)
+                LogCell(row.name.ifBlank { "—" }, 160.dp, Desk.text)
+                LogCell(row.address, 140.dp, Desk.text)
+                LogCell(row.rssi.toString(), 52.dp, rssiColor(row.rssi))
+                LogCell(if (row.channel > 0) row.channel.toString() else "—", 34.dp, Desk.dim)
+                LogCell(
+                    if (isWifi) security else BleKind.label(row.name, row.address),
+                   150.dp,
+                    if (isWifi && WifiSecurity.isOpen(row.security)) Desk.warn
+                    else if (isWifi && security == WifiSecurity.UNKNOWN) Desk.dim
+                    else Desk.accent,
+                )
+            }
+        }
+        if (signals.size > 12) {
+            Text("+${signals.size - 12} more, strongest first", color = Desk.dim, fontSize = 10.sp, fontFamily = Desk.mono)
+        }
+    }
+}
+
 /** The handset's drives, where a log is read: the desk's own rows and the phone's trips together. */
 @Composable
 private fun PhoneDrives(drives: List<DeskDrives.Row>, onShow: (String) -> Unit) {
@@ -957,6 +1028,7 @@ private fun LogPane(
     recorder: SessionRecorder,
     boards: List<BoardState>,
     drives: List<DeskDrives.Row>,
+    signals: List<DeskDrives.SignalRow>,
     onShowDrive: (String) -> Unit,
 ) {
     val rows = remember(recorder.count) { recorder.rows() }
@@ -977,20 +1049,31 @@ private fun LogPane(
             Badge("$ghz5 ON 5 GHZ", Desk.accent)
         }
         Spacer(Modifier.height(12.dp))
-        // Listed above the rows and before the empty state: a desk that has not recorded its own
-        // session yet still has the phone's drives to show, and they were invisible here.
-        if (drives.isNotEmpty()) {
-            PhoneDrives(drives, onShowDrive)
-            Spacer(Modifier.height(12.dp))
+        // The phone's drives and their signals scroll in their own region: a desk with no board has
+        // hundreds of them and nothing else in the pane, and a plain column ran the table past the
+        // bottom of the window, where nothing could reach it.
+        if (drives.isNotEmpty() || signals.isNotEmpty() || rows.isEmpty()) {
+            Column(
+                Modifier
+                    .weight(if (rows.isEmpty()) 1f else 0.5f)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                if (drives.isNotEmpty()) {
+                    PhoneDrives(drives, onShowDrive)
+                    Spacer(Modifier.height(12.dp))
+                }
+                if (signals.isNotEmpty()) LoggedSignals(signals)
+                if (rows.isEmpty()) {
+                    if (drives.isEmpty() && signals.isEmpty()) Spacer(Modifier.height(12.dp))
+                    Text(
+                        "Nothing recorded yet. START a session, link a board, and every network and advertiser it sweeps is filed here with the board's own fix.",
+                        color = Desk.dim,
+                        fontSize = 12.sp,
+                    )
+                }
+            }
         }
-        if (rows.isEmpty()) {
-            Text(
-                "Nothing recorded yet. START a session, link a board, and every network and advertiser it sweeps is filed here with the board's own fix.",
-                color = Desk.dim,
-                fontSize = 12.sp,
-            )
-            return@Column
-        }
+        if (rows.isEmpty()) return@Column
         Row(Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
             LogCell("TIME", 80.dp, Desk.dim)
             LogCell("BOARD", 90.dp, Desk.dim)

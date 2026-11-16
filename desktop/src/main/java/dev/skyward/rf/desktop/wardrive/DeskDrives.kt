@@ -33,6 +33,17 @@ class DeskDrives(home: File) {
         val from: String,
     )
 
+    /** One signal heard during any saved drive, strongest hearing kept. */
+    data class SignalRow(
+        val kind: String,
+        val address: String,
+        val name: String,
+        val rssi: Int,
+        val channel: Int,
+        val security: String,
+        val from: String,
+    )
+
     private val dir = File(home, "wardrive").apply { mkdirs() }
     private val json = Json {
         ignoreUnknownKeys = true
@@ -60,6 +71,41 @@ class DeskDrives(home: File) {
     fun points(id: String): List<WardrivePoint> = runCatching {
         json.decodeFromString(WardriveSession.serializer(), File(dir, "peer_$id.json").readText())
     }.getOrNull()?.points.orEmpty()
+
+    /**
+     * Every signal the saved drives heard, one row per signal.
+     *
+     * A drive records the radios at each fix it heard them, so one network appears at hundreds
+     * of fixes. The strongest hearing is kept: it is the one that says whether the network was
+     * beside you or across the road, and it is the hearing whose security was read cleanly.
+     */
+    fun signals(): List<SignalRow> {
+        val files = dir.listFiles { file -> file.isFile && file.name.endsWith(".json") } ?: return emptyList()
+        val best = LinkedHashMap<String, SignalRow>()
+        for (file in files) {
+            val session = runCatching {
+                json.decodeFromString(WardriveSession.serializer(), file.readText())
+            }.getOrNull() ?: continue
+            val sender = session.from.ifBlank { session.name }
+            for (fix in session.points) {
+                for (heard in fix.networks) {
+                    val row = SignalRow(
+                        kind = heard.kind.name,
+                        address = heard.id,
+                        name = heard.name,
+                        rssi = heard.rssi,
+                        channel = heard.channel,
+                        security = heard.security,
+                        from = sender,
+                    )
+                    val key = row.kind + "|" + row.address
+                    val seen = best[key]
+                    if (seen == null || row.rssi > seen.rssi) best[key] = row
+                }
+            }
+        }
+        return best.values.sortedByDescending { it.rssi }
+    }
 
     /** Every saved drive, newest first. Unreadable files are skipped rather than listed empty. */
     fun list(): List<Row> {

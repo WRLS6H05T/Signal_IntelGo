@@ -137,6 +137,9 @@ class DeskPeer(private val scope: CoroutineScope, private val drives: DeskDrives
     /** The same drive with its scores, for the dot-per-fix drawing. */
     fun points(id: String): List<WardrivePoint> = drives.points(id)
 
+    /** One row per signal the saved drives heard, for the logged table. */
+    fun signals(): List<DeskDrives.SignalRow> = drives.signals()
+
     /** Re-reads the folder, so drives that arrived by cable list beside the ones from the link. */
     fun refreshSaved() {
         _state.value = _state.value.copy(saved = drives.list())
