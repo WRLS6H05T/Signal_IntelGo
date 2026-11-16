@@ -959,7 +959,9 @@ private fun LoggedSignals(signals: List<DeskDrives.SignalRow>) {
         !WifiSecurity.isOpen(it.security) && WifiSecurity.label(it.security) != WifiSecurity.UNKNOWN
     }
     val quiet = wifi.count { WifiSecurity.label(it.security) == WifiSecurity.UNKNOWN }
-    val unnamed = ble.count { BleIdentity.label(it.name, it.address) == BleKind.UNKNOWN.label }
+    val unnamed = ble.count {
+        BleIdentity.label(it.name, it.address, it.companyId, it.serviceUuids) == BleKind.UNKNOWN.label
+    }
 
     Column(Modifier.fillMaxWidth().padding(top = 12.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -1015,7 +1017,7 @@ private fun LoggedSignals(signals: List<DeskDrives.SignalRow>) {
                 LogCell(row.rssi.toString(), 52.dp, rssiColor(row.rssi))
                 LogCell(if (row.channel > 0) row.channel.toString() else "—", 40.dp, Desk.dim)
                 LogCell(
-                    if (isWifi) security else BleIdentity.label(row.name, row.address),
+                    if (isWifi) security else BleIdentity.label(row.name, row.address, row.companyId, row.serviceUuids),
                     150.dp,
                     if (isWifi && WifiSecurity.isOpen(row.security)) Desk.warn
                     else if (isWifi && security == WifiSecurity.UNKNOWN) Desk.dim

@@ -42,6 +42,9 @@ class DeskDrives(home: File) {
         val channel: Int,
         val security: String,
         val from: String,
+        /** BLE only: the advertisement's SIG company id, or 0; and the service UUIDs it listed. */
+        val companyId: Int = 0,
+        val serviceUuids: List<String> = emptyList(),
     )
 
     private val dir = File(home, "wardrive").apply { mkdirs() }
@@ -97,6 +100,8 @@ class DeskDrives(home: File) {
                         channel = heard.channel,
                         security = heard.security,
                         from = sender,
+                        companyId = heard.companyId,
+                        serviceUuids = heard.serviceUuids,
                     )
                     val key = row.kind + "|" + row.address
                     val seen = best[key]

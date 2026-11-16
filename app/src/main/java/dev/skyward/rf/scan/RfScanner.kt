@@ -417,7 +417,11 @@ class RfScanner(private val context: Context) {
         val address = runCatching { device.address }.getOrNull() ?: return
         val now = System.currentTimeMillis()
         val record = result.scanRecord
-        companyId(record?.bytes)?.let { companyIds[address] = it }
+        // The two fields a randomised address cannot hide: the maker's company id and the services
+        // the device offers. Both ride in every advertisement that carries them.
+        val company = companyId(record?.bytes) ?: 0
+        if (company != 0) companyIds[address] = company
+        val uuids = record?.serviceUuids?.map { it.uuid.toString() }.orEmpty()
         val name = record?.deviceName?.takeIf { it.isNotBlank() }
             ?: runCatching { device.name }.getOrNull()
             ?: ""
@@ -431,6 +435,8 @@ class RfScanner(private val context: Context) {
             security = if (name.startsWith("Meshtastic", true)) "MESH" else "",
             freqMhz = 2400,
             seenAt = now,
+            companyId = company,
+            serviceUuids = uuids,
         )
 
         // ESP32 boards ride in manufacturer-specific data, so they are decoded from every

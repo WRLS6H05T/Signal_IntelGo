@@ -61,6 +61,26 @@ class SignalLabelsTest {
     }
 
     @Test
+    fun `the advertisement names the maker when the address says nothing`() {
+        // A made-up address, which is what phones, watches and earbuds hand out.
+        val random = "D5:1F:48:AC:EC:37"
+        assertEquals("wearable", BleIdentity.label("", random, 0x0087))
+        assertEquals("audio", BleIdentity.label("BLE", random, 0x0055))
+        assertEquals("apple", BleIdentity.label("", random, 0x004C))
+
+        // A service UUID settles a kind the company id leaves open - Apple's id ships every kind.
+        val leAudio = "00001851-0000-1000-8000-00805f9b34fb"
+        assertEquals("audio", BleIdentity.label("", random, 0x004C, listOf(leAudio)))
+        assertEquals("wearable", BleIdentity.label("", random, 0, listOf("0000180d-0000-1000-8000-00805f9b34fb")))
+        assertEquals("beacon", BleIdentity.label("BLE", random, 0, listOf("FEAA")))
+        assertEquals("google", BleIdentity.label("", random, 0, listOf("FE2C")))
+
+        // Battery and device-information ride on nearly everything, so they must not categorise.
+        assertEquals("unknown", BleIdentity.label("", random, 0x7FFF, listOf("180F")))
+        assertEquals("unknown", BleIdentity.label("", random))
+    }
+
+    @Test
     fun `firmware security strings collapse to one label`() {
         assertEquals(WifiSecurity.WPA2, WifiSecurity.label("WPA2_PSK"))
         assertEquals(WifiSecurity.WPA2, WifiSecurity.label("[WPA2-PSK-CCMP][ESS]"))

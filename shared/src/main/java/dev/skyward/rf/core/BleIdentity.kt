@@ -124,17 +124,116 @@ object BleAddress {
 }
 
 /**
+ * The maker, from the SIG company identifier in the advertisement's manufacturer data.
+ *
+ * Every advertisement that carries manufacturer data names its company here, up front and in the
+ * clear, which is why it is worth more than the address: a phone, a watch and a pair of earbuds all
+ * hand out randomised addresses, and none of them can hide this field. The table is short for the
+ * same reason as [BleVendor]'s - only identifiers checked against the SIG's assigned numbers.
+ *
+ * Apple, Google and Microsoft ship every kind of device off one identifier, so theirs name a vendor
+ * and no kind; the service UUIDs decide for those.
+ */
+object BleCompany {
+
+    private val byId: Map<Int, Pair<String, BleKind>> = mapOf(
+        0x0006 to ("microsoft" to BleKind.COMPUTER),
+        0x004C to ("apple" to BleKind.UNKNOWN),
+        0x00E0 to ("google" to BleKind.UNKNOWN),
+        // Garmin International, Inc.
+        0x0087 to ("garmin" to BleKind.WEARABLE),
+        // Plantronics, Inc. - headsets.
+        0x0055 to ("plantronics" to BleKind.AUDIO),
+        // Harman International - JBL and Harman Kardon speakers and headphones.
+        0x0057 to ("harman" to BleKind.AUDIO),
+        // GN Hearing A/S - hearing instruments and the Jabra line.
+        0x0089 to ("gn" to BleKind.AUDIO),
+        // Gimbal, Inc. - beacons.
+        0x008C to ("gimbal" to BleKind.BEACON),
+    )
+
+    fun of(companyId: Int): String? = byId[companyId]?.first
+
+    fun kindOf(companyId: Int): BleKind? = byId[companyId]?.second?.takeIf { it != BleKind.UNKNOWN }
+}
+
+/**
+ * The service UUIDs an advertisement lists.
+ *
+ * A device only advertises the services it offers, and some of them settle its kind on their own:
+ * LE Audio's announcement services are audio, Heart Rate is something you wear, HID is a keyboard.
+ * Services on nearly every device - battery, device information, generic access - are left out on
+ * purpose, because `has a battery` is not a category.
+ */
+object BleService {
+
+    private val kindByShort: Map<String, BleKind> = mapOf(
+        "1802" to BleKind.TRACKER,   // Immediate Alert: find-me
+        "1808" to BleKind.HEALTH,    // Glucose
+        "1809" to BleKind.HEALTH,    // Health Thermometer
+        "180D" to BleKind.WEARABLE,  // Heart Rate
+        "1810" to BleKind.HEALTH,    // Blood Pressure
+        "1811" to BleKind.PHONE,     // Alert Notification: a phone publishes it
+        "1812" to BleKind.INPUT,     // Human Interface Device
+        "1814" to BleKind.WEARABLE,  // Running Speed and Cadence
+        "1816" to BleKind.WEARABLE,  // Cycling Speed and Cadence
+        "1826" to BleKind.WEARABLE,  // Fitness Machine
+        "1827" to BleKind.NETWORK,   // Mesh Provisioning
+        "184E" to BleKind.AUDIO,     // Audio Stream Control (LE Audio)
+        "1851" to BleKind.AUDIO,     // Basic Audio Announcement (LE Audio)
+        "1852" to BleKind.AUDIO,     // Broadcast Audio Announcement (LE Audio)
+        "FD6F" to BleKind.PHONE,     // Exposure Notification
+        "FEAA" to BleKind.BEACON,    // Eddystone
+    )
+
+    private val vendorByShort: Map<String, String> = mapOf(
+        "FE2C" to "google",          // Fast Pair: earbuds, but trackers use it too
+    )
+
+    /** The first UUID that names a kind, or null. */
+    fun kindOf(uuids: List<String>): BleKind? = uuids.firstNotNullOfOrNull { kindByShort[BleUuid.short(it) ?: ""] }
+
+    fun vendorOf(uuids: List<String>): String? = uuids.firstNotNullOfOrNull { vendorByShort[BleUuid.short(it) ?: ""] }
+}
+
+/** UUIDs arrive short (`180D`), long (`0000180D-0000-1000-8000-00805F9B34FB`) or not at all. */
+object BleUuid {
+
+    fun short(raw: String): String? {
+        val s = raw.trim().uppercase()
+        if (s.isEmpty()) return null
+        if (s.length == 4 && s.all { it in "0123456789ABCDEF" }) return s
+        val parts = s.split('-')
+        if (parts.size != 5) return null
+        val bluetoothBase = parts[2] == "1000" && parts[3] == "8000" && parts[4] == "00805F9B34FB"
+        if (!bluetoothBase) return null
+        return parts[0].takeLast(4)
+    }
+}
+
+/**
  * The one string the tables and the map card print for an advertiser.
  *
- * Name first - a device that says `Jabra Elite` is audio whatever its prefix is - then the kind the
- * address's vendor implies, then the vendor's own name when the vendor ships too many kinds for the
- * prefix to pick one. Everything else is `unknown`, which is the truth for a randomised address.
+ * Name first - a device that says `Jabra Elite` is audio whatever its prefix is - then the kind its
+ * service UUIDs imply, then the manufacturer's company id, then whatever vendor the address's prefix
+ * names. Everything else is `unknown`, and `unknown` is a real answer: it is what a silent advertiser
+ * behind a randomised address with no manufacturer data is, and no amount of wanting otherwise
+ * changes it.
  */
 object BleIdentity {
 
-    fun label(name: String, address: String = ""): String {
+    fun label(
+        name: String,
+        address: String = "",
+        companyId: Int = 0,
+        serviceUuids: List<String> = emptyList(),
+    ): String {
         val kind = BleKind.of(name)
         if (kind != BleKind.UNKNOWN) return kind.label
+        BleService.kindOf(serviceUuids)?.let { return it.label }
+        BleCompany.kindOf(companyId)?.let { return it.label }
+        BleCompany.of(companyId)?.let { return it }
+        BleService.vendorOf(serviceUuids)?.let { return it }
         BleVendor.kindOf(address)?.let { return it.label }
         BleVendor.of(address)?.let { return it }
         return BleKind.UNKNOWN.label

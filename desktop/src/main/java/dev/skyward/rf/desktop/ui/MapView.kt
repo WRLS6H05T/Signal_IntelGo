@@ -137,6 +137,8 @@ data class MapHit(
     val rssi: Int,
     val channel: Int,
     val security: String,
+    val companyId: Int = 0,
+    val serviceUuids: List<String> = emptyList(),
 )
 
 /** How many dots a drive gets before it is sampled, matching the phone's budget. */
@@ -583,6 +585,8 @@ private fun DrawScope.drawMap(
                         rssi = heard.rssi,
                         channel = heard.channel,
                         security = heard.security,
+                        companyId = heard.companyId,
+                        serviceUuids = heard.serviceUuids,
                     ),
                 )
             }
@@ -828,7 +832,7 @@ private fun SignalCard(hit: MapHit, modifier: Modifier = Modifier, onClose: () -
             )
         } else {
             Text(
-                "device · " + BleIdentity.label(hit.name, hit.address),
+                "device · " + BleIdentity.label(hit.name, hit.address, hit.companyId, hit.serviceUuids),
                 color = Desk.accent,
                 fontSize = 11.sp,
                 fontFamily = Desk.mono,

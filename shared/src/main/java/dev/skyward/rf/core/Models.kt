@@ -38,6 +38,15 @@ data class RfObservation(
     val seenAt: Long = 0L,
     /** "local", "peer" or "board": which radio heard it, so each can be placed at its own fix. */
     val source: String = "local",
+    /**
+     * The maker's SIG company id from the advertisement's 0xFF block, or 0 when it carried none.
+     *
+     * This is what identifies an advertiser that hides behind a randomised address: the address is
+     * made up, but the manufacturer data still names the company that wrote it.
+     */
+    val companyId: Int = 0,
+    /** Service UUIDs the advertisement listed, long or short form; empty for Wi-Fi. */
+    val serviceUuids: List<String> = emptyList(),
 )
 
 /**
