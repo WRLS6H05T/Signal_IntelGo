@@ -320,26 +320,30 @@ fun CommandCenter(
                 onUsbPull = { usbWant++ },
             )
         }
-        Hairline()
-        SessionBar(
-            name = sessionName,
-            onName = { sessionName = it },
-            liveSince = startedAt,
-            now = now,
-            rows = rows,
-            summary = summary,
-            recorder = recorder,
-            onStart = {
-                recorder.start(sessionName.ifBlank { "desk" })
-                startedAt = System.currentTimeMillis()
-                summary = null
-            },
-            onStop = {
-                summary = recorder.stop()
-                startedAt = null
-                rows = recorder.count
-            },
-        )
+        // A session is a log: naming and starting a wardrive belongs with the rows it produces.
+        // On the other tabs it was a strip of dead controls under a map nobody was recording.
+        if (tab == DeskTab.LOG) {
+            Hairline()
+            SessionBar(
+                name = sessionName,
+                onName = { sessionName = it },
+                liveSince = startedAt,
+                now = now,
+                rows = rows,
+                summary = summary,
+                recorder = recorder,
+                onStart = {
+                    recorder.start(sessionName.ifBlank { "desk" })
+                    startedAt = System.currentTimeMillis()
+                    summary = null
+                },
+                onStop = {
+                    summary = recorder.stop()
+                    startedAt = null
+                    rows = recorder.count
+                },
+            )
+        }
     }
 }
 
