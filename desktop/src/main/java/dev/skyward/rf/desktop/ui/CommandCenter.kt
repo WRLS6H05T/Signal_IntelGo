@@ -997,7 +997,7 @@ private fun LoggedSignals(signals: List<DeskDrives.SignalRow>) {
             LogCell("ADDRESS", 150.dp, Desk.dim)
             LogCell("RSSI", 52.dp, Desk.dim)
             LogCell(if (tab == 0) "CH" else "GAP", 40.dp, Desk.dim)
-            LogCell(if (tab == 0) "SECURITY" else "DEVICE TYPE", 150.dp, Desk.dim)
+            LogCell(if (tab == 0) "SECURITY" else "MAKER \u00B7 TYPE", 190.dp, Desk.dim)
         }
         Hairline()
         if (rows.isEmpty()) {
@@ -1018,7 +1018,7 @@ private fun LoggedSignals(signals: List<DeskDrives.SignalRow>) {
                 LogCell(if (row.channel > 0) row.channel.toString() else "—", 40.dp, Desk.dim)
                 LogCell(
                     if (isWifi) security else BleIdentity.label(row.name, row.address, row.companyId, row.serviceUuids),
-                    150.dp,
+                    190.dp,
                     if (isWifi && WifiSecurity.isOpen(row.security)) Desk.warn
                     else if (isWifi && security == WifiSecurity.UNKNOWN) Desk.dim
                     else Desk.accent,

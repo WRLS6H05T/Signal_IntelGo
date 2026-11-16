@@ -212,30 +212,55 @@ object BleUuid {
 }
 
 /**
- * The one string the tables and the map card print for an advertiser.
+ * The one string the tables and the map card print for an advertiser: `apple · audio`.
  *
- * Name first - a device that says `Jabra Elite` is audio whatever its prefix is - then the kind its
- * service UUIDs imply, then the manufacturer's company id, then whatever vendor the address's prefix
- * names. Everything else is `unknown`, and `unknown` is a real answer: it is what a silent advertiser
- * behind a randomised address with no manufacturer data is, and no amount of wanting otherwise
- * changes it.
+ * The two halves come from different places, so they are resolved separately and kept together: the
+ * kind from the name, the service UUIDs, the company id or the address prefix, in that order of
+ * specificity, and the vendor from whichever identifier names a company. Showing one of them instead
+ * of both threw evidence away - an Apple identifier carrying LE Audio read `audio` with no maker, and
+ * Apple's identifier alone read `apple` with no kind. An advertiser that names nothing shows
+ * `unknown`, which is the truth about a silent device behind a randomised address.
  */
 object BleIdentity {
 
+    /** The vendor, or null when no identifier names a company. */
+    fun vendorOf(
+        companyId: Int = 0,
+        serviceUuids: List<String> = emptyList(),
+        address: String = "",
+    ): String? = BleCompany.of(companyId)
+        ?: BleService.vendorOf(serviceUuids)
+        ?: BleVendor.of(address)
+
+    /** The kind, from the most specific identifier that has one. */
+    fun kindOf(
+        name: String,
+        companyId: Int = 0,
+        serviceUuids: List<String> = emptyList(),
+        address: String = "",
+    ): BleKind {
+        val named = BleKind.of(name)
+        if (named != BleKind.UNKNOWN) return named
+        return BleService.kindOf(serviceUuids)
+            ?: BleCompany.kindOf(companyId)
+            ?: BleVendor.kindOf(address)
+            ?: BleKind.UNKNOWN
+    }
+
+    /** `apple · audio`, `beacon`, `garmin`, or `unknown`. */
     fun label(
         name: String,
         address: String = "",
         companyId: Int = 0,
         serviceUuids: List<String> = emptyList(),
     ): String {
-        val kind = BleKind.of(name)
-        if (kind != BleKind.UNKNOWN) return kind.label
-        BleService.kindOf(serviceUuids)?.let { return it.label }
-        BleCompany.kindOf(companyId)?.let { return it.label }
-        BleCompany.of(companyId)?.let { return it }
-        BleService.vendorOf(serviceUuids)?.let { return it }
-        BleVendor.kindOf(address)?.let { return it.label }
-        BleVendor.of(address)?.let { return it }
-        return BleKind.UNKNOWN.label
+        val kind = kindOf(name, companyId, serviceUuids, address)
+        val vendor = vendorOf(companyId, serviceUuids, address)
+        return when {
+            vendor != null && kind != BleKind.UNKNOWN -> "$vendor \u00B7 ${kind.label}"
+            vendor != null -> vendor
+            kind != BleKind.UNKNOWN -> kind.label
+            else -> BleKind.UNKNOWN.label
+        }
     }
 }

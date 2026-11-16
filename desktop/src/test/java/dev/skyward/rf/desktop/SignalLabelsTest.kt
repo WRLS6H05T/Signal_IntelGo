@@ -51,26 +51,26 @@ class SignalLabelsTest {
     fun `the address categorises an advertiser the name leaves blank`() {
         // A Bose prefix is audio even with nothing in the name; an Apple prefix is only a vendor,
         // because Apple ships phones, watches and earbuds off the same pool.
-        assertEquals("audio", BleIdentity.label("", "C8:7B:23:12:34:56"))
+        assertEquals("bose \u00B7 audio", BleIdentity.label("", "C8:7B:23:12:34:56"))
         assertEquals("apple", BleIdentity.label("", "F0:18:98:12:34:56"))
         // A randomised address says nothing, and the label must not invent a vendor from its bits.
         assertEquals("unknown", BleIdentity.label("", "D5:1F:48:AC:EC:37"))
         assertEquals("unknown", BleIdentity.label("BLE", "CC:89:70:5B:BC:9D"))
         // A name that does claim a kind beats the prefix.
-        assertEquals("audio", BleIdentity.label("Jabra Elite", "F0:18:98:12:34:56"))
+        assertEquals("apple \u00B7 audio", BleIdentity.label("Jabra Elite", "F0:18:98:12:34:56"))
     }
 
     @Test
     fun `the advertisement names the maker when the address says nothing`() {
         // A made-up address, which is what phones, watches and earbuds hand out.
         val random = "D5:1F:48:AC:EC:37"
-        assertEquals("wearable", BleIdentity.label("", random, 0x0087))
-        assertEquals("audio", BleIdentity.label("BLE", random, 0x0055))
+        assertEquals("garmin \u00B7 wearable", BleIdentity.label("", random, 0x0087))
+        assertEquals("plantronics \u00B7 audio", BleIdentity.label("BLE", random, 0x0055))
         assertEquals("apple", BleIdentity.label("", random, 0x004C))
 
         // A service UUID settles a kind the company id leaves open - Apple's id ships every kind.
         val leAudio = "00001851-0000-1000-8000-00805f9b34fb"
-        assertEquals("audio", BleIdentity.label("", random, 0x004C, listOf(leAudio)))
+        assertEquals("apple \u00B7 audio", BleIdentity.label("", random, 0x004C, listOf(leAudio)))
         assertEquals("wearable", BleIdentity.label("", random, 0, listOf("0000180d-0000-1000-8000-00805f9b34fb")))
         assertEquals("beacon", BleIdentity.label("BLE", random, 0, listOf("FEAA")))
         assertEquals("google", BleIdentity.label("", random, 0, listOf("FE2C")))
