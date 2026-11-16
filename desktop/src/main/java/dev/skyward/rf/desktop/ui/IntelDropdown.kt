@@ -47,8 +47,6 @@ fun IntelDropdown(
     counts: Map<String, Int>,
     logged: Map<String, Int>,
     notes: Map<String, String>,
-    spin: Int,
-    onSpin: () -> Unit,
 ) {
     val rows = listOf(
         LayerRow("SAT", "sat", Glyph.SAT, Desk.cyan),
@@ -150,38 +148,6 @@ fun IntelDropdown(
                     live = counts[row.label] ?: 0,
                     logged = logged[row.label] ?: 0,
                     onClick = { onLayer(row.key, !on) },
-                )
-            }
-
-            Spacer(Modifier.height(6.dp))
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .background(Desk.panelHi.copy(alpha = 0.7f), RoundedCornerShape(6.dp))
-                    .clickable { onSpin() }
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                LayerIcon(Glyph.SPIN, if (spin > 0) Desk.cyan else Desk.dim, 13.dp)
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    "GLOBE SPIN",
-                    color = if (spin > 0) Desk.text else Desk.dim,
-                    fontSize = 10.sp,
-                    letterSpacing = 1.sp,
-                    fontFamily = Desk.mono,
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    when (spin) {
-                        1 -> "1X"
-                        2 -> "3X"
-                        else -> "OFF"
-                    },
-                    color = if (spin > 0) Desk.cyan else Desk.dim,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = Desk.mono,
                 )
             }
 

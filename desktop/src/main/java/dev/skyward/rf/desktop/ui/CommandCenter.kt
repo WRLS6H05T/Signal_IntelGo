@@ -51,6 +51,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.skyward.rf.core.LatLon
+import dev.skyward.rf.desktop.alerts.DeskAlert
+import dev.skyward.rf.desktop.alerts.DeskAlerts
+import dev.skyward.rf.desktop.alerts.DeskWatch
 import dev.skyward.rf.core.ScanPlan
 import dev.skyward.rf.core.Settings
 import dev.skyward.rf.core.BleKind
@@ -200,6 +203,9 @@ fun CommandCenter(
     var startedAt by remember { mutableStateOf<Long?>(null) }
     var summary by remember { mutableStateOf<SessionSummary?>(null) }
     var rows by remember { mutableStateOf(0) }
+    // Survives tab switches on purpose: an alert raised while the operator was in Setup is
+    // still in the ledger when they come back to the log.
+    val alerts = remember { DeskAlerts() }
 
     LaunchedEffect(Unit) {
         host.refresh()
@@ -215,6 +221,12 @@ fun CommandCenter(
     val active = boards[selected ?: ""]
         ?: ordered.firstOrNull { it.connected }
         ?: ordered.firstOrNull()
+
+    // Once a second, on the same tick as the clock: matching every swept name against the watcher's
+    // table is cheap, but not once a frame while the globe redraws.
+    LaunchedEffect(now) {
+        alerts.scan(DeskWatch.hits(ordered), now)
+    }
 
     // A board's own fix is the observer until somebody types one in Setup: the desk has no GPS
     // of its own, and borrowing the phone's position would be inventing one.
@@ -236,6 +248,11 @@ fun CommandCenter(
             rows = rows,
         )
         Hairline()
+        val alert = alerts.latest
+        if (alert != null && alerts.bannerOpen(now)) {
+            AlertStrip(alert) { alerts.dismiss() }
+            Hairline()
+        }
         when (tab) {
             DeskTab.MAP -> MapPane(
                 modifier = Modifier.weight(1f),
@@ -294,6 +311,7 @@ fun CommandCenter(
                 boards = ordered,
                 drives = peerState.saved,
                 signals = loggedSignals,
+                alerts = alerts.alerts,
                 onShowDrive = { showDrive(it) },
             )
 
@@ -478,8 +496,6 @@ private fun MapPane(
                     "mesh" to skyState.meshNote,
                     "uav" to skyState.droneNote,
                 ),
-                spin = spin,
-                onSpin = onSpin,
             )
         }
         VerticalHairline()
@@ -1081,6 +1097,7 @@ private fun LogPane(
     boards: List<BoardState>,
     drives: List<DeskDrives.Row>,
     signals: List<DeskDrives.SignalRow>,
+    alerts: List<DeskAlert>,
     onShowDrive: (String) -> Unit,
 ) {
     val rows = remember(recorder.count) { recorder.rows() }
@@ -1099,6 +1116,10 @@ private fun LogPane(
             Badge("$ble BLE", Desk.violet)
             Spacer(Modifier.width(6.dp))
             Badge("$ghz5 ON 5 GHZ", Desk.accent)
+        }
+        if (alerts.isNotEmpty()) {
+            AlertsBlock(alerts)
+            Spacer(Modifier.height(12.dp))
         }
         Spacer(Modifier.height(12.dp))
         // The phone's drives and their signals scroll in their own region: a desk with no board has
@@ -1648,6 +1669,95 @@ private fun SetupPane(
         val temps = listOf("c", "f")
         ChoiceChips(listOf("C", "F"), temps.indexOf(cfg.tempUnit).coerceAtLeast(0)) { pick ->
             settings.update { it.copy(tempUnit = temps[pick]) }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- alerts
+
+/**
+ * The hit that just fired, across the top.
+ *
+ * This is the desk's stand-in for the phone speaking a hit: the same fact, in the same place in the
+ * operator's attention, and gone again after [DeskAlerts.BANNER_MS] so a quiet desk looks quiet.
+ */
+@Composable
+private fun AlertStrip(alert: DeskAlert, onDismiss: () -> Unit) {
+    val accent = if (alert.strong) Desk.warn else Desk.violet
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .background(accent.copy(alpha = 0.14f), RoundedCornerShape(8.dp))
+            .border(1.dp, accent.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "ALERT",
+            color = accent,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.5.sp,
+            fontFamily = Desk.mono,
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            alert.kind.detail + if (alert.name.isBlank()) "" else "  \u00B7  ${alert.name}",
+            color = Desk.text,
+            fontSize = 12.sp,
+            fontFamily = Desk.mono,
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            "${alert.rssi} dBm  \u00B7  ${alert.confidence}  \u00B7  ${clockOf(alert.at)}",
+            color = Desk.dim,
+            fontSize = 10.sp,
+            fontFamily = Desk.mono,
+        )
+        Spacer(Modifier.width(14.dp))
+        Text(
+            "DISMISS",
+            color = Desk.dim,
+            fontSize = 9.sp,
+            letterSpacing = 1.sp,
+            fontFamily = Desk.mono,
+            modifier = Modifier.clickable { onDismiss() },
+        )
+    }
+}
+
+/** Everything this session flagged, newest first: the phone's sightings ledger, on screen. */
+@Composable
+private fun AlertsBlock(alerts: List<DeskAlert>) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            SectionLabel("ALERTS \u00B7 ${alerts.size}")
+            Spacer(Modifier.weight(1f))
+            Text("newest first \u00B7 last hour", color = Desk.dim, fontSize = 9.sp, fontFamily = Desk.mono)
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.fillMaxWidth().padding(bottom = 3.dp)) {
+            LogCell("TIME", 66.dp, Desk.dim)
+            LogCell("KIND", 74.dp, Desk.dim)
+            LogCell("WHAT", 200.dp, Desk.dim)
+            LogCell("NAME", 160.dp, Desk.dim)
+            LogCell("RSSI", 50.dp, Desk.dim)
+            LogCell("CONFIDENCE", 170.dp, Desk.dim)
+        }
+        Hairline()
+        alerts.take(6).forEach { alert ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                LogCell(clockOf(alert.at), 66.dp, Desk.dim)
+                LogCell(alert.kind.label, 74.dp, if (alert.strong) Desk.warn else Desk.violet)
+                LogCell(alert.kind.detail, 200.dp, Desk.text)
+                LogCell(alert.name.ifBlank { "\u2014" }, 160.dp, Desk.text)
+                LogCell(alert.rssi.toString(), 50.dp, rssiColor(alert.rssi))
+                LogCell(alert.confidence, 170.dp, Desk.dim)
+            }
+        }
+        if (alerts.size > 6) {
+            Text("+${alerts.size - 6} more this hour", color = Desk.dim, fontSize = 10.sp, fontFamily = Desk.mono)
         }
     }
 }
