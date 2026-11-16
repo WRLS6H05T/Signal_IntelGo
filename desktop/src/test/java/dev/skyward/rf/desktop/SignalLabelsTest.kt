@@ -1,17 +1,22 @@
 package dev.skyward.rf.desktop
 
+import dev.skyward.rf.core.BleAddress
+import dev.skyward.rf.core.BleIdentity
 import dev.skyward.rf.core.BleKind
+import dev.skyward.rf.core.BleVendor
 import dev.skyward.rf.core.WifiSecurity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The two labels the logged table and the map card read out.
+ * The three labels the logged table and the map card read out.
  *
- * Both are keyword reads of text a radio wrote, so they are tested on the shapes firmware actually
- * prints rather than on tidy values: a network is `[WPA2-PSK-CCMP][ESS]` as often as it is `WPA2`.
+ * Each is a read of text a radio wrote, so they are tested on the shapes firmware actually prints: a
+ * network is `[WPA2-PSK-CCMP][ESS]` as often as it is `WPA2`, and an address arrives with colons,
+ * dashes or none at all.
  */
 class SignalLabelsTest {
 
@@ -27,6 +32,32 @@ class SignalLabelsTest {
         // Nothing to go on: an unnamed advertiser must not be guessed into a category.
         assertEquals(BleKind.UNKNOWN, BleKind.of(""))
         assertEquals(BleKind.UNKNOWN, BleKind.of("BLE"))
+    }
+
+    @Test
+    fun `the address prefix names the maker, in any notation`() {
+        assertEquals("F0:18:98", BleAddress.oui("f0:18:98:1a:2b:3c"))
+        assertEquals("F0:18:98", BleAddress.oui("F0-18-98-1A-2B-3C"))
+        assertEquals("F0:18:98", BleAddress.oui("f018981a2b3c"))
+        assertNull(BleAddress.oui(""))
+        assertNull(BleAddress.oui("BT_LE"))
+
+        assertEquals("apple", BleVendor.of("F0:18:98:1a:2b:3c"))
+        assertEquals("bose", BleVendor.of("c8:7b:23:00:11:22"))
+        assertNull(BleVendor.of("D5:1F:48:AC:EC:37"))
+    }
+
+    @Test
+    fun `the address categorises an advertiser the name leaves blank`() {
+        // A Bose prefix is audio even with nothing in the name; an Apple prefix is only a vendor,
+        // because Apple ships phones, watches and earbuds off the same pool.
+        assertEquals("audio", BleIdentity.label("", "C8:7B:23:12:34:56"))
+        assertEquals("apple", BleIdentity.label("", "F0:18:98:12:34:56"))
+        // A randomised address says nothing, and the label must not invent a vendor from its bits.
+        assertEquals("unknown", BleIdentity.label("", "D5:1F:48:AC:EC:37"))
+        assertEquals("unknown", BleIdentity.label("BLE", "CC:89:70:5B:BC:9D"))
+        // A name that does claim a kind beats the prefix.
+        assertEquals("audio", BleIdentity.label("Jabra Elite", "F0:18:98:12:34:56"))
     }
 
     @Test

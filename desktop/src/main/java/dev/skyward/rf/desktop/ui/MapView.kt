@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import dev.skyward.rf.core.BleKind
+import dev.skyward.rf.core.BleIdentity
 import dev.skyward.rf.core.SignalScale
 import dev.skyward.rf.core.WifiSecurity
 import dev.skyward.rf.wardrive.WardrivePoint
@@ -827,7 +828,7 @@ private fun SignalCard(hit: MapHit, modifier: Modifier = Modifier, onClose: () -
             )
         } else {
             Text(
-                "device · " + BleKind.label(hit.name, hit.address),
+                "device · " + BleIdentity.label(hit.name, hit.address),
                 color = Desk.accent,
                 fontSize = 11.sp,
                 fontFamily = Desk.mono,
