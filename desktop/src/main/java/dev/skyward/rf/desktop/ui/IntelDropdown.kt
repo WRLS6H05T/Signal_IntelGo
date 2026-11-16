@@ -1,6 +1,5 @@
 package dev.skyward.rf.desktop.ui
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -15,16 +14,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -65,9 +60,6 @@ fun IntelDropdown(
         LayerRow("BLE", "ble", Glyph.BLE, Desk.violet),
     )
     val liveTotal = rows.sumOf { counts[it.label] ?: 0 }
-    // Off by default: a logged sweep can be hundreds of signals, and the panel sits over the
-    // map. Turning it on is the operator saying they want to see the whole trail.
-    var showAll by remember { mutableStateOf(false) }
 
     Column(modifier.fillMaxWidth()) {
         // The header is the control: closed it is one line of numbers, open it is the whole panel.
@@ -137,20 +129,8 @@ fun IntelDropdown(
                     fontSize = 8.sp,
                     letterSpacing = 1.sp,
                     fontFamily = Desk.mono,
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    if (showAll) "ALL" else "SOME",
-                    color = if (showAll) Desk.cyan else Desk.dim,
-                    fontSize = 8.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp,
-                    fontFamily = Desk.mono,
-                    modifier = Modifier
-                        .background(if (showAll) Desk.panelHi else Desk.panel, RoundedCornerShape(4.dp))
-                        .border(1.dp, if (showAll) Desk.cyan.copy(alpha = 0.5f) else Desk.line, RoundedCornerShape(4.dp))
-                        .clickable { showAll = !showAll }
-                        .padding(horizontal = 5.dp, vertical = 2.dp),
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.width(46.dp),
                 )
             }
             rows.forEach { row ->
@@ -169,7 +149,6 @@ fun IntelDropdown(
                     on = on,
                     live = counts[row.label] ?: 0,
                     logged = logged[row.label] ?: 0,
-                    showAll = showAll,
                     onClick = { onLayer(row.key, !on) },
                 )
             }
@@ -232,7 +211,6 @@ private fun LayerRowView(
     on: Boolean,
     live: Int,
     logged: Int,
-    showAll: Boolean,
     onClick: () -> Unit,
 ) {
     Row(
@@ -265,54 +243,22 @@ private fun LayerRowView(
             modifier = Modifier.width(46.dp),
         )
         Spacer(Modifier.weight(1f))
-        LoggedDots(
-            count = logged,
-            color = if (on) row.color else row.color.copy(alpha = 0.45f),
-            showAll = showAll,
+        // A count, not a dot per catch: the rail is a column of numbers, and a session's trail does
+        // not fit in a cell that sits beside a map. The LOG tab draws the trail.
+        Text(
+            logged.toString(),
+            color = when {
+                logged == 0 -> Desk.dim.copy(alpha = 0.5f)
+                on -> row.color
+                else -> row.color.copy(alpha = 0.6f)
+            },
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = Desk.mono,
+            maxLines = 1,
+            softWrap = false,
+            textAlign = TextAlign.End,
+            modifier = Modifier.width(46.dp),
         )
-    }
-}
-
-/**
- * One dot per logged signal.
- *
- * The number beside a layer said how many signals had been written down but not whether that was
- * three streets or three cities, so the trail is drawn instead: a dot each, wrapped into rows that
- * stay the same width as the panel. SOME keeps the panel short enough to read over the map; ALL
- * shows the whole trail, which on a long sweep is hundreds of dots.
- */
-@Composable
-private fun LoggedDots(count: Int, color: Color, showAll: Boolean) {
-    val perRow = 9
-    val cap = if (showAll) 450 else 27
-    val shown = count.coerceAtMost(cap)
-    val rows = ((shown + perRow - 1) / perRow).coerceAtLeast(1)
-    val cell = 5.dp
-    val dot = 2.5.dp
-
-    Row(verticalAlignment = Alignment.Top) {
-        Canvas(Modifier.width((cell * perRow)).height(cell * rows)) {
-            val step = cell.toPx()
-            val radius = dot.toPx() / 2f
-            for (i in 0 until shown) {
-                drawCircle(
-                    color = color,
-                    radius = radius,
-                    center = Offset(
-                        x = (i % perRow) * step + radius,
-                        y = (i / perRow) * step + radius,
-                    ),
-                )
-            }
-        }
-        if (count > shown) {
-            Text(
-                "+${count - shown}",
-                color = Desk.dim,
-                fontSize = 8.sp,
-                fontFamily = Desk.mono,
-                modifier = Modifier.padding(start = 3.dp, top = 1.dp),
-            )
-        }
     }
 }
